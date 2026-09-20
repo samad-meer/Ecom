@@ -27,12 +27,15 @@ This guide covers production deployment for both the **Django Backend** and the 
 
 ### 1. LiteSpeed 404 vs Django API (Passenger Startup File)
 - **Problem**: Requests to `https://century.zipnixtechnologies.com/api/` return LiteSpeed's generic 404 error rather than Django's response.
-- **Cause**: Passenger requires a startup file (`passenger_wsgi.py` or `wsgi.py`) inside the Application Root. Without it, the Python app never starts, and LiteSpeed serves the folder as plain static files.
-- **Dual Entry Points Provided**:
-  - `passenger_wsgi.py` in the app root: prepends `APP_ROOT` to `sys.path`, loads `core.settings`, and exposes `application = get_wsgi_application()`.
-  - `wsgi.py` in the app root: forwards directly to `core.wsgi` so Passenger boots cleanly even if cPanel's startup filename is configured as `wsgi.py`.
+- **Cause**: Passenger requires a startup file (`passenger_wsgi.py` or `wsgi.py`) inside the configured Application Root. Without it, the Python app never starts, and LiteSpeed serves the folder as plain static files.
+- **Where Passenger Looks**:
+  - If cPanel's **Application root** is `public_html/centuryy`: Passenger looks for `passenger_wsgi.py` directly in `/home3/zipnixte/public_html/centuryy/passenger_wsgi.py`. (Use `dist/passenger_wsgi_FOR_centuryy.py` for this).
+  - If cPanel's **Application root** is `public_html/centuryy/ecom-app`: Passenger looks inside `ecom-app/passenger_wsgi.py`.
+- **Dual Entry Points Provided in Backend**:
+  - `passenger_wsgi.py`: prepends `APP_ROOT` to `sys.path`, loads `core.settings`, and exposes `application = get_wsgi_application()`.
+  - `wsgi.py`: forwards directly to `core.wsgi` so Passenger boots cleanly even if cPanel's startup filename is configured as `wsgi.py`.
 - **cPanel Setup Python App Configuration**:
-  - **Application root**: `public_html/centuryy/ecom-app` (or `public_html/centuryy` depending on where extracted)
+  - **Application root**: `public_html/centuryy/ecom-app` (or `public_html/centuryy`)
   - **Application startup file**: `passenger_wsgi.py` (or `wsgi.py`)
   - **Application Entry point**: `application`
 - **WSGI Verification Script (`tools/try_wsgi.py`)**:

@@ -17,3 +17,4 @@ if APP_ROOT not in sys.path:
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')
 
 from core.wsgi import application  # noqa: E402, F401
+
