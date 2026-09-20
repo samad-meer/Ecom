@@ -27,6 +27,12 @@ Options -MultiViews
   RewriteCond %{REQUEST_FILENAME} -d
   RewriteRule ^ - [L]
 
+  # Next.js RSC payload requests (/products/<id>/index.txt?_rsc=... or /products/<id>.txt?_rsc=...)
+  # Next.js client-side navigation prefetches RSC payloads. If the requested product
+  # has no static folder on disk, serve the fallback shell's index.txt.
+  RewriteRule ^products/(?!_)[^/]+/index\.txt$ /products/_/index.txt [QSA,L]
+  RewriteRule ^products/(?!_)[^/]+\.txt$ /products/_/index.txt [QSA,L]
+
   # /products/<id> or /products/<id>/ with no folder on disk -> the shell.
   # The (?!_/?$) guard excludes the shell itself so this can never loop.
   RewriteRule ^products/(?!_/?$)[^/]+/?$ /products/_/index.html [L]

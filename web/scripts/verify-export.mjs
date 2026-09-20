@@ -64,6 +64,7 @@ const required = [
   ['.htaccess', 'the rewrite that serves /products/<id>; without it every product URL is an Apache 404'],
   ['404.html', 'the error page .htaccess points ErrorDocument at'],
   ['products/_/index.html', 'the client-rendered shell the product rewrite targets'],
+  ['products/_/index.txt', 'the client-rendered shell RSC payload the prefetch rewrite targets'],
   ['index.html', 'the site root'],
 ]
 for (const [rel, why] of required) {
