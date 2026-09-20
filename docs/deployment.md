@@ -27,13 +27,21 @@ This guide covers production deployment for both the **Django Backend** and the 
 
 ### 1. LiteSpeed 404 vs Django API (Passenger Startup File)
 - **Problem**: Requests to `https://century.zipnixtechnologies.com/api/` return LiteSpeed's generic 404 error rather than Django's response.
-- **Cause**: Passenger requires a startup file named `passenger_wsgi.py` inside the Application Root. Without it, the Python app never starts, and LiteSpeed serves the folder as plain static files.
-- **Fix**:
-  - In **cPanel &rarr; Setup Python App**, ensure:
-    - **Application root**: `public_html/centuryy/ecom-app`
-    - **Application startup file**: `passenger_wsgi.py`
-  - Ensure `passenger_wsgi.py` exists at `/home3/zipnixte/public_html/centuryy/ecom-app/passenger_wsgi.py`.
-- **Diagnostic Tool**:
+- **Cause**: Passenger requires a startup file (`passenger_wsgi.py` or `wsgi.py`) inside the Application Root. Without it, the Python app never starts, and LiteSpeed serves the folder as plain static files.
+- **Dual Entry Points Provided**:
+  - `passenger_wsgi.py` in the app root: prepends `APP_ROOT` to `sys.path`, loads `core.settings`, and exposes `application = get_wsgi_application()`.
+  - `wsgi.py` in the app root: forwards directly to `core.wsgi` so Passenger boots cleanly even if cPanel's startup filename is configured as `wsgi.py`.
+- **cPanel Setup Python App Configuration**:
+  - **Application root**: `public_html/centuryy/ecom-app` (or `public_html/centuryy` depending on where extracted)
+  - **Application startup file**: `passenger_wsgi.py` (or `wsgi.py`)
+  - **Application Entry point**: `application`
+- **WSGI Verification Script (`tools/try_wsgi.py`)**:
+  To test importing the WSGI application exactly as Passenger does and run a test GET request through Django without needing browser access:
+  ```
+  /home3/zipnixte/public_html/centuryy/ecom-app/tools/try_wsgi.py
+  ```
+  *(Captures any import error, verifies database connectivity and ALLOWED_HOSTS, and prints the exact traceback if anything fails).*
+- **Diagnostic Tool (`tools/passenger_probe.py`)**:
   In Setup Python App &rarr; "Execute python script", run:
   ```
   /home3/zipnixte/public_html/centuryy/ecom-app/tools/passenger_probe.py
@@ -63,15 +71,25 @@ Always take a database backup in phpMyAdmin before running migrations:
 ## 🚀 Step 2: Backend Deployment
 
 ### A. Packaging the Backend
-The deployment zip must **strictly exclude** `.env`, `venv/`, `__pycache__/`, `.pyc`, and `media/`.
+The deployment zip must **strictly exclude** `.env`, `venv/`, `__pycache__/`, `.pyc`, and `media/`, while ensuring `passenger_wsgi.py`, `wsgi.py`, and `tools/` are included.
+
 To generate or refresh `dist/backend-deploy.zip`:
 ```powershell
 # From repository root
-$dist = "f:\samad\ecom-app\dist"
-if (!(Test-Path $dist)) { New-Item -ItemType Directory -Path $dist -Force }
-
-# Use Compress-Archive with clean directory contents
-Compress-Archive -Path backend\* -DestinationPath "$dist\backend-deploy.zip" -Force
+python -c "
+import os, zipfile
+b = r'backend'; out = r'dist\backend-deploy.zip'
+ex_d = {'venv', '__pycache__', 'media', '.git'}
+ex_e = {'.pyc', '.pyo'}
+with zipfile.ZipFile(out, 'w', compression=zipfile.ZIP_DEFLATED) as z:
+    for root, dirs, files in os.walk(b):
+        dirs[:] = [d for d in dirs if d not in ex_d]
+        for f in files:
+            if f == '.env' or os.path.splitext(f)[1] in ex_e: continue
+            fp = os.path.join(root, f)
+            z.write(fp, os.path.relpath(fp, b))
+print('dist/backend-deploy.zip packaged successfully.')
+"
 ```
 *(Always verify that `backend-deploy.zip` does not contain `.env` so production database credentials and `SECRET_KEY` are never overwritten).*
 
@@ -160,3 +178,4 @@ npx eas-cli build --platform android --profile preview
 - Profile `preview` builds an installable `.apk` file for Android devices.
 - Production `API_URL` and Google OAuth client IDs are baked in via `mobile-app/eas.json`.
 - `config.ts` enforces `const USE_LOCAL = __DEV__ && true;`, guaranteeing release builds point to the live server.
+

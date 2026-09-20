@@ -1,5 +1,7 @@
 "use client";
 
+import { ApiError } from "@/lib/api/client";
+
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { User, Lock, LogIn, Eye, EyeOff } from "lucide-react";
@@ -8,6 +10,25 @@ import { Button, Input } from "@/components/ui";
 import type { UserProfile } from "@/lib/types";
 import { AuthShell } from "./AuthShell";
 import { GoogleDivider, GoogleSignInButton } from "./GoogleSignInButton";
+
+/**
+ * Turn a login failure into something true.
+ *
+ * A browser reports an unreachable or CORS-blocked API as a bare TypeError with
+ * no status, which is indistinguishable from a network outage — and is exactly
+ * what a dead backend looks like from here.
+ */
+function describeLoginFailure(error: unknown): string {
+  const status = error instanceof ApiError ? error.status : 0;
+
+  if (status === 401 || status === 400) return "Invalid username or password.";
+  if (status === 403) return "This account is not allowed to sign in here.";
+  if (status === 404) {
+    return "The server is not responding correctly (404). The API may be down — contact support.";
+  }
+  if (status >= 500) return "The server had a problem. Please try again shortly.";
+  return "Cannot reach the server. Check your connection, or the API may be down.";
+}
 
 export function LoginForm() {
   const { login } = useAuth();
@@ -36,8 +57,11 @@ export function LoginForm() {
     setLoading(true);
     try {
       goAfterLogin(await login(username, password));
-    } catch {
-      setError("Invalid username or password.");
+    } catch (e) {
+      // Every failure used to be reported as bad credentials, which sent people
+      // hunting for a password when the real problem was that the API was not
+      // answering at all. A wrong password is a 401; anything else is not.
+      setError(describeLoginFailure(e));
     } finally {
       setLoading(false);
     }
