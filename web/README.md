@@ -26,7 +26,7 @@ const USE_LOCAL = false;  // true → http://localhost:8002 ; false → live / N
 ```bash
 npm run build      # outputs static site to ./out
 ```
-Zip `out/` and upload to the host. The app uses `output: "export"`, `trailingSlash`, and unoptimized images (`next.config.mjs`).
+Zip `out/` and upload to the host. The app uses `output: "export"`, `trailingSlash`, and unoptimized images (`next.config.mjs`). See [docs/deployment.md](../docs/deployment.md) for full cPanel upload and `.htaccess` instructions.
 
 ## Layout
 - `src/app/` — routes (admin under `/manage/*`, storefront at root)

@@ -49,6 +49,7 @@ see **[docs/network-config.md](docs/network-config.md)**.
 | Doc | What |
 |-----|------|
 | [docs/quickstart.md](docs/quickstart.md) | Setup and day-to-day commands |
+| [docs/deployment.md](docs/deployment.md) | Server deployment guide for cPanel / LiteSpeed (backend + web) |
 | [docs/dependencies.md](docs/dependencies.md) | Dependency overview (authoritative source: `requirements.txt` / `package.json`) |
 | [docs/network-config.md](docs/network-config.md) | Pointing the mobile app at a local vs. live backend |
 | [docs/notifications.md](docs/notifications.md) | Push-notification system (models, endpoints, web vs. mobile) |

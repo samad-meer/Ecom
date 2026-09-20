@@ -6,6 +6,7 @@ Django 6 + Django REST Framework + SimpleJWT. Serves the API consumed by the web
 - Python 3.12, Django 6, DRF, `djangorestframework-simplejwt`
 - DB: PostgreSQL (local) or MySQL (shared hosting) — switched via `DB_ENGINE`
 - Static via WhiteNoise; media served by Django/Passenger on shared hosting
+- For production server deployment on cPanel, see [docs/deployment.md](../docs/deployment.md).
 
 ## Local setup
 ```bash
