@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ScrollView, Alert, ActivityIndicator,
 } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { updateOrderStatus, getDeliveryStatuses, DeliveryStatus } from '../services/orderService';
+import { getDeliveryOrder, updateOrderStatus } from '../services/orderService';
+import { useDialog } from '../components/AppDialog';
 import { startRiderTracking } from '../services/locationService';
 import { OrderLocationMap } from '../components/OrderLocationMap';
 import { KeyboardAwareScrollView } from '../components/KeyboardAwareScrollView';
@@ -27,13 +27,33 @@ const PAYMENT_OPTIONS: { key: PaymentMode; label: string; icon: string; color: s
 export const DeliveryOrderDetailScreen: React.FC = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const { order } = route.params as RouteParams;
+  // The row the rider tapped is a SNAPSHOT. It cannot know the order has since
+  // been delivered — by this rider a minute ago, or by the office — so every
+  // lock below would be decided from stale data and the form would come up
+  // fully editable on an order that is already closed. Render the snapshot for
+  // an instant screen, then correct it from the server.
+  const { order: snapshot } = route.params as RouteParams;
+  const [order, setOrder] = useState<any>(snapshot);
 
-  const isStatusLocked = !!(order.delivery_status_updated_at);
-  // A completed delivery is final — the server rejects every write to it, so
-  // the screen must not offer any. Distinct from isStatusLocked, which only
-  // means "the status has been set once" and still allows the note to be fixed.
-  const isDelivered = order.delivery_status === 'Delivered' || order.status === 'Delivered';
+  const reload = useCallback(async () => {
+    try {
+      const fresh = await getDeliveryOrder(snapshot.id);
+      if (fresh?.id) setOrder(fresh);
+    } catch {
+      // Offline or the request failed. Keep showing the snapshot — the server
+      // still refuses a second write, so the worst case is a wasted tap.
+    }
+  }, [snapshot.id]);
+
+  useFocusEffect(useCallback(() => { void reload(); }, [reload]));
+
+  // Submitting completes the delivery, and a completed delivery is final: the
+  // server rejects every write to it, so the screen must not offer any. Orders
+  // submitted under the older flow carry a non-Delivered status but are locked
+  // just the same, which is why the timestamp — not the status — is the test.
+  const isSubmitted = !!order.delivery_status_updated_at
+    || order.delivery_status === 'Delivered'
+    || order.status === 'Delivered';
   const totalBottles = order.items?.reduce((sum: number, item: any) => sum + item.quantity, 0) || 0;
 
   // The rider serializer sends a `customer` block — name, phone, balance —
@@ -42,10 +62,6 @@ export const DeliveryOrderDetailScreen: React.FC = () => {
   const customerName: string = order.customer?.name || order.user || 'Customer';
   const customerPhone: string | null = order.customer?.phone_number ?? order.guest_phone ?? null;
 
-  const [deliveryStatuses, setDeliveryStatuses] = useState<DeliveryStatus[]>([]);
-  const [loadingStatuses, setLoadingStatuses] = useState(true);
-  const [deliveryStatus, setDeliveryStatus] = useState(order.delivery_status || 'Pending');
-
   // Payment
   const initPaymentMode = (): PaymentMode => {
     if (order.is_paid && !order.cash_received) return 'online';
@@ -53,77 +69,99 @@ export const DeliveryOrderDetailScreen: React.FC = () => {
     return 'none';
   };
   const [paymentMode, setPaymentMode] = useState<PaymentMode>(initPaymentMode);
-  const [amount, setAmount] = useState(order.cash_amount?.toString() || order.total_price?.toString() || '');
+  // What the rider actually asks for at the door: everything the customer owes,
+  // not just today's bottles.
+  //
+  // `customer.account_balance` arrives owed-positive from the rider serializer —
+  // that is its documented purpose. It does NOT include this order, because the
+  // ledger charge only posts once the order reaches Delivered, so the doorstep
+  // figure is the old balance PLUS today's total.
+  //
+  // Clamped at zero: a customer in credit is owed money, not asked for a
+  // negative amount.
+  const orderTotal = Number(order.total_price ?? 0);
+  const previousDue = Number(order.customer?.account_balance ?? 0);
+  const totalDue = Math.max(0, previousDue + orderTotal);
 
+  // Pre-filled and editable. `cash_amount` is a DRF decimal STRING, so an order
+  // with nothing collected sends "0.00" — truthy — and the old `||` chain never
+  // fell through, pre-filling "0.00" so a rider typing 165 recorded PKR 0.00165.
+  // Compare numerically instead, and select on focus so the first keystroke
+  // replaces the figure rather than appending to it.
+  const alreadyCollected = Number(order.cash_amount ?? 0);
+  const [amount, setAmount] = useState(
+    String(alreadyCollected > 0 ? alreadyCollected : totalDue || ''),
+  );
+
+  const { confirm, notify } = useDialog();
   const [notes, setNotes] = useState(order.delivery_notes || '');
-  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    getDeliveryStatuses()
-      .then(setDeliveryStatuses)
-      .catch(() => Alert.alert('Error', 'Failed to load delivery statuses'))
-      .finally(() => setLoadingStatuses(false));
-  }, []);
-
-  const isDelivering = !isStatusLocked && deliveryStatus === 'Delivered';
+    if (!isSubmitted) return;
+    // Read-only from here, so this cannot clobber anything the rider is typing.
+    setNotes(order.delivery_notes || '');
+    const collected = Number(order.cash_amount ?? 0);
+    if (collected > 0) setAmount(String(collected));
+  }, [isSubmitted, order]);
+  const [loading, setLoading] = useState(false);
 
   /**
-   * The status locks after the first submission, so confirm before writing it.
-   * Notes-only edits are reversible and skip the prompt.
+   * Submitting completes the delivery and cannot be undone from the app, so it
+   * is always confirmed first — with the payment spelled out, because that is
+   * the part the office reconciles and the rider cannot come back and fix.
    */
-  const confirmSubmit = () => {
-    if (isStatusLocked) {
-      submitUpdate();
-      return;
-    }
-
+  const confirmSubmit = async () => {
     const paymentLine =
-      paymentMode === 'cash'   ? `\nCash collected: PKR ${parseFloat(amount) || 0}`
-      : paymentMode === 'online' ? `\nPaid online: PKR ${parseFloat(amount) || 0}`
-      : '\nNo payment collected';
+      paymentMode === 'cash'   ? `Cash collected: PKR ${parseFloat(amount) || 0}`
+      : paymentMode === 'online' ? `Paid online: PKR ${parseFloat(amount) || 0}`
+      : 'No payment collected';
 
-    Alert.alert(
-      isDelivering ? 'Confirm Delivery' : 'Confirm Update',
-      isDelivering
-        ? `Do you want to deliver this order?\n\nOrder #${order.id} will be marked as Delivered.${paymentLine}\n\nThis can't be changed afterwards.`
-        : `Mark order #${order.id} as "${deliveryStatus}"?${paymentLine}\n\nThis can't be changed afterwards.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: isDelivering ? 'Yes, Deliver' : 'Confirm', onPress: submitUpdate },
-      ],
-    );
+    const ok = await confirm({
+      title: `Deliver order #${order.id}?`,
+      message: `${paymentLine}
+
+Nothing on this order can be changed afterwards — the office will have to correct it.`,
+      confirmLabel: 'Yes, deliver',
+      tone: 'success',
+    });
+    if (ok) void submitUpdate();
   };
 
   const submitUpdate = async () => {
     setLoading(true);
     try {
-      let updateData: any;
-      if (isStatusLocked) {
-        updateData = { delivery_notes: notes };
-      } else {
-        updateData = {
-          number_of_bottles: totalBottles,
-          delivery_status: deliveryStatus,
-          delivery_notes: notes,
-          cash_received: paymentMode === 'cash',
-          cash_amount: (paymentMode === 'cash' || paymentMode === 'online') ? (parseFloat(amount) || 0) : 0,
-          is_paid: paymentMode === 'online',
-        };
-      }
+      // `delivery_status` is deliberately not sent: the server sets Delivered
+      // itself, so the two can never disagree.
+      const updateData = {
+        number_of_bottles: totalBottles,
+        delivery_notes: notes,
+        cash_received: paymentMode === 'cash',
+        cash_amount: (paymentMode === 'cash' || paymentMode === 'online') ? (parseFloat(amount) || 0) : 0,
+        is_paid: paymentMode === 'online',
+      };
       await updateOrderStatus(order.id, order.status, updateData);
       // In 'active_delivery' mode the rider's last open order is what keeps
       // tracking alive — closing it here should stop it now, not whenever the
       // app next happens to be resumed.
       void startRiderTracking();
-      Alert.alert(
-        'Success',
-        isStatusLocked ? 'Notes updated'
-          : isDelivering ? 'Order marked as delivered'
-          : 'Order updated',
-        [{ text: 'OK', onPress: () => navigation.goBack() }],
-      );
+      const recorded =
+        paymentMode === 'none'
+          ? 'No payment recorded.'
+          : `${paymentMode === 'cash' ? 'Cash' : 'Online'} received: PKR ${parseFloat(amount) || 0}.`;
+      await notify({
+        title: `Order #${order.id} delivered`,
+        message: `${recorded}
+
+The office can see it now. You cannot change it from here.`,
+        tone: 'success',
+      });
+      navigation.goBack();
     } catch (error: any) {
-      Alert.alert('Error', error?.message || 'Failed to update order');
+      void notify({
+        title: 'Could not submit',
+        message: error?.message || 'Failed to update order.',
+        tone: 'destructive',
+      });
       setLoading(false);
     }
   };
@@ -249,69 +287,37 @@ export const DeliveryOrderDetailScreen: React.FC = () => {
         <Text style={styles.sectionTitle}>Delivery Details</Text>
 
         {/* Locked warning */}
-        {isDelivered ? (
+        {isSubmitted ? (
           <View style={styles.warningBox}>
             <Text style={styles.warningIcon}>✅</Text>
             <View style={{ flex: 1 }}>
-              <Text style={styles.warningTitle}>Delivered</Text>
+              <Text style={styles.warningTitle}>
+                {order.delivery_status === 'Delivered' || order.status === 'Delivered'
+                  ? 'Delivered'
+                  : 'Already submitted'}
+              </Text>
               <Text style={styles.warningText}>
                 This delivery is complete. Nothing on it can be changed now —
                 contact the office if something needs correcting.
               </Text>
             </View>
           </View>
-        ) : isStatusLocked ? (
-          <View style={styles.warningBox}>
-            <Text style={styles.warningIcon}>🔒</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.warningTitle}>Status Locked</Text>
-              <Text style={styles.warningText}>
-                You can only update notes after the first submission.
-              </Text>
-            </View>
-          </View>
         ) : null}
 
-        {/* Delivery status */}
-        {isStatusLocked ? (
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Delivery Status</Text>
-            <View style={styles.lockedStatus}>
-              <Text style={styles.lockedStatusText}>{deliveryStatus}</Text>
-            </View>
+        {/* Delivery status. There is nothing to pick: submitting this form is
+            what delivers the order, so the screen states the outcome instead of
+            offering a choice that only ever had one right answer. */}
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>Delivery Status</Text>
+          <View style={styles.lockedStatus}>
+            <Text style={styles.lockedStatusText}>
+              {isSubmitted ? (order.delivery_status || 'Delivered') : 'Delivered on submit'}
+            </Text>
           </View>
-        ) : (
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Delivery Status</Text>
-            {loadingStatuses ? (
-              <ActivityIndicator size="small" color="#007AFF" style={{ marginVertical: 16 }} />
-            ) : (
-              <View style={styles.buttonGroup}>
-                {deliveryStatuses.map((s) => (
-                  <TouchableOpacity
-                    key={s.id}
-                    style={[
-                      styles.statusButton,
-                      { borderColor: s.border_color },
-                      deliveryStatus === s.name && { backgroundColor: s.background_color, borderWidth: 2 },
-                    ]}
-                    onPress={() => setDeliveryStatus(s.name)}
-                  >
-                    <Text style={[
-                      styles.statusButtonText,
-                      deliveryStatus === s.name && { color: s.color, fontWeight: 'bold' },
-                    ]}>
-                      {s.name}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-          </View>
-        )}
+        </View>
 
         {/* Payment mode */}
-        {!isStatusLocked && (
+        {!isSubmitted && (
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Payment Received</Text>
             <View style={styles.paymentRow}>
@@ -338,7 +344,7 @@ export const DeliveryOrderDetailScreen: React.FC = () => {
         )}
 
         {/* Amount — shown for cash or online */}
-        {!isStatusLocked && paymentMode !== 'none' && (
+        {!isSubmitted && paymentMode !== 'none' && (
           <View style={styles.inputGroup}>
             <Text style={styles.label}>
               {paymentMode === 'cash' ? 'Cash Amount (PKR)' : 'Transfer Amount (PKR)'}
@@ -349,7 +355,40 @@ export const DeliveryOrderDetailScreen: React.FC = () => {
               onChangeText={setAmount}
               keyboardType="decimal-pad"
               placeholder="Enter amount"
+              placeholderTextColor="#000"
+              // Re-editing an amount replaces it rather than appending.
+              selectTextOnFocus
             />
+            {(previousDue !== 0 || orderTotal > 0) && (
+              <View style={styles.dueBox}>
+                <View style={styles.dueRow}>
+                  <Text style={styles.dueLabel}>Previous balance</Text>
+                  <Text style={styles.dueValue}>
+                    {previousDue < 0
+                      ? `PKR ${Math.abs(previousDue).toLocaleString('en-PK')} in credit`
+                      : `PKR ${previousDue.toLocaleString('en-PK')}`}
+                  </Text>
+                </View>
+                <View style={styles.dueRow}>
+                  <Text style={styles.dueLabel}>This order</Text>
+                  <Text style={styles.dueValue}>PKR {orderTotal.toLocaleString('en-PK')}</Text>
+                </View>
+                <View style={[styles.dueRow, styles.dueTotalRow]}>
+                  <Text style={styles.dueTotalLabel}>Total due</Text>
+                  <Text style={styles.dueTotalValue}>PKR {totalDue.toLocaleString('en-PK')}</Text>
+                </View>
+                {Number(amount || 0) !== totalDue && (
+                  <TouchableOpacity
+                    style={styles.fullAmountBtn}
+                    onPress={() => setAmount(String(totalDue))}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Reset to the full due amount, ${totalDue} rupees`}
+                  >
+                    <Text style={styles.fullAmountText}>Reset to full due</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
           </View>
         )}
 
@@ -359,19 +398,17 @@ export const DeliveryOrderDetailScreen: React.FC = () => {
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Delivery note</Text>
           <Text style={styles.hint}>
-            {isDelivered
+            {isSubmitted
               ? 'This is what was recorded at the door.'
-              : isStatusLocked
-                ? 'The status is locked, but you can still correct this note.'
-                : 'Instructions from the office appear here. Add what happened at the door.'}
+              : 'Instructions from the office appear here. Add what happened at the door — you cannot change it after submitting.'}
           </Text>
           <TextInput
-            style={[styles.input, styles.textArea, isDelivered && styles.inputReadOnly]}
+            style={[styles.input, styles.textArea, isSubmitted && styles.inputReadOnly]}
             value={notes}
             onChangeText={setNotes}
-            editable={!isDelivered}
+            editable={!isSubmitted}
             placeholder="Left with the guard · Customer not home · Paid in cash"
-            placeholderTextColor="#aaa"
+            placeholderTextColor="#000"
             multiline
             numberOfLines={3}
             maxLength={500}
@@ -382,21 +419,19 @@ export const DeliveryOrderDetailScreen: React.FC = () => {
         {/* No submit once delivered — the server rejects every write to a
             completed delivery, so offering the button would only produce an
             error the rider can do nothing about. */}
-        {!isDelivered && (
+        {!isSubmitted && (
           <TouchableOpacity
             style={[
               styles.submitButton,
-              isDelivering && styles.deliverButton,
+              styles.deliverButton,
               loading && styles.submitButtonDisabled,
             ]}
             onPress={confirmSubmit}
             disabled={loading}
           >
-            {isDelivering && !loading && (
-              <Ionicons name="checkmark-circle" size={19} color="#fff" />
-            )}
+            {!loading && <Ionicons name="checkmark-circle" size={19} color="#fff" />}
             <Text style={styles.submitButtonText}>
-              {loading ? 'Updating…' : isStatusLocked ? 'Update Notes' : isDelivering ? 'Delivered' : 'Submit Update'}
+              {loading ? 'Submitting…' : 'Mark as Delivered'}
             </Text>
           </TouchableOpacity>
         )}
@@ -479,12 +514,28 @@ const styles = StyleSheet.create({
   totalValue: { fontSize: 15, fontWeight: 'bold', color: '#007AFF' },
 
   inputGroup: { marginBottom: 18 },
+  dueBox: {
+    marginTop: 10, backgroundColor: '#f7f9fc', borderRadius: 10,
+    borderWidth: 1, borderColor: '#e4e9ee', padding: 12, gap: 6,
+  },
+  dueRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  dueLabel: { fontSize: 13, color: '#5b6672' },
+  dueValue: { fontSize: 13, color: '#1a2530', fontWeight: '600' },
+  dueTotalRow: { borderTopWidth: 1, borderTopColor: '#e4e9ee', paddingTop: 7, marginTop: 1 },
+  dueTotalLabel: { fontSize: 14, color: '#1a2530', fontWeight: '700' },
+  dueTotalValue: { fontSize: 15, color: '#0A84FF', fontWeight: '800' },
+  fullAmountBtn: {
+    alignSelf: 'flex-start', marginTop: 4,
+    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8,
+    backgroundColor: '#eaf2ff', borderWidth: 1, borderColor: '#b9d4ff',
+  },
+  fullAmountText: { fontSize: 13, fontWeight: '700', color: '#0A84FF' },
   label: { fontSize: 14, fontWeight: '600', color: '#444', marginBottom: 8 },
   hint: { fontSize: 12, color: '#8a929b', marginBottom: 8, lineHeight: 17 },
   hintBelow: { fontSize: 12, color: '#8a929b', marginTop: 8, lineHeight: 17 },
-  input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 10, padding: 12, fontSize: 16, backgroundColor: '#fafafa' },
+  input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 10, padding: 12, fontSize: 16, backgroundColor: '#fafafa', color: '#000' },
   textArea: { height: 80, textAlignVertical: 'top' },
-  inputReadOnly: { backgroundColor: '#f0f0f0', color: '#666', borderColor: 'transparent' },
+  inputReadOnly: { backgroundColor: '#f0f0f0', color: '#000', borderColor: 'transparent' },
 
   // Payment options
   paymentRow: { flexDirection: 'row', gap: 8 },
@@ -493,14 +544,6 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: '#ddd', backgroundColor: '#fafafa', gap: 6,
   },
   paymentLabel: { fontSize: 11, fontWeight: '600', color: '#888', textAlign: 'center' },
-
-  // Status buttons
-  buttonGroup: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  statusButton: {
-    paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8,
-    borderWidth: 1, borderColor: '#007AFF', backgroundColor: '#fff',
-  },
-  statusButtonText: { color: '#007AFF', fontSize: 13, fontWeight: '600' },
 
   lockedStatus: { backgroundColor: '#e9ecef', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#ced4da' },
   lockedStatusText: { fontSize: 15, color: '#495057', fontWeight: '600' },

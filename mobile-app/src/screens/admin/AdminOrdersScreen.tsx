@@ -8,6 +8,7 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { adminService, AdminOrder, DeliveryBoy } from '../../services/adminService';
+import { useRefetchOnFocus } from '../../hooks/useRefetchOnFocus';
 import { RootStackParamList, AdminTabParamList } from '../../types/navigation';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -113,6 +114,11 @@ export const AdminOrdersScreen: React.FC = () => {
 
   useEffect(() => { load(); }, [load]);
 
+  // Coming back from a detail screen that changed something must show the
+  // change. Silent refetch — load(true) skips the full-screen spinner, so the
+  // list updates in place instead of flashing blank.
+  useRefetchOnFocus(() => load(true));
+
   const onRefresh = () => { setRefreshing(true); load(true); };
 
   return (
@@ -128,7 +134,7 @@ export const AdminOrdersScreen: React.FC = () => {
             onChangeText={setSearch}
             returnKeyType="search"
             onSubmitEditing={() => load()}
-            placeholderTextColor="#aaa"
+            placeholderTextColor="#000"
           />
           {search.length > 0 && (
             <TouchableOpacity onPress={() => setSearch('')}>
@@ -234,7 +240,7 @@ const styles = StyleSheet.create({
     height: 38,
     gap: 6,
   },
-  searchInput: { flex: 1, fontSize: 14, color: '#333' },
+  searchInput: { flex: 1, fontSize: 14, color: '#000' },
   hiddenBtn: {
     width: 38, height: 38, borderRadius: 10,
     backgroundColor: '#f0f0f0', alignItems: 'center', justifyContent: 'center',

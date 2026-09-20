@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  ActivityIndicator, Alert, FlatList, Modal, RefreshControl, ScrollView,
+  ActivityIndicator, Alert, FlatList, Modal, RefreshControl,
   StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { RouteProp, useRoute } from '@react-navigation/native';
 import { LoadingScreen } from '../../components/LoadingScreen';
+import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
 import {
   adminService, LedgerEntry, LedgerStatement, Receivable,
 } from '../../services/adminService';
@@ -41,7 +42,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 8,
     backgroundColor: 'white', padding: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0',
   },
-  searchInput: { flex: 1, fontSize: 14, color: '#333' },
+  searchInput: { flex: 1, fontSize: 14, color: '#000' },
   filterChip: {
     paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14,
     borderWidth: 1, borderColor: '#e0e0e0', backgroundColor: 'white',
@@ -127,7 +128,7 @@ const sheet = StyleSheet.create({
   label: { fontSize: 13, fontWeight: '600', color: '#444', marginBottom: 5, marginTop: 12 },
   input: {
     borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 8,
-    padding: 12, fontSize: 15, color: '#333', backgroundColor: '#fafafa',
+    padding: 12, fontSize: 15, color: '#000', backgroundColor: '#fafafa',
   },
   methods: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
   method: {
@@ -228,7 +229,7 @@ function RecordPaymentSheet({
             </TouchableOpacity>
           </View>
 
-          <ScrollView keyboardShouldPersistTaps="handled">
+          <KeyboardAwareScrollView keyboardShouldPersistTaps="handled">
             <Text style={sheet.hint}>From {customer.name}</Text>
 
             <Text style={sheet.label}>Amount (PKR) *</Text>
@@ -238,20 +239,20 @@ function RecordPaymentSheet({
               onChangeText={setAmount}
               keyboardType="decimal-pad"
               placeholder="0.00"
-              placeholderTextColor="#bbb"
+              placeholderTextColor="#000"
               autoFocus
             />
 
             <Text style={sheet.label}>Reference (voucher / slip no.)</Text>
             <TextInput
               style={sheet.input} value={reference} onChangeText={setReference}
-              placeholder="Optional" placeholderTextColor="#bbb"
+              placeholder="Optional" placeholderTextColor="#000"
             />
 
             <Text style={sheet.label}>Notes</Text>
             <TextInput
               style={sheet.input} value={notes} onChangeText={setNotes}
-              placeholder="Optional" placeholderTextColor="#bbb"
+              placeholder="Optional" placeholderTextColor="#000"
             />
 
             <TouchableOpacity
@@ -264,7 +265,7 @@ function RecordPaymentSheet({
                 : <><Ionicons name="checkmark-circle" size={18} color="white" />
                     <Text style={sheet.submitText}>Record Payment</Text></>}
             </TouchableOpacity>
-          </ScrollView>
+          </KeyboardAwareScrollView>
         </View>
       </View>
     </Modal>
@@ -333,7 +334,7 @@ function ReceivablesTab({ onOpen }: { onOpen: (r: Receivable) => void }) {
         <TextInput
           style={styles.searchInput}
           placeholder="Search name, code, phone…"
-          placeholderTextColor="#aaa"
+          placeholderTextColor="#000"
           value={search}
           onChangeText={setSearch}
         />

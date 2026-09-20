@@ -14,7 +14,9 @@ from .models import (
     CUSTOMER_PIN_FIELDS, LOCATION_STALE_AFTER_MINUTES,
     RiderLocation, RiderLocationPing, TrackingSettings,
 )
+from activities.service import log_data_issue
 from .permissions import user_can_override_discount
+from .phone import duplicate_phone_error, normalize_phone
 
 
 class AreaSerializer(serializers.ModelSerializer):
@@ -87,19 +89,19 @@ class DiscountCategorySerializer(serializers.ModelSerializer):
         return attrs
 
 
-# Pakistani mobile numbers: 03xx-xxxxxxx, +923xxxxxxxxx or 923xxxxxxxxx
-_PHONE_SEPARATORS = re.compile(r'[\s\-().]')
-_PHONE_PATTERN = re.compile(r'^(?:\+92|92|0)3\d{9}$')
-
-
 def normalize_phone_number(value):
-    """Strip separators and return the number in local 03xxxxxxxxx form."""
-    cleaned = _PHONE_SEPARATORS.sub('', value or '')
-    if not _PHONE_PATTERN.match(cleaned):
+    """Strip separators and return the number in local 03xxxxxxxxx form.
+
+    The rule itself lives in `accounts.phone` so the admin views and the
+    backfill migration share one definition; this is only the raising wrapper
+    that DRF field validation wants.
+    """
+    normalized = normalize_phone(value)
+    if normalized is None:
         raise serializers.ValidationError(
             'Enter a valid mobile number, e.g. 0300-1234567.'
         )
-    return '0' + cleaned[-10:]
+    return normalized
 
 
 # ── Coordinates (shared by rider tracking and the customer delivery pin) ─────
@@ -229,6 +231,20 @@ class UpdateProfileSerializer(serializers.ModelSerializer):
         bound=180, required=False, allow_null=True, write_only=True,
     )
 
+    def validate_phone_number(self, value):
+        """Same rule as signup — a customer must not edit their way onto
+        somebody else's number, and the stored form must stay canonical or the
+        duplicate check goes blind."""
+        if not value:
+            return value
+        normalized = normalize_phone_number(value)
+        user = getattr(self, 'instance', None)
+        if duplicate_phone_error(normalized, exclude_user_id=user.pk if user else None):
+            raise serializers.ValidationError(
+                'This number is already registered to another account.'
+            )
+        return normalized
+
     class Meta:
         model = User
         fields = (
@@ -356,7 +372,14 @@ class CustomerAddressSerializer(serializers.ModelSerializer):
 class RegisterSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(
         required=True,
-        validators=[UniqueValidator(queryset=User.objects.all())]
+        # DRF's default here is "This field must be unique." — which names
+        # neither the field nor what to do about it. A duplicate email means
+        # this person already has an account, so say that and point them at
+        # the way out.
+        validators=[UniqueValidator(
+            queryset=User.objects.all(),
+            message='This email already has an account. Try signing in instead.',
+        )],
     )
     password = serializers.CharField(
         write_only=True, required=True, validators=[validate_password], min_length=8
@@ -393,7 +416,40 @@ class RegisterSerializer(serializers.ModelSerializer):
         }
 
     def validate_phone_number(self, value):
-        return normalize_phone_number(value)
+        """One number, one customer.
+
+        A number already on file means this person is almost certainly the
+        walk-in or phone customer an admin entered earlier, and letting the
+        signup through would split them into two accounts — two ledgers, two
+        balances, and an app showing zero to someone who owes money.
+        """
+        normalized = normalize_phone_number(value)
+        duplicate = duplicate_phone_error(normalized)
+        if duplicate:
+            # Worth an admin's attention, and not as a nuisance: someone whose
+            # number is already on file is almost always a customer the office
+            # entered by hand, now trying to get into the app. The row tells
+            # the admin who to give a password to.
+            #
+            # A plain typo at signup is deliberately NOT logged — the customer
+            # retypes it a second later, and logging every mistyped digit from
+            # a public form would bury the rows that need acting on.
+            log_data_issue(
+                None, 'Existing Customer Tried To Sign Up',
+                target_type='customer',
+                target_id=duplicate['existing_customer']['id'],
+                target_label=duplicate['existing_customer']['name'],
+                details={
+                    'phone': normalized,
+                    'chose_username': self.initial_data.get('username', ''),
+                    'where': 'signup',
+                },
+            )
+            raise serializers.ValidationError(
+                'An account already exists for this number. Please sign in, or '
+                'contact us if you have not set a password yet.'
+            )
+        return normalized
 
     def validate_portion(self, value):
         """Accept any spelling, store the canonical key.
@@ -442,6 +498,27 @@ class RegisterSerializer(serializers.ModelSerializer):
             )
             update_fields += CUSTOMER_PIN_FIELDS
         profile.save(update_fields=update_fields)
+
+        # The address the customer just typed becomes their first address-book
+        # entry, marked default.
+        #
+        # Without this it lived only on the profile, so checkout — which reads
+        # the address book — told a customer who had just given their full
+        # address "You have no saved addresses yet" and made them type it all
+        # again before they could order. The pin they dropped at signup was
+        # stranded the same way.
+        CustomerAddress.objects.create(
+            user=user,
+            label=CustomerAddress.LABEL_HOME,
+            house_number=profile.house_number or '',
+            portion=profile.portion or '',
+            block=profile.block or '',
+            area=profile.area or '',
+            address=profile.address or '',
+            latitude=profile.customer_latitude,
+            longitude=profile.customer_longitude,
+            is_default=True,
+        )
         return user
 
 

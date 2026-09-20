@@ -7,12 +7,20 @@ class ActivityLog(models.Model):
     CATEGORY_RIDER = 'rider'
     CATEGORY_CUSTOMER = 'customer'
     CATEGORY_USER = 'user'
+    CATEGORY_SETTINGS = 'settings'
+    # Records that arrived wrong rather than actions somebody took: a number
+    # already on file, a number that is not a number, an address with no house
+    # on it. Kept apart from 'customer' because the admin reads this tab to find
+    # work to do, and mixing it into the ordinary customer stream buries it.
+    CATEGORY_DATA = 'data'
 
     CATEGORIES = [
         (CATEGORY_ORDER, 'Order'),
         (CATEGORY_RIDER, 'Rider'),
         (CATEGORY_CUSTOMER, 'Customer'),
         (CATEGORY_USER, 'User'),
+        (CATEGORY_SETTINGS, 'Settings'),
+        (CATEGORY_DATA, 'Data Issue'),
     ]
 
     timestamp = models.DateTimeField(auto_now_add=True, db_index=True)

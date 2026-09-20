@@ -211,7 +211,7 @@ export function AddressFields({
       </div>
 
       <div>
-        <FieldLabel htmlFor={areaId}>Area</FieldLabel>
+        <FieldLabel htmlFor={areaId}>Town / Mohala</FieldLabel>
         {areas.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2">
             {areas.map((a) => (
@@ -255,7 +255,7 @@ export function AddressFields({
             className="input w-full"
             value={value.area}
             onChange={set("area")}
-            placeholder="Type the area"
+            placeholder="Type the town or mohala"
             maxLength={150}
           />
         )}

@@ -44,6 +44,8 @@ import { CartProvider, useCart } from './src/context/CartContext';
 import { AuthProvider, AuthContext } from './src/context/AuthContext';
 import { LanguageProvider } from './src/context/LanguageContext';
 import { FloatingContactButton } from './src/components/FloatingContactButton';
+import { RiderLocationGate } from './src/components/RiderLocationGate';
+import { DialogProvider } from './src/components/AppDialog';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -243,7 +245,7 @@ const AppContent = () => {
     contentStyle: { paddingBottom: 0 },
   } as const;
 
-  return (
+  const tree = (
     <NavigationContainer>
       <Stack.Navigator
         screenOptions={{ ...headerOptions(), contentStyle: screenContentStyle }}
@@ -311,6 +313,14 @@ const AppContent = () => {
       {user && !isAdmin && <FloatingContactButton />}
     </NavigationContainer>
   );
+
+  // A rider who is not sharing location cannot work, so the gate stands in
+  // front of the whole navigator — there is nothing behind it to reach. It
+  // deliberately does not apply to admins, who are not tracked.
+  if (isDeliveryBoy && !isAdmin) {
+    return <RiderLocationGate>{tree}</RiderLocationGate>;
+  }
+  return tree;
 };
 
 export default function App() {
@@ -320,7 +330,11 @@ export default function App() {
         <AuthProvider>
           <LanguageProvider>
             <CartProvider>
-              <AppContent />
+              {/* Inside the providers so a dialog can use auth/language, and
+                  around AppContent so every screen can raise one. */}
+              <DialogProvider>
+                <AppContent />
+              </DialogProvider>
               <StatusBar style="dark" />
             </CartProvider>
           </LanguageProvider>

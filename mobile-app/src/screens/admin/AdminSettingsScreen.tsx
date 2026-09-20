@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View, Text, ScrollView, StyleSheet, TouchableOpacity,
+  View, Text, StyleSheet, TouchableOpacity,
   TextInput, ActivityIndicator, Alert, Switch,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
 import { adminService, PricedType, PlantSettings } from '../../services/adminService';
+import { PaymentAccountsSection } from './PaymentAccountsSection';
+import { LanguageSection } from './LanguageSection';
 
 // ─── Reusable TypeRow ─────────────────────────────────────────────────────────
 
@@ -108,7 +111,9 @@ function TypeList({
   const handleDelete = (item: PricedType) => {
     Alert.alert(
       `Delete "${item.name}"?`,
-      'This cannot be undone.',
+      `It will no longer be offered when creating new records.
+
+Turning it off does the same thing and can be undone.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -138,7 +143,7 @@ function TypeList({
         <TextInput
           style={[styles.addInput, { flex: 2 }]}
           placeholder={namePlaceholder}
-          placeholderTextColor="#bbb"
+          placeholderTextColor="#000"
           value={name}
           onChangeText={setName}
         />
@@ -146,7 +151,7 @@ function TypeList({
           <TextInput
             style={[styles.addInput, { flex: 1 }]}
             placeholder="Price (opt.)"
-            placeholderTextColor="#bbb"
+            placeholderTextColor="#000"
             value={price}
             onChangeText={setPrice}
             keyboardType="decimal-pad"
@@ -239,7 +244,7 @@ function PricingSection() {
             onChangeText={setPrice}
             keyboardType="decimal-pad"
             placeholder="0"
-            placeholderTextColor="#bbb"
+            placeholderTextColor="#000"
           />
           <TouchableOpacity
             style={[styles.saveBtn, (!dirty || saving) && { opacity: 0.4 }]}
@@ -468,8 +473,12 @@ const mps = StyleSheet.create({
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export const AdminSettingsScreen: React.FC = () => (
-  <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
+  <KeyboardAwareScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
     <PricingSection />
+
+    <PaymentAccountsSection />
+
+    <LanguageSection />
 
     <TypeList
       title="Bottle Types"
@@ -518,7 +527,7 @@ export const AdminSettingsScreen: React.FC = () => (
     />
 
     <MobileProfileSection />
-  </ScrollView>
+  </KeyboardAwareScrollView>
 );
 
 const styles = StyleSheet.create({
@@ -548,7 +557,7 @@ const styles = StyleSheet.create({
   priceInput: {
     flex: 1, borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 10,
     paddingHorizontal: 12, paddingVertical: 10, fontSize: 18,
-    fontWeight: '700', color: '#1a1a1a',
+    fontWeight: '700', color: '#000',
   },
   saveBtn: {
     backgroundColor: '#007AFF', borderRadius: 10,
@@ -559,7 +568,7 @@ const styles = StyleSheet.create({
   addRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   addInput: {
     borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 10,
-    paddingHorizontal: 10, paddingVertical: 9, fontSize: 13, color: '#333',
+    paddingHorizontal: 10, paddingVertical: 9, fontSize: 13, color: '#000',
   },
   addBtn: {
     width: 40, height: 40, borderRadius: 10,

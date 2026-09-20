@@ -1,8 +1,9 @@
-import React, { createContext, useState, useEffect, ReactNode } from 'react';
+import React, { useCallback, createContext, useState, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { authService } from '../services/authService';
 import { registerForPushNotificationsAsync, sendPushTokenToBackend } from '../services/notificationService';
 import { startRiderTracking, stopRiderTracking, stopRiderTrackingForLogout } from '../services/locationService';
+import { identifyUser } from '../services/crashReporting';
 
 interface User {
   id: number;
@@ -47,6 +48,27 @@ export interface AuthError extends Error {
 }
 
 /** Flatten a DRF error body into { field: 'first message' }. */
+/**
+ * Turn a raw API failure into something a customer can act on.
+ *
+ * SimpleJWT answers an expired or missing session with "Given token not valid
+ * for any token type", which told a customer staring at the SIGN-UP form that
+ * some token was wrong — about an account they did not yet have.
+ */
+const humanise = (message: string): string => {
+  const raw = (message || '').toLowerCase();
+  if (raw.includes('token') && (raw.includes('not valid') || raw.includes('expired'))) {
+    return 'Your session has expired. Please sign in again.';
+  }
+  if (raw.includes('no active account')) {
+    return 'Wrong username or password.';
+  }
+  if (raw.includes('network request failed') || raw.includes('failed to fetch')) {
+    return 'Cannot reach the server. Check your connection and try again.';
+  }
+  return message;
+};
+
 const parseFieldErrors = (raw: string): Record<string, string> | undefined => {
   let data: unknown;
   try {
@@ -65,6 +87,8 @@ const parseFieldErrors = (raw: string): Record<string, string> | undefined => {
 };
 
 interface AuthContextType {
+  /** Drop a stale error raised by some other screen. */
+  clearError: () => void;
   user: User | null;
   token: string | null;
   /** True only while an auth request is in flight — drives inline button spinners. */
@@ -89,6 +113,7 @@ export const AuthContext = createContext<AuthContextType>({
   register: async () => {},
   updateProfile: async () => {},
   logout: async () => {},
+  clearError: () => {},
   error: null,
 });
 
@@ -102,10 +127,21 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // `error` is shared by login, register, profile updates and Google
+  // sign-in, and nothing cleared it between screens — so a session that
+  // expired during a profile save greeted the next person to open Sign Up.
+  const clearError = useCallback(() => setError(null), []);
 
   useEffect(() => {
     loadStorageData();
   }, []);
+
+  // Tag crash reports with whoever is signed in. Derived from `user` rather
+  // than called at each login/logout site, so it can never disagree with the
+  // state it is meant to describe.
+  useEffect(() => {
+    identifyUser(user ? { id: user.id, username: user.username } : null);
+  }, [user]);
 
   useEffect(() => {
     if (user) {
@@ -175,7 +211,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       } catch {
         message = e.message;
       }
-      setError(message as string);
+      setError(humanise(message as string));
       throw new Error(message as string);
     } finally {
       console.log('🔓 Setting isLoading to false');
@@ -201,7 +237,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const message = fieldErrors
         ? Object.values(fieldErrors)[0]
         : e.message || 'Registration failed';
-      setError(message);
+      setError(humanise(message));
       const authError: AuthError = new Error(message);
       authError.fieldErrors = fieldErrors;
       throw authError;
@@ -226,7 +262,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       } catch {
         message = e.message;
       }
-      setError(message as string);
+      setError(humanise(message as string));
       throw new Error(message as string);
     } finally {
       setIsLoading(false);
@@ -253,7 +289,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       } catch {
         message = e.message;
       }
-      setError(message);
+      setError(humanise(message));
       throw new Error(message);
     } finally {
       setIsLoading(false);
@@ -283,7 +319,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, isLoading, isBootstrapping, login, loginWithGoogle, register, updateProfile, logout, error }}>
+    <AuthContext.Provider value={{ user, token, isLoading, isBootstrapping, login, loginWithGoogle, register, updateProfile, logout, error, clearError }}>
       {children}
     </AuthContext.Provider>
   );

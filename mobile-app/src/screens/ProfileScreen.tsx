@@ -1,7 +1,7 @@
 import React, { useContext, useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  Alert, ScrollView, Modal, ActivityIndicator, Animated, Easing,
+  Alert, Modal, ActivityIndicator, Animated, Easing,
 } from 'react-native';
 import { AuthContext } from '../context/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,6 +11,7 @@ import { RootStackParamList } from '../types/navigation';
 import { useLanguage } from '../context/LanguageContext';
 import { useReducedMotion } from '../hooks/useReducedMotion';
 import { KeyboardAwareScrollView } from '../components/KeyboardAwareScrollView';
+import { FieldError } from '../components/FormField';
 import { authService } from '../services/authService';
 import { CustomerAddress, Pin, addressService, formatPin } from '../services/addressService';
 import { AddressPinMap } from '../components/AddressPinMap';
@@ -128,7 +129,7 @@ const MenuRow: React.FC<{
 
 export const ProfileScreen = () => {
   const { user, token, updateProfile, logout } = useContext(AuthContext);
-  const { language, setLanguage, t } = useLanguage();
+  const { language, setLanguage, t, urduEnabled } = useLanguage();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const reducedMotion = useReducedMotion();
 
@@ -142,6 +143,8 @@ export const ProfileScreen = () => {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordLoading, setPasswordLoading] = useState(false);
+  // Keyed by field so the message lands on the box at fault.
+  const [pwErrors, setPwErrors] = useState<Record<string, string>>({});
   const [business, setBusiness] = useState<BusinessContact | null>(null);
 
   // Summary of the address book, for the card that replaces the old free-text
@@ -444,15 +447,19 @@ export const ProfileScreen = () => {
   };
 
   const handleChangePassword = async () => {
-    if (!oldPassword || !newPassword || !confirmPassword) {
-      Alert.alert('Error', 'Please fill in all password fields'); return;
+    // Shown against the field, not in a dialog. "New passwords do not match"
+    // as a popup is the worst of the three: it has to be dismissed before the
+    // person can even see the two boxes it is talking about.
+    const errors: Record<string, string> = {};
+    if (!oldPassword) errors['Current Password'] = 'Enter your current password';
+    if (!newPassword) errors['New Password'] = 'Enter a new password';
+    else if (newPassword.length < 8) errors['New Password'] = 'Use at least 8 characters';
+    if (!confirmPassword) errors['Confirm New Password'] = 'Repeat the new password';
+    else if (newPassword && newPassword !== confirmPassword) {
+      errors['Confirm New Password'] = 'This does not match the new password';
     }
-    if (newPassword !== confirmPassword) {
-      Alert.alert('Error', 'New passwords do not match'); return;
-    }
-    if (newPassword.length < 8) {
-      Alert.alert('Error', 'Password must be at least 8 characters'); return;
-    }
+    setPwErrors(errors);
+    if (Object.keys(errors).length) return;
     setPasswordLoading(true);
     try {
       await authService.changePassword(token!, oldPassword, newPassword);
@@ -619,7 +626,7 @@ export const ProfileScreen = () => {
                     value={value}
                     onChangeText={(v) => setForm((p) => ({ ...p, [key]: v }))}
                     placeholder={cfg.label}
-                    placeholderTextColor="#b6bcc4"
+                    placeholderTextColor="#000"
                     multiline={multiline}
                     numberOfLines={multiline ? 2 : 1}
                     keyboardType={keyboard ?? 'default'}
@@ -738,7 +745,7 @@ export const ProfileScreen = () => {
               onSubmitEditing={saveLabel}
               returnKeyType="done"
               placeholder={businessDefault}
-              placeholderTextColor="#b6bcc4"
+              placeholderTextColor="#000"
               maxLength={120}
             />
             <Text style={styles.fieldHint}>
@@ -815,7 +822,10 @@ export const ProfileScreen = () => {
         </Animated.View>
       )}
 
-      {/* ── Language ─────────────────────────────────────────────────────── */}
+      {/* ── Language ───────────────────────────────────────────────────────
+          Hidden entirely when the office has Urdu switched off: a picker with
+          one option is just a control that does nothing. */}
+      {urduEnabled && (
       <Animated.View style={[styles.section, riseStyle(langIn)]}>
         <View style={styles.sectionHeader}>
           <IconChip name="language" color="#7A5AF8" bg="#EFEBFE" />
@@ -841,6 +851,7 @@ export const ProfileScreen = () => {
           })}
         </View>
       </Animated.View>
+      )}
 
       {/* ── Actions ──────────────────────────────────────────────────────── */}
       <Animated.View style={[styles.section, riseStyle(actionsIn)]}>
@@ -909,13 +920,23 @@ export const ProfileScreen = () => {
               <View key={label} style={styles.modalField}>
                 <Text style={styles.fieldLabel}>{label}</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, !!pwErrors[label] && styles.inputInvalid]}
                   value={val}
-                  onChangeText={set}
+                  onChangeText={(v) => {
+                    set(v);
+                    if (pwErrors[label]) {
+                      setPwErrors((e) => {
+                        const next = { ...e };
+                        delete next[label];
+                        return next;
+                      });
+                    }
+                  }}
                   secureTextEntry
                   placeholder={label}
-                  placeholderTextColor="#b6bcc4"
+                  placeholderTextColor="#000"
                 />
+                <FieldError message={pwErrors[label]} />
               </View>
             ))}
             <TouchableOpacity
@@ -1026,8 +1047,9 @@ const styles = StyleSheet.create({
   input: {
     borderWidth: 1.5, borderColor: '#e4e9ee', borderRadius: 12,
     paddingHorizontal: 12, paddingVertical: 11,
-    fontSize: 15, color: '#1a2530', backgroundColor: '#fafbfc',
+    fontSize: 15, color: '#000', backgroundColor: '#fafbfc',
   },
+  inputInvalid: { borderColor: '#D93025', backgroundColor: '#FFF7F7' },
   multilineInput: { minHeight: 68, textAlignVertical: 'top' },
   // ── Work place location ───────────────────────────────────────────────────
   labelField: { marginTop: 12 },

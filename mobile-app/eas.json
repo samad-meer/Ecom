@@ -15,10 +15,20 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "API_URL": "https://century.zipnixtechnologies.com/api",
+        "GOOGLE_WEB_CLIENT_ID": "1054797578232-k9t48k0dp7sl5fpc8oo6tjktps4r86og.apps.googleusercontent.com",
+        "GOOGLE_ANDROID_CLIENT_ID": "1054797578232-v07g9g3i4s7vivd0jdejn17c78a1n5m2.apps.googleusercontent.com"
       }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "API_URL": "https://century.zipnixtechnologies.com/api",
+        "GOOGLE_WEB_CLIENT_ID": "1054797578232-k9t48k0dp7sl5fpc8oo6tjktps4r86og.apps.googleusercontent.com",
+        "GOOGLE_ANDROID_CLIENT_ID": "1054797578232-v07g9g3i4s7vivd0jdejn17c78a1n5m2.apps.googleusercontent.com"
+      }
     }
   },
   "submit": {

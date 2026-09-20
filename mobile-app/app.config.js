@@ -72,6 +72,9 @@ module.exports = {
     plugins: [
       "expo-web-browser",
       "expo-notifications",
+      // Crash reporting. The plugin's job is source maps: without it every
+      // stack trace is a minified bundle offset, which tells you nothing.
+      "@sentry/react-native",
       // Backs the "remember me" password with the Keychain / Keystore. The
       // plugin's default also excludes those entries from Android auto-backup,
       // which matters because a restored ciphertext cannot be decrypted on a
@@ -113,6 +116,11 @@ module.exports = {
       // Maps SDK key. Same value as android.config.googleMaps.apiKey above —
       // the JS side reads this copy to decide whether to render a map at all.
       googleMapsApiKey,
+      // Sentry DSN. Not a secret (it only accepts events, it cannot read them),
+      // but it is environment-specific, so it comes from the environment. Empty
+      // disables reporting entirely rather than failing — a missing DSN must
+      // never be able to stop the app starting.
+      sentryDsn: process.env.SENTRY_DSN || "",
       // EAS project ID — required for push tokens (project @samadfastnexa/mobile-app).
       eas: {
         projectId: process.env.EAS_PROJECT_ID || "32a63efa-d33b-4d87-97b9-e0b590501945"

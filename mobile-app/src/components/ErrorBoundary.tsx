@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { reportError } from '../services/crashReporting';
 
 /**
  * Catches render errors so one bad screen does not take the whole app with it.
@@ -31,9 +32,11 @@ export class ErrorBoundary extends React.Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    // Kept so the stack still reaches Metro / logcat during development. A
-    // crash reporter would take its place here.
+    // The console line is for development, where Metro is watching. The report
+    // is for production, where nobody is: without it we only learn about a
+    // crash when a rider rings up to say the app closed.
     console.error('Unhandled render error:', error, info.componentStack);
+    reportError(error, { componentStack: info.componentStack });
   }
 
   render() {

@@ -78,17 +78,36 @@ class OrderLedgerWiringTests(LedgerTestMixin, TestCase):
         )
         self.assertEqual(self.stock(self.customer), 2)
 
-    def test_rider_non_delivery_status_posts_no_charge(self):
+    def test_rider_status_in_the_request_cannot_dodge_the_charge(self):
+        """A rider submit always delivers, so it always posts the charge.
+
+        The status in the request body is ignored — it used to be honoured, and
+        'Not Responding' left the order open and the ledger untouched.
+        """
         self.client.force_authenticate(self.rider)
         self.client.patch(
             f'/api/orders/delivery/orders/{self.order.id}/',
             {'delivery_status': 'Not Responding', 'cash_amount': 0},
             format='json',
         )
-        self.assertEqual(self.balance(self.customer), Decimal('0.00'))
-        self.assertEqual(LedgerEntry.objects.count(), 0)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, 'Delivered')
+        self.assertEqual(self.balance(self.customer), Decimal('-300.00'))
+        self.assertLedgerConsistent(self.customer)
 
     # ── Admin path ───────────────────────────────────────────────────────────
+
+    def test_undelivered_order_posts_no_charge(self):
+        """Charge lands on Delivered and not before — an order can sit open or
+        be cancelled, and charging earlier puts phantom debt on the balance."""
+        self.client.force_authenticate(self.admin)
+        self.client.patch(
+            f'/api/orders/admin/{self.order.id}/',
+            {'status': 'Processing', 'cash_amount': 0},
+            format='json',
+        )
+        self.assertEqual(self.balance(self.customer), Decimal('0.00'))
+        self.assertEqual(LedgerEntry.objects.count(), 0)
 
     def test_admin_update_posts_to_ledger_without_double_counting(self):
         """The old inline balance mutation was removed; only the ledger writes now."""

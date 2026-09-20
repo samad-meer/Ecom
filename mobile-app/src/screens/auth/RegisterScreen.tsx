@@ -14,8 +14,8 @@ import {
 } from '../../components/AddressFields';
 
 const BRAND_BLUE = '#0A84FF';
-const TEXT_DARK = '#1a1a1a';
-const PLACEHOLDER = '#9aa0a6';
+const TEXT_DARK = '#000';
+const PLACEHOLDER = '#000';
 const OK_GREEN = '#34C759';
 
 // Pakistani mobile numbers: 03xx-xxxxxxx, +923xxxxxxxxx or 923xxxxxxxxx
@@ -34,7 +34,9 @@ const RegisterScreen = () => {
   // Per-field messages from local checks and from the backend's 400 response.
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formMessage, setFormMessage] = useState<string | null>(null);
-  const { register, isLoading, error } = useContext(AuthContext);
+  const { register, isLoading, error, clearError } = useContext(AuthContext);
+  // Whatever failed on some other screen is not this form's problem.
+  useEffect(() => { clearError(); }, [clearError]);
   const { t } = useLanguage();
   const navigation = useNavigation<any>();
 

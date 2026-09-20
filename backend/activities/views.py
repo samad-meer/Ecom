@@ -2,6 +2,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import BasePermission
 from django.contrib.auth.models import User
+from django.db.models import Count
 from django.utils.dateparse import parse_date
 
 from core.timeframes import scope_to_days
@@ -34,8 +35,6 @@ class ActivityLogListView(APIView):
         qs = ActivityLog.objects.all()
         p = request.query_params
 
-        if p.get('category'):
-            qs = qs.filter(category=p['category'])
         if p.get('action'):
             qs = qs.filter(action__icontains=p['action'])
         if p.get('actor_id'):
@@ -50,6 +49,18 @@ class ActivityLogListView(APIView):
             parse_date(p['date_to']) if p.get('date_to') else None,
         )
 
+        # Tab badges are counted BEFORE the category filter, so switching tab
+        # does not collapse every other tab's badge to nothing. Every other
+        # filter still applies — the badge answers "how many in this tab match
+        # what I am currently looking at", which is the only useful question.
+        counts = {
+            row['category']: row['n']
+            for row in qs.values('category').annotate(n=Count('id'))
+        }
+
+        if p.get('category'):
+            qs = qs.filter(category=p['category'])
+
         try:
             limit = min(int(p.get('limit', 100)), 500)
             offset = int(p.get('offset', 0))
@@ -58,4 +69,9 @@ class ActivityLogListView(APIView):
 
         total = qs.count()
         data = ActivityLogSerializer(qs[offset:offset + limit], many=True).data
-        return Response({'count': total, 'results': data})
+        return Response({
+            'count': total,
+            'counts': counts,
+            'total_all': sum(counts.values()),
+            'results': data,
+        })

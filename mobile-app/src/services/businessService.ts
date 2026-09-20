@@ -9,6 +9,17 @@ import { getAuthToken } from './authService';
  * anonymous `/ledger/business/` fetches used for the "contact us" button.
  */
 
+/** One account the rider can show at the door. */
+export interface PaymentAccount {
+  id: number;
+  bank_name: string;
+  account_title: string;
+  account_number: string;
+  iban: string;
+  qr: string | null;
+  instructions: string;
+}
+
 export interface PaymentDetails {
   name: string;
   phone: string | null;
@@ -19,6 +30,12 @@ export interface PaymentDetails {
   /** Absolute URL, or null when the office has not uploaded one. */
   payment_qr: string | null;
   payment_instructions: string;
+  /**
+   * Every active account, in the order the office arranged them. The flat
+   * payment_* fields above mirror the first one so that builds predating this
+   * list keep working.
+   */
+  payment_accounts?: PaymentAccount[];
   /** False when the office has not set any of this up yet. */
   has_payment_details: boolean;
 }

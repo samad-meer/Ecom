@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import LedgerEntry, LedgerSettings, NumberSequence
+from .models import LedgerEntry, LedgerSettings, NumberSequence, PaymentAccount
 
 
 @admin.register(LedgerEntry)
@@ -60,3 +60,11 @@ class NumberSequenceAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+@admin.register(PaymentAccount)
+class PaymentAccountAdmin(admin.ModelAdmin):
+    list_display = ('bank_name', 'account_title', 'account_number', 'iban', 'is_active', 'sort_order')
+    list_editable = ('is_active', 'sort_order')
+    list_filter = ('is_active', 'bank_name')
+    search_fields = ('bank_name', 'account_title', 'account_number', 'iban')

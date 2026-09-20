@@ -43,3 +43,34 @@ def log(
     except Exception:
         logger.exception('Failed to write activity log')
         return None
+
+
+def log_data_issue(
+    actor,
+    action: str,
+    *,
+    target_type: str = '',
+    target_id: int | None = None,
+    target_label: str = '',
+    details: dict | None = None,
+) -> ActivityLog | None:
+    """
+    Record a record that arrived wrong, so an admin can go and fix it.
+
+    Separate from log() only to keep the category off every call site — these
+    are written from validation paths where the request is about to fail, and
+    the point is that the failure leaves a trace instead of vanishing into a
+    400 that only the person typing ever sees.
+
+    `actor` is None for signup, where nobody is logged in yet; the attempted
+    name travels in `details` instead so the row still says who it was.
+    """
+    return log(
+        actor,
+        ActivityLog.CATEGORY_DATA,
+        action,
+        target_type=target_type,
+        target_id=target_id,
+        target_label=target_label,
+        details=details,
+    )

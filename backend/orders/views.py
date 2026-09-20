@@ -96,58 +96,57 @@ class DeliveryBoyOrderDetailView(generics.RetrieveUpdateAPIView):
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
 
-        # A completed delivery is final. What the rider recorded at the door —
-        # the cash figure, the bottle count, the note — is the record of what
-        # happened, and letting any of it be rewritten afterwards would let the
-        # money move silently after the fact. Earlier statuses stay editable.
-        if instance.delivery_status == 'Delivered':
+        # A rider gets exactly one submission per order, and that submission
+        # completes the delivery. Afterwards nothing on the order may move from
+        # the rider side: the cash figure, the bottle count and the note are the
+        # record of what happened at the door, and letting any of it be
+        # rewritten would let the money move silently after the fact. Only the
+        # office can correct a submitted delivery.
+        #
+        # The test is whether the order is FINISHED, not whether a timestamp was
+        # ever stamped. Two reasons it is written this way:
+        #
+        #   `status` is included because the office closing an order must stick.
+        #   Cancelling from the admin panel writes `status` alone and never
+        #   touches delivery_status or its timestamp, so a rider holding a stale
+        #   screen could otherwise resurrect a cancelled order to Delivered and
+        #   charge the customer for a delivery the office had called off.
+        #
+        #   The bare timestamp is NOT enough on its own, because the old flow
+        #   stamped it for 'Not Responding' and 'Not Needed' — orders left
+        #   MID-FLIGHT to be re-attempted. Locking on the timestamp would strand
+        #   every one of those as permanently un-deliverable.
+        if (
+            instance.status in ('Delivered', 'Cancelled')
+            or instance.delivery_status == 'Delivered'
+        ):
             return Response(
                 {'error': 'This delivery is complete and can no longer be changed.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Check if delivery status has been locked (already updated once)
-        is_locked = instance.delivery_status_updated_at is not None
+        # Submitting *is* delivering. The rider app no longer offers a status to
+        # choose, so it is derived here rather than trusted from the request —
+        # a client sending 'Not Responding' or 'Pending' cannot leave the order
+        # half-submitted, and one sending 'Cancelled' cannot kill it.
+        allowed_fields = ['delivery_notes', 'number_of_bottles',
+                          'cash_received', 'cash_amount']
+        data = {k: v for k, v in request.data.items() if k in allowed_fields}
+        data['delivery_status'] = 'Delivered'
+        if not instance.delivery_completed_at:
+            data['delivery_completed_at'] = timezone.now()
 
         # `status`, `is_paid` and `delivery_status_updated_at` are read-only on
         # OrderSerializer, so DRF silently drops them from validated_data. These
         # are server-derived rather than client input, so they get written
         # straight to the model after the serializer has saved the rest.
-        derived = {}
-
-        if is_locked:
-            # Only allow updating delivery_notes after first update
-            allowed_fields = ['delivery_notes']
-            data = {k: v for k, v in request.data.items() if k in allowed_fields}
-
-            if any(field in request.data for field in ['delivery_status', 'cash_received', 'cash_amount', 'number_of_bottles', 'is_paid']):
-                return Response(
-                    {'error': 'Status has been locked. You can only update notes/comments.'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-        else:
-            # First update - allow all delivery-related fields. Note `status` is
-            # deliberately absent: it is derived from delivery_status below so a
-            # rider can't push an order straight to e.g. Cancelled.
-            allowed_fields = ['delivery_notes', 'number_of_bottles',
-                             'delivery_status', 'cash_received', 'cash_amount']
-            data = {k: v for k, v in request.data.items() if k in allowed_fields}
-
-            if 'is_paid' in request.data:
-                derived['is_paid'] = bool(request.data['is_paid'])
-
-            delivery_status = data.get('delivery_status')
-            if delivery_status:
-                # Lock the status once it moves off Pending
-                if delivery_status != 'Pending' and not instance.delivery_status_updated_at:
-                    derived['delivery_status_updated_at'] = timezone.now()
-
-                # Completing the delivery advances the main order status, which
-                # is what the admin panel and the customer's app both read.
-                if delivery_status == 'Delivered':
-                    derived['status'] = 'Delivered'
-                    if not instance.delivery_completed_at:
-                        data['delivery_completed_at'] = timezone.now()
+        derived = {
+            # What the admin panel and the customer's app both read.
+            'status': 'Delivered',
+            'delivery_status_updated_at': timezone.now(),
+        }
+        if 'is_paid' in request.data:
+            derived['is_paid'] = bool(request.data['is_paid'])
 
         serializer = self.get_serializer(instance, data=data, partial=True)
         serializer.is_valid(raise_exception=True)
@@ -166,21 +165,13 @@ class DeliveryBoyOrderDetailView(generics.RetrieveUpdateAPIView):
         from ledger.service import sync_order
         sync_order(instance, actor=request.user)
 
-        # Activity logging for rider delivery actions
-        if not is_locked:
-            ds = data.get('delivery_status')
-            if ds:
-                _rider_actions = {
-                    'Accepted': 'Delivery Accepted',
-                    'Started': 'Delivery Started',
-                    'Delivered': 'Delivery Completed',
-                }
-                if ds in _rider_actions:
-                    activity_log(
-                        request.user, 'rider', _rider_actions[ds],
-                        target_type='order', target_id=instance.id,
-                        target_label=f'Order #{instance.id}',
-                    )
+        # Activity logging for rider delivery actions. One submission per order
+        # means one entry, and it is always a completion.
+        activity_log(
+            request.user, 'rider', 'Delivery Completed',
+            target_type='order', target_id=instance.id,
+            target_label=f'Order #{instance.id}',
+        )
 
         return Response(serializer.data)
 

@@ -6,6 +6,7 @@ from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -14,7 +15,7 @@ from accounts.models import UserProfile
 from activities.service import log as activity_log
 
 from . import service
-from .models import LedgerEntry
+from .models import LedgerEntry, PaymentAccount
 from .permissions import CanRecordPayment, CanViewLedger, CanVoidLedger
 from .serializers import (
     BusinessSettingsSerializer,
@@ -23,6 +24,7 @@ from .serializers import (
     ReceivableSerializer,
     RecordPaymentSerializer,
     VoidEntrySerializer,
+    PaymentAccountSerializer, PaymentAccountWriteSerializer,
 )
 from .statement import build_statement, customer_summary
 
@@ -116,16 +118,47 @@ def _payment_details_payload(cfg, request):
     all" — the rider page shows a set-up-required message rather than a card of
     blank rows when the office has not filled these in.
     """
-    qr = cfg.payment_qr
+    accounts = list(
+        PaymentAccount.objects.filter(is_active=True).order_by('sort_order', 'id')
+    )
+    serialized = PaymentAccountSerializer(
+        accounts, many=True, context={'request': request},
+    ).data
+
+    # The flat payment_* keys are the OLD single-account shape. Rider builds
+    # already installed read them and know nothing about `payment_accounts`, so
+    # the first active account is mirrored back into them. Dropping these keys
+    # would blank the Pay tab on every phone that has not been updated — and
+    # this project ships by hand, so that is most of them for a while.
+    primary = accounts[0] if accounts else None
+    if primary is not None:
+        first = serialized[0]
+        legacy = {
+            'payment_account_title': primary.account_title,
+            'payment_account_number': primary.account_number or primary.iban,
+            'payment_bank_name': primary.bank_name,
+            'payment_qr': first['qr'],
+            'payment_instructions': primary.instructions,
+        }
+    else:
+        qr = cfg.payment_qr
+        legacy = {
+            'payment_account_title': cfg.payment_account_title,
+            'payment_account_number': cfg.payment_account_number,
+            'payment_bank_name': cfg.payment_bank_name,
+            # Absolute so the mobile app can load it without knowing the API host.
+            'payment_qr': request.build_absolute_uri(qr.url) if qr else None,
+            'payment_instructions': cfg.payment_instructions,
+        }
+
     return {
-        'payment_account_title': cfg.payment_account_title,
-        'payment_account_number': cfg.payment_account_number,
-        'payment_bank_name': cfg.payment_bank_name,
-        # Absolute so the mobile app can load it without knowing the API host.
-        'payment_qr': request.build_absolute_uri(qr.url) if qr else None,
-        'payment_instructions': cfg.payment_instructions,
+        **legacy,
+        'payment_accounts': serialized,
         'has_payment_details': bool(
-            cfg.payment_account_number or cfg.payment_account_title or qr
+            serialized
+            or legacy['payment_account_number']
+            or legacy['payment_account_title']
+            or legacy['payment_qr']
         ),
     }
 
@@ -380,3 +413,72 @@ def statement_pdf(request, user_id):
         HttpResponse(pdf, content_type='application/pdf'),
         f'statement-{customer.username}-{suffix}.pdf',
     )
+
+
+# ─── Payment accounts ────────────────────────────────────────────────────────
+
+class AdminPaymentAccountListCreateView(APIView):
+    """
+    GET  /api/ledger/admin/payment-accounts/   every account, active or not
+    POST /api/ledger/admin/payment-accounts/   add one (multipart for the QR)
+
+    Staff only. Riders and customers read the active ones through
+    /api/ledger/business/, which is where they already look.
+    """
+
+    permission_classes = [CanViewLedger]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def get(self, request):
+        qs = PaymentAccount.objects.all().order_by('sort_order', 'id')
+        return Response(
+            PaymentAccountSerializer(qs, many=True, context={'request': request}).data
+        )
+
+    def post(self, request):
+        serializer = PaymentAccountWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        account = serializer.save()
+        activity_log(
+            request.user, 'settings', 'Payment Account Added',
+            target_type='payment_account', target_id=account.id,
+            target_label=str(account),
+            details={'bank': account.bank_name},
+        )
+        return Response(
+            PaymentAccountSerializer(account, context={'request': request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class AdminPaymentAccountDetailView(APIView):
+    """PATCH to edit, DELETE to remove. Staff only."""
+
+    permission_classes = [CanViewLedger]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def patch(self, request, pk):
+        account = get_object_or_404(PaymentAccount, pk=pk)
+        serializer = PaymentAccountWriteSerializer(
+            account, data=request.data, partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        activity_log(
+            request.user, 'settings', 'Payment Account Updated',
+            target_type='payment_account', target_id=account.id,
+            target_label=str(account),
+        )
+        return Response(
+            PaymentAccountSerializer(account, context={'request': request}).data
+        )
+
+    def delete(self, request, pk):
+        account = get_object_or_404(PaymentAccount, pk=pk)
+        label = str(account)
+        account.delete()
+        activity_log(
+            request.user, 'settings', 'Payment Account Deleted',
+            target_type='payment_account', target_id=pk, target_label=label,
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)

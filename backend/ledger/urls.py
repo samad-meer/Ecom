@@ -17,4 +17,11 @@ urlpatterns = [
     path('entries/', views.ManualEntryView.as_view(), name='ledger-manual-entry'),
     path('entries/<int:pk>/void/', views.VoidEntryView.as_view(), name='ledger-void-entry'),
     path('entries/<int:pk>/receipt/', views.receipt_pdf, name='ledger-receipt-pdf'),
+
+    # Payment accounts — staff manage them here; riders and customers read the
+    # active ones from business/ above, which they already call.
+    path('admin/payment-accounts/', views.AdminPaymentAccountListCreateView.as_view(),
+         name='ledger-payment-accounts'),
+    path('admin/payment-accounts/<int:pk>/', views.AdminPaymentAccountDetailView.as_view(),
+         name='ledger-payment-account-detail'),
 ]

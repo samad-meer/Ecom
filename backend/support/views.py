@@ -37,7 +37,7 @@ class AdminComplaintListCreateView(APIView):
         status_filter = request.query_params.get('status')
         if status_filter:
             qs = qs.filter(status=status_filter)
-        return Response(AdminComplaintSerializer(qs, many=True).data)
+        return Response(AdminComplaintSerializer(qs, many=True, context={'request': request}).data)
 
     def post(self, request):
         err = self._check_staff(request)
@@ -69,7 +69,7 @@ class AdminComplaintListCreateView(APIView):
         for f in images:
             ComplaintImage.objects.create(complaint=complaint, image=f)
         return Response(
-            AdminComplaintSerializer(complaint).data,
+            AdminComplaintSerializer(complaint, context={'request': request}).data,
             status=status.HTTP_201_CREATED,
         )
 
@@ -101,7 +101,7 @@ class AdminComplaintDetailView(APIView):
             complaint.status = new_status
 
         complaint.save()
-        return Response(AdminComplaintSerializer(complaint).data)
+        return Response(AdminComplaintSerializer(complaint, context={'request': request}).data)
 
     def put(self, request, pk):
         """Edit subject and description of an existing complaint."""
@@ -120,7 +120,7 @@ class AdminComplaintDetailView(APIView):
         complaint.subject = subject
         complaint.description = description
         complaint.save(update_fields=['subject', 'description', 'updated_at'])
-        return Response(AdminComplaintSerializer(complaint).data)
+        return Response(AdminComplaintSerializer(complaint, context={'request': request}).data)
 
     def delete(self, request, pk):
         err = self._check_staff(request)

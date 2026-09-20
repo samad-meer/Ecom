@@ -3,6 +3,7 @@ from decimal import Decimal
 from django.contrib.auth.models import Permission, User
 from django.core.cache import cache
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework import status as http
 from rest_framework.test import APIClient
 
@@ -100,22 +101,22 @@ class RiderDeliveryUpdateTests(TestCase):
         self.assertEqual(self.order.delivery_notes, 'Handed to customer')
         self.assertEqual(self.order.status, 'Delivered')
 
-    def test_notes_editable_while_not_yet_delivered(self):
-        """The lock is on delivery, not on the first update: a rider who marked
-        'Not Responding' must still be able to correct their note."""
-        self.client.patch(
-            self.url,
-            {'delivery_status': 'Not Responding', 'number_of_bottles': 2},
-            format='json',
-        )
+    def test_notes_not_editable_after_submitting(self):
+        """A rider gets one submission per order and no second pass at the note.
+
+        There used to be a window: submitting a non-Delivered status locked the
+        status but left the note editable. Submitting now completes the delivery
+        outright, so the window is gone.
+        """
+        self.client.patch(self.url, {'number_of_bottles': 2}, format='json')
         response = self.client.patch(
             self.url, {'delivery_notes': 'Gate locked, retrying at 5pm'}, format='json',
         )
-        self.assertEqual(response.status_code, http.HTTP_200_OK)
-        self.order.refresh_from_db()
-        self.assertEqual(self.order.delivery_notes, 'Gate locked, retrying at 5pm')
+        self.assertEqual(response.status_code, http.HTTP_400_BAD_REQUEST)
 
-    def test_non_delivered_status_leaves_order_status_alone(self):
+    def test_submitting_always_delivers(self):
+        """Submitting *is* delivering — the rider app no longer sends a status,
+        and one sent by any other client is ignored rather than honoured."""
         response = self.client.patch(
             self.url,
             {'status': 'Processing', 'delivery_status': 'Not Responding', 'number_of_bottles': 2},
@@ -123,18 +124,71 @@ class RiderDeliveryUpdateTests(TestCase):
         )
         self.assertEqual(response.status_code, http.HTTP_200_OK)
         self.order.refresh_from_db()
-        self.assertEqual(self.order.delivery_status, 'Not Responding')
-        self.assertEqual(self.order.status, 'Processing')
+        self.assertEqual(self.order.delivery_status, 'Delivered')
+        self.assertEqual(self.order.status, 'Delivered')
 
     def test_rider_cannot_force_arbitrary_status(self):
-        """`status` is server-derived — a rider must not be able to cancel an order."""
+        """`status` is server-derived — a rider must not be able to cancel an
+        order by asking for it."""
         self.client.patch(
             self.url,
             {'status': 'Cancelled', 'delivery_status': 'Not Responding'},
             format='json',
         )
         self.order.refresh_from_db()
-        self.assertEqual(self.order.status, 'Processing')
+        self.assertEqual(self.order.status, 'Delivered')
+
+    def test_submitting_without_a_status_still_delivers(self):
+        """The old flow silently did nothing when the status was left 'Pending',
+        leaving the order open with the rider believing it was closed."""
+        response = self.client.patch(
+            self.url,
+            {'delivery_status': 'Pending', 'delivery_notes': 'Handed over'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, http.HTTP_200_OK)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, 'Delivered')
+        self.assertIsNotNone(self.order.delivery_status_updated_at)
+
+    def test_old_mid_flight_order_can_still_be_completed(self):
+        """The old flow stamped delivery_status_updated_at for 'Not Responding'
+        and 'Not Needed' — orders left MID-FLIGHT, to be re-attempted.
+
+        Locking on that timestamp would strand every one of them as permanently
+        un-deliverable, so the lock keys on the order being finished instead.
+        """
+        self.order.delivery_status = 'Not Responding'
+        self.order.delivery_status_updated_at = timezone.now()
+        self.order.save(update_fields=['delivery_status', 'delivery_status_updated_at'])
+        response = self._deliver()
+        self.assertEqual(response.status_code, http.HTTP_200_OK, response.data)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, 'Delivered')
+
+    def test_rider_cannot_write_to_an_order_the_office_cancelled(self):
+        """Cancelling writes `status` alone — it never touches delivery_status
+        or its timestamp. A rider holding a screen opened before the cancel must
+        not be able to resurrect the order and charge the customer for it.
+        """
+        self.order.status = 'Cancelled'
+        self.order.save(update_fields=['status'])
+        response = self._deliver()
+        self.assertEqual(response.status_code, http.HTTP_400_BAD_REQUEST)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, 'Cancelled')
+        self.assertEqual(self.order.delivery_status, 'Pending')
+
+    def test_rider_cannot_rewrite_an_order_the_office_already_delivered(self):
+        """Same shape: the office marked it Delivered from the admin panel, so
+        the rider's cash and bottle figures must not overwrite the office's."""
+        self.order.status = 'Delivered'
+        self.order.cash_amount = Decimal('500.00')
+        self.order.save(update_fields=['status', 'cash_amount'])
+        response = self._deliver(cash_amount=9999)
+        self.assertEqual(response.status_code, http.HTTP_400_BAD_REQUEST)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.cash_amount, Decimal('500.00'))
 
     def test_delivered_order_leaves_riders_active_list(self):
         self._deliver()

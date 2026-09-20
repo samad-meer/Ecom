@@ -10,7 +10,7 @@ import type { AdminComplaint, AdminCustomer, ComplaintStatus } from "@/lib/types
 import { adminComplaintsApi, customersApi } from "@/lib/api";
 import { Button, Card, Input, Modal, MultiImagePicker, Skeleton, useToast } from "@/components/ui";
 import { useAsync } from "@/hooks/useAsync";
-import { formatDate } from "@/lib/format";
+import { formatDate, imageUrl } from "@/lib/format";
 import { cn } from "@/lib/cn";
 
 // ─── Status config ─────────────────────────────────────────────────────────────
@@ -340,13 +340,13 @@ function ComplaintRow({
               {complaint.images.map((img) => (
                 <a
                   key={img.id}
-                  href={img.image}
+                  href={imageUrl(img.image) ?? undefined}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="h-20 w-20 overflow-hidden rounded-lg border border-white/10"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={img.image} alt="Attachment" className="h-full w-full object-cover" />
+                  <img src={imageUrl(img.image) ?? undefined} alt="Attachment" className="h-full w-full object-cover" />
                 </a>
               ))}
             </div>

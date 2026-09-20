@@ -19,7 +19,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLanguage } from '../context/LanguageContext';
 import { LoadingScreen } from '../components/LoadingScreen';
 import { MultiImagePicker } from '../components/MultiImagePicker';
+import { KeyboardAwareScrollView } from '../components/KeyboardAwareScrollView';
 import { PickedImage } from '../constants/imageLimits';
+import { FieldError } from '../components/FormField';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Complaints'>;
 
@@ -32,6 +34,7 @@ export const ComplaintScreen: React.FC<Props> = ({ navigation }) => {
   const [description, setDescription] = useState('');
   const [images, setImages] = useState<PickedImage[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<{ subject?: string; description?: string }>({});
   const { t } = useLanguage();
 
   const fetchComplaints = async (silent = false) => {
@@ -58,10 +61,13 @@ export const ComplaintScreen: React.FC<Props> = ({ navigation }) => {
   };
 
   const handleSubmit = async () => {
-    if (!subject.trim() || !description.trim()) {
-      Alert.alert(t('error', 'Error'), t('fill_all_fields', 'Please fill in all fields'));
-      return;
-    }
+    // Marked on the field itself rather than in a dialog that covers the form
+    // and leaves the person hunting for the empty box.
+    const missing: { subject?: string; description?: string } = {};
+    if (!subject.trim()) missing.subject = t('subject_required', 'Add a short subject');
+    if (!description.trim()) missing.description = t('description_required', 'Describe what went wrong');
+    setFieldErrors(missing);
+    if (missing.subject || missing.description) return;
 
     setSubmitting(true);
     try {
@@ -175,27 +181,46 @@ export const ComplaintScreen: React.FC<Props> = ({ navigation }) => {
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>{t('new_complaint', 'New Complaint')}</Text>
 
-            <TextInput
-              style={styles.input}
-              placeholder={t('subject_placeholder', 'Subject')}
-              value={subject}
-              onChangeText={setSubject}
-            />
+            {/* The fields scroll, the title and the buttons do not: with the
+                keypad up the card has little room left, and Submit staying put
+                is worth more than seeing one extra line of the form. */}
+            <KeyboardAwareScrollView
+              style={styles.modalScroll}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              <TextInput
+                style={[styles.input, !!fieldErrors.subject && styles.inputInvalid]}
+                placeholder={t('subject_placeholder', 'Subject')}
+                placeholderTextColor="#000"
+                value={subject}
+                onChangeText={(v) => {
+                  setSubject(v);
+                  if (fieldErrors.subject) setFieldErrors((e) => ({ ...e, subject: undefined }));
+                }}
+              />
+              <FieldError message={fieldErrors.subject} />
 
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              placeholder={t('description_placeholder', 'Describe your issue in detail…')}
-              value={description}
-              onChangeText={setDescription}
-              multiline
-              numberOfLines={4}
-            />
+              <TextInput
+                style={[styles.input, styles.textArea, !!fieldErrors.description && styles.inputInvalid]}
+                placeholder={t('description_placeholder', 'Describe your issue in detail…')}
+                placeholderTextColor="#000"
+                value={description}
+                onChangeText={(v) => {
+                  setDescription(v);
+                  if (fieldErrors.description) setFieldErrors((e) => ({ ...e, description: undefined }));
+                }}
+                multiline
+                numberOfLines={4}
+              />
+              <FieldError message={fieldErrors.description} />
 
-            <MultiImagePicker
-              label={t('attach_photos', 'Attach photos (optional)')}
-              value={images}
-              onChange={setImages}
-            />
+              <MultiImagePicker
+                label={t('attach_photos', 'Attach photos (optional)')}
+                value={images}
+                onChange={setImages}
+              />
+            </KeyboardAwareScrollView>
 
             <View style={styles.modalButtons}>
               <TouchableOpacity
@@ -378,6 +403,12 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 20,
     elevation: 5,
+    // A definite height is what lets the field area shrink and scroll instead
+    // of the card growing until the buttons are pushed off screen.
+    maxHeight: '85%',
+  },
+  modalScroll: {
+    flexShrink: 1,
   },
   modalTitle: {
     fontSize: 20,
@@ -392,6 +423,14 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 16,
     fontSize: 16,
+    // Without an explicit colour the device theme picks one, and on a
+    // dark-mode phone that is white — invisible on this white modal.
+    color: '#000',
+    backgroundColor: '#fff',
+  },
+  inputInvalid: {
+    borderColor: '#D93025',
+    backgroundColor: '#FFF7F7',
   },
   textArea: {
     height: 110,

@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
-  TextInput, ActivityIndicator, RefreshControl, Modal, ScrollView,
+  TextInput, ActivityIndicator, RefreshControl, Modal,
   Switch, Alert,
 } from 'react-native';
 import { useRoute, RouteProp } from '@react-navigation/native';
 import { LoadingScreen } from '../../components/LoadingScreen';
+import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
 import { Ionicons } from '@expo/vector-icons';
 import { adminService, AdminStaff } from '../../services/adminService';
 import { RootStackParamList, StaffRoleFilter } from '../../types/navigation';
@@ -34,7 +35,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'white', padding: 12,
     borderBottomWidth: 1, borderBottomColor: '#f0f0f0',
   },
-  searchInput: { flex: 1, fontSize: 14, color: '#333' },
+  searchInput: { flex: 1, fontSize: 14, color: '#000' },
   addBtn: {
     width: 36, height: 36, borderRadius: 10,
     backgroundColor: '#007AFF', alignItems: 'center', justifyContent: 'center',
@@ -100,7 +101,7 @@ const addModal = StyleSheet.create({
   required: { color: '#FF3B30' },
   input: {
     borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 8,
-    padding: 11, fontSize: 14, color: '#333', backgroundColor: '#fafafa',
+    padding: 11, fontSize: 14, color: '#000', backgroundColor: '#fafafa',
   },
   passwordRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   eyeBtn: {
@@ -163,7 +164,7 @@ const detailModal = StyleSheet.create({
   },
   input: {
     borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 8,
-    padding: 11, fontSize: 14, color: '#333', backgroundColor: '#fafafa',
+    padding: 11, fontSize: 14, color: '#000', backgroundColor: '#fafafa',
   },
   infoCard: {
     backgroundColor: '#f7f8fa', borderRadius: 12, padding: 14, gap: 8,
@@ -277,33 +278,33 @@ function AddStaffModal({
             </TouchableOpacity>
           </View>
 
-          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <KeyboardAwareScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             {/* Name */}
             <View style={addModal.twoCol}>
               <View style={{ flex: 1 }}>
                 <Text style={addModal.label}>First Name</Text>
-                <TextInput style={addModal.input} value={form.first_name} onChangeText={set('first_name')} placeholder="Ali" placeholderTextColor="#bbb" />
+                <TextInput style={addModal.input} value={form.first_name} onChangeText={set('first_name')} placeholder="Ali" placeholderTextColor="#000" />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={addModal.label}>Last Name</Text>
-                <TextInput style={addModal.input} value={form.last_name} onChangeText={set('last_name')} placeholder="Hassan" placeholderTextColor="#bbb" />
+                <TextInput style={addModal.input} value={form.last_name} onChangeText={set('last_name')} placeholder="Hassan" placeholderTextColor="#000" />
               </View>
             </View>
 
             <Text style={addModal.label}>Username <Text style={addModal.required}>*</Text></Text>
-            <TextInput style={addModal.input} value={form.username} onChangeText={set('username')} placeholder="ali.staff" placeholderTextColor="#bbb" autoCapitalize="none" autoCorrect={false} />
+            <TextInput style={addModal.input} value={form.username} onChangeText={set('username')} placeholder="ali.staff" placeholderTextColor="#000" autoCapitalize="none" autoCorrect={false} />
 
             <Text style={addModal.label}>Phone</Text>
-            <TextInput style={addModal.input} value={form.phone_number} onChangeText={set('phone_number')} placeholder="03xx-xxxxxxx" placeholderTextColor="#bbb" keyboardType="phone-pad" />
+            <TextInput style={addModal.input} value={form.phone_number} onChangeText={set('phone_number')} placeholder="03xx-xxxxxxx" placeholderTextColor="#000" keyboardType="phone-pad" />
 
             <View style={addModal.twoCol}>
               <View style={{ flex: 1 }}>
                 <Text style={addModal.label}>Department</Text>
-                <TextInput style={addModal.input} value={form.department} onChangeText={set('department')} placeholder="Operations" placeholderTextColor="#bbb" />
+                <TextInput style={addModal.input} value={form.department} onChangeText={set('department')} placeholder="Operations" placeholderTextColor="#000" />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={addModal.label}>Designation</Text>
-                <TextInput style={addModal.input} value={form.designation} onChangeText={set('designation')} placeholder="Manager" placeholderTextColor="#bbb" />
+                <TextInput style={addModal.input} value={form.designation} onChangeText={set('designation')} placeholder="Manager" placeholderTextColor="#000" />
               </View>
             </View>
 
@@ -343,11 +344,11 @@ function AddStaffModal({
               <View style={addModal.twoCol}>
                 <View style={{ flex: 1 }}>
                   <Text style={addModal.label}>Vehicle Type</Text>
-                  <TextInput style={addModal.input} value={form.vehicle_type} onChangeText={set('vehicle_type')} placeholder="Bike, Motorcycle" placeholderTextColor="#bbb" />
+                  <TextInput style={addModal.input} value={form.vehicle_type} onChangeText={set('vehicle_type')} placeholder="Bike, Motorcycle" placeholderTextColor="#000" />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={addModal.label}>Vehicle No.</Text>
-                  <TextInput style={addModal.input} value={form.vehicle_number} onChangeText={set('vehicle_number')} placeholder="ABC-1234" placeholderTextColor="#bbb" />
+                  <TextInput style={addModal.input} value={form.vehicle_number} onChangeText={set('vehicle_number')} placeholder="ABC-1234" placeholderTextColor="#000" />
                 </View>
               </View>
             )}
@@ -357,7 +358,7 @@ function AddStaffModal({
               <TextInput
                 style={[addModal.input, { flex: 1 }]}
                 value={form.password} onChangeText={set('password')}
-                placeholder="Min. 6 characters" placeholderTextColor="#bbb"
+                placeholder="Min. 6 characters" placeholderTextColor="#000"
                 secureTextEntry={!showPw}
               />
               <TouchableOpacity onPress={() => setShowPw(v => !v)} style={addModal.eyeBtn}>
@@ -386,7 +387,7 @@ function AddStaffModal({
                 )
               }
             </TouchableOpacity>
-          </ScrollView>
+          </KeyboardAwareScrollView>
         </View>
       </View>
     </Modal>
@@ -468,7 +469,10 @@ function StaffDetailModal({
       Alert.alert('Error', 'Password must be at least 6 characters.');
       return;
     }
-    Alert.alert('Reset Password', `Set new password for ${fullName}?`, [
+    Alert.alert(
+      'Reset password?',
+      `${fullName} will need the new password next time they sign in. Tell them what it is — they cannot recover it themselves.`,
+      [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Reset', style: 'destructive',
@@ -487,7 +491,10 @@ function StaffDetailModal({
   };
 
   const generatePassword = async () => {
-    Alert.alert('Generate Password', `Generate a random temporary password for ${fullName}?`, [
+    Alert.alert(
+      'Generate a password?',
+      `A random password will be created for ${fullName} and shown to you once. Send it to them before you close it, or you will have to generate another.`,
+      [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Generate',
@@ -522,7 +529,7 @@ function StaffDetailModal({
             </TouchableOpacity>
           </View>
 
-          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <KeyboardAwareScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
 
             {/* Account info */}
             <View style={detailModal.infoCard}>
@@ -554,25 +561,25 @@ function StaffDetailModal({
             <View style={detailModal.twoCol}>
               <View style={{ flex: 1 }}>
                 <Text style={detailModal.label}>First Name</Text>
-                <TextInput style={detailModal.input} value={firstName} onChangeText={setFirstName} placeholder="First name" placeholderTextColor="#bbb" />
+                <TextInput style={detailModal.input} value={firstName} onChangeText={setFirstName} placeholder="First name" placeholderTextColor="#000" />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={detailModal.label}>Last Name</Text>
-                <TextInput style={detailModal.input} value={lastName} onChangeText={setLastName} placeholder="Last name" placeholderTextColor="#bbb" />
+                <TextInput style={detailModal.input} value={lastName} onChangeText={setLastName} placeholder="Last name" placeholderTextColor="#000" />
               </View>
             </View>
 
             <Text style={detailModal.label}>Phone</Text>
-            <TextInput style={detailModal.input} value={phone} onChangeText={setPhone} placeholder="03xx-xxxxxxx" placeholderTextColor="#bbb" keyboardType="phone-pad" />
+            <TextInput style={detailModal.input} value={phone} onChangeText={setPhone} placeholder="03xx-xxxxxxx" placeholderTextColor="#000" keyboardType="phone-pad" />
 
             <View style={detailModal.twoCol}>
               <View style={{ flex: 1 }}>
                 <Text style={detailModal.label}>Department</Text>
-                <TextInput style={detailModal.input} value={department} onChangeText={setDepartment} placeholder="Operations" placeholderTextColor="#bbb" />
+                <TextInput style={detailModal.input} value={department} onChangeText={setDepartment} placeholder="Operations" placeholderTextColor="#000" />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={detailModal.label}>Designation</Text>
-                <TextInput style={detailModal.input} value={designation} onChangeText={setDesignation} placeholder="Manager" placeholderTextColor="#bbb" />
+                <TextInput style={detailModal.input} value={designation} onChangeText={setDesignation} placeholder="Manager" placeholderTextColor="#000" />
               </View>
             </View>
 
@@ -626,11 +633,11 @@ function StaffDetailModal({
               <View style={[detailModal.twoCol, { marginTop: 10 }]}>
                 <View style={{ flex: 1 }}>
                   <Text style={detailModal.label}>Vehicle Type</Text>
-                  <TextInput style={detailModal.input} value={vehicleType} onChangeText={setVehicleType} placeholder="Bike" placeholderTextColor="#bbb" />
+                  <TextInput style={detailModal.input} value={vehicleType} onChangeText={setVehicleType} placeholder="Bike" placeholderTextColor="#000" />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={detailModal.label}>Vehicle No.</Text>
-                  <TextInput style={detailModal.input} value={vehicleNumber} onChangeText={setVehicleNumber} placeholder="ABC-1234" placeholderTextColor="#bbb" />
+                  <TextInput style={detailModal.input} value={vehicleNumber} onChangeText={setVehicleNumber} placeholder="ABC-1234" placeholderTextColor="#000" />
                 </View>
               </View>
             )}
@@ -654,7 +661,7 @@ function StaffDetailModal({
                 value={newPw}
                 onChangeText={setNewPw}
                 placeholder="New password (min. 6)"
-                placeholderTextColor="#bbb"
+                placeholderTextColor="#000"
                 secureTextEntry={!showPw}
               />
               <TouchableOpacity onPress={() => setShowPw(v => !v)} style={detailModal.eyeBtn}>
@@ -680,7 +687,7 @@ function StaffDetailModal({
             </TouchableOpacity>
 
             <View style={{ height: 36 }} />
-          </ScrollView>
+          </KeyboardAwareScrollView>
         </View>
       </View>
     </Modal>
@@ -762,7 +769,7 @@ export const AdminStaffScreen: React.FC = () => {
           placeholder="Search by name, username, phone…"
           value={search}
           onChangeText={setSearch}
-          placeholderTextColor="#aaa"
+          placeholderTextColor="#000"
         />
         {search.length > 0 && (
           <TouchableOpacity onPress={() => setSearch('')}>

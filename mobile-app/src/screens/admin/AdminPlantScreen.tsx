@@ -4,6 +4,8 @@ import {
   TextInput, ActivityIndicator, Alert, RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
+import { FieldError } from '../../components/FormField';
 import {
   adminService,
   PlantRecord,
@@ -64,6 +66,7 @@ function LedgerTab() {
   const [paidAmount, setPaidAmount] = useState('');
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<{ house?: string; bottles?: string }>({});
 
   const load = useCallback(async () => {
     try {
@@ -88,10 +91,14 @@ function LedgerTab() {
   useEffect(() => { load(); }, [load]);
 
   const handleAdd = async () => {
-    if (!house.trim() || !bottles) {
-      Alert.alert('Missing fields', 'House/Address and Bottles are required.');
-      return;
-    }
+    // On the fields themselves — a dialog listing the field names still leaves
+    // the operator matching those names back to boxes.
+    const missing: { house?: string; bottles?: string } = {};
+    if (!house.trim()) missing.house = 'Enter the house or address';
+    if (!bottles) missing.bottles = 'Enter how many bottles';
+    else if (!(parseInt(bottles, 10) > 0)) missing.bottles = 'Enter a number greater than zero';
+    setFieldErrors(missing);
+    if (missing.house || missing.bottles) return;
     setSubmitting(true);
     try {
       await adminService.createPlantRecord({
@@ -112,7 +119,10 @@ function LedgerTab() {
   };
 
   const handleDelete = (id: number) => {
-    Alert.alert('Delete record?', 'This cannot be undone.', [
+    Alert.alert(
+      'Delete this delivery record?',
+      `The bottles and the charge come back off the customer’s ledger, so their balance changes to match. This cannot be undone.`,
+      [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete', style: 'destructive',
@@ -125,7 +135,7 @@ function LedgerTab() {
   };
 
   return (
-    <ScrollView
+    <KeyboardAwareScrollView
       style={{ flex: 1 }}
       contentContainerStyle={{ paddingBottom: 32 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
@@ -138,7 +148,7 @@ function LedgerTab() {
           value={selectedDate}
           onChangeText={setSelectedDate}
           placeholder="YYYY-MM-DD"
-          placeholderTextColor="#bbb"
+          placeholderTextColor="#000"
         />
       </View>
 
@@ -162,10 +172,31 @@ function LedgerTab() {
       {showForm && (
         <View style={lt.form}>
           <Text style={lt.formTitle}>New Delivery Record</Text>
-          <TextInput style={lt.input} placeholder="House / Address *" placeholderTextColor="#bbb" value={house} onChangeText={setHouse} />
-          <TextInput style={lt.input} placeholder="Bottles *" placeholderTextColor="#bbb" value={bottles} onChangeText={setBottles} keyboardType="number-pad" />
-          <TextInput style={lt.input} placeholder="Amount Received (PKR)" placeholderTextColor="#bbb" value={paidAmount} onChangeText={setPaidAmount} keyboardType="decimal-pad" />
-          <TextInput style={lt.input} placeholder="Notes (optional)" placeholderTextColor="#bbb" value={notes} onChangeText={setNotes} />
+          <TextInput
+            style={[lt.input, !!fieldErrors.house && lt.inputInvalid]}
+            placeholder="House / Address *"
+            placeholderTextColor="#000"
+            value={house}
+            onChangeText={(v) => {
+              setHouse(v);
+              if (fieldErrors.house) setFieldErrors((e) => ({ ...e, house: undefined }));
+            }}
+          />
+          <FieldError message={fieldErrors.house} />
+          <TextInput
+            style={[lt.input, !!fieldErrors.bottles && lt.inputInvalid]}
+            placeholder="Bottles *"
+            placeholderTextColor="#000"
+            value={bottles}
+            onChangeText={(v) => {
+              setBottles(v);
+              if (fieldErrors.bottles) setFieldErrors((e) => ({ ...e, bottles: undefined }));
+            }}
+            keyboardType="number-pad"
+          />
+          <FieldError message={fieldErrors.bottles} />
+          <TextInput style={lt.input} placeholder="Amount Received (PKR)" placeholderTextColor="#000" value={paidAmount} onChangeText={setPaidAmount} keyboardType="decimal-pad" />
+          <TextInput style={lt.input} placeholder="Notes (optional)" placeholderTextColor="#000" value={notes} onChangeText={setNotes} />
           <TouchableOpacity
             style={[lt.submitBtn, submitting && { opacity: 0.5 }]}
             onPress={handleAdd}
@@ -208,19 +239,20 @@ function LedgerTab() {
           ))}
         </View>
       )}
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 }
 
 const lt = StyleSheet.create({
   dateRow: { flexDirection: 'row', alignItems: 'center', gap: 8, margin: 16, padding: 12, backgroundColor: 'white', borderRadius: 12, borderWidth: 1, borderColor: '#e0e0e0' },
-  dateInput: { flex: 1, fontSize: 14, color: '#333' },
+  dateInput: { flex: 1, fontSize: 14, color: '#000' },
   summaryRow: { flexDirection: 'row', gap: 8, marginHorizontal: 16, marginBottom: 12 },
   addBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginHorizontal: 16, marginBottom: 12, backgroundColor: '#007AFF', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 16 },
   addBtnText: { color: 'white', fontWeight: '700', fontSize: 14 },
   form: { marginHorizontal: 16, marginBottom: 12, backgroundColor: 'white', borderRadius: 14, padding: 16, gap: 10, elevation: 1 },
   formTitle: { fontSize: 15, fontWeight: '700', color: '#1a1a1a', marginBottom: 4 },
-  input: { borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: '#333' },
+  inputInvalid: { borderColor: '#D93025', backgroundColor: '#FFF7F7' },
+  input: { borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: '#000' },
   submitBtn: { backgroundColor: '#34C759', borderRadius: 10, paddingVertical: 12, alignItems: 'center', marginTop: 4 },
   submitText: { color: 'white', fontWeight: '700', fontSize: 14 },
   listWrap: { marginHorizontal: 16, gap: 8 },

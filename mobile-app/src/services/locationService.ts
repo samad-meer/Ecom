@@ -446,8 +446,14 @@ const startBackgroundUpdates = async (config: TrackingConfig): Promise<void> => 
     pausesUpdatesAutomatically: false,
     showsBackgroundLocationIndicator: true,
     foregroundService: {
+      // Android requires a foreground service for continuous background
+      // location, and requires that service to show a permanent notification —
+      // an app is not allowed to track someone invisibly. It cannot be hidden,
+      // so the wording is kept neutral rather than announcing location on the
+      // rider's lock screen all day. The OS still discloses tracking through
+      // the status-bar location indicator, which is where that belongs.
       notificationTitle: 'Century Sip',
-      notificationBody: 'Sharing your location with dispatch',
+      notificationBody: 'On shift',
       notificationColor: '#0A84FF',
       // Survive a swipe-away: a rider who clears their recents is not asking
       // to go dark, and Android would otherwise never restart the service.

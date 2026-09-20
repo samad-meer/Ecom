@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import {
-  Activity, RefreshCw, Filter, Search, Calendar, Loader2,
+  Activity, RefreshCw, Filter, Search, Calendar, Loader2, AlertTriangle,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api/client";
 import { Button, Card, Skeleton } from "@/components/ui";
@@ -25,8 +25,23 @@ interface ActivityLogEntry {
 
 interface ActivityResponse {
   count: number;
+  /** Per-category totals for the current date/search filters — the tab badges. */
+  counts: Record<string, number>;
+  total_all: number;
   results: ActivityLogEntry[];
 }
+
+/** Tabs, in the order an admin scans them. `data` last because it is the one
+ *  they act on rather than read past — it carries a badge of its own. */
+const TABS: { key: string; label: string }[] = [
+  { key: "",         label: "All" },
+  { key: "order",    label: "Orders" },
+  { key: "rider",    label: "Riders" },
+  { key: "customer", label: "Customers" },
+  { key: "user",     label: "Users" },
+  { key: "settings", label: "Settings" },
+  { key: "data",     label: "Data Issues" },
+];
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -67,7 +82,9 @@ const CATEGORY_COLORS: Record<string, string> = {
   rider:    "bg-emerald-400/15 text-emerald-300",
   customer: "bg-purple-400/15 text-purple-300",
   user:     "bg-amber-400/15 text-amber-300",
+  settings: "bg-slate-400/15 text-slate-300",
   plant:    "bg-teal-400/15 text-teal-300",
+  data:     "bg-rose-400/15 text-rose-300",
 };
 
 const ACTION_COLORS: Record<string, string> = {
@@ -83,6 +100,11 @@ const ACTION_COLORS: Record<string, string> = {
   "Staff Created":       "text-amber-400",
   "Password Changed":    "text-amber-300",
   "Password Reset by Admin": "text-rose-300",
+  // Data issues — these are the rows that mean "go and fix something".
+  "Duplicate Phone Blocked":           "text-rose-400",
+  "Existing Customer Tried To Sign Up": "text-amber-400",
+  "Invalid Phone Rejected":            "text-rose-300",
+  "Incomplete Customer Record":        "text-amber-300",
 };
 
 const LIMIT = 50;
@@ -123,6 +145,8 @@ function DetailsBlock({ details }: { details: Record<string, unknown> }) {
 export function ActivityLogPage() {
   const [entries, setEntries] = useState<ActivityLogEntry[]>([]);
   const [total, setTotal] = useState(0);
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [totalAll, setTotalAll] = useState(0);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [offset, setOffset] = useState(0);
@@ -147,6 +171,8 @@ export function ActivityLogPage() {
         const data = await apiFetch<ActivityResponse>(`/activities/?${sp}`, { auth: true });
         setEntries((prev) => (append ? [...prev, ...data.results] : data.results));
         setTotal(data.count);
+        setCounts(data.counts ?? {});
+        setTotalAll(data.total_all ?? data.count);
         setOffset(off);
       } catch (e) {
         console.error(e);
@@ -207,6 +233,45 @@ export function ActivityLogPage() {
         </Button>
       </div>
 
+      {/* Segments. A tab is one click where the dropdown was three, and the
+          badge means the admin can see there is something in Data Issues
+          without going and looking. */}
+      <div className="-mb-2 flex flex-wrap gap-1 border-b border-white/10">
+        {TABS.map((t) => {
+          const active = filterCategory === t.key;
+          const n = t.key === "" ? totalAll : (counts[t.key] ?? 0);
+          const isIssues = t.key === "data";
+          return (
+            <button
+              key={t.key || "all"}
+              onClick={() => setFilterCategory(t.key)}
+              className={cn(
+                "relative flex items-center gap-2 rounded-t-lg px-4 py-2.5 text-sm font-medium transition",
+                active
+                  ? "bg-white/10 text-mist"
+                  : "text-mist/50 hover:bg-white/5 hover:text-mist/80",
+              )}
+            >
+              {isIssues && <AlertTriangle size={13} className={n > 0 ? "text-rose-400" : "text-mist/30"} />}
+              {t.label}
+              <span
+                className={cn(
+                  "rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums",
+                  isIssues && n > 0
+                    ? "bg-rose-400/20 text-rose-300"
+                    : "bg-white/10 text-mist/50",
+                )}
+              >
+                {n.toLocaleString()}
+              </span>
+              {active && (
+                <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-wave" />
+              )}
+            </button>
+          );
+        })}
+      </div>
+
       {/* Filters */}
       <Card className="p-4">
         {/* Quick ranges — what an admin reaches for most of the time, so they
@@ -229,23 +294,6 @@ export function ActivityLogPage() {
         </div>
 
         <div className="flex flex-wrap items-end gap-3">
-          {/* Category */}
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-mist/50">Category</label>
-            <select
-              value={filterCategory}
-              onChange={(e) => setFilterCategory(e.target.value)}
-              className="input py-2 text-sm"
-            >
-              <option value="">All</option>
-              <option value="order">Order</option>
-              <option value="rider">Rider</option>
-              <option value="customer">Customer</option>
-              <option value="user">User</option>
-              <option value="plant">Plant</option>
-            </select>
-          </div>
-
           {/* Date from */}
           <div className="flex flex-col gap-1">
             <label className="text-xs text-mist/50">From</label>

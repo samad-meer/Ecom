@@ -202,7 +202,7 @@ export const AddressFormSheet: React.FC<Props> = ({
               <TextInput
                 style={[styles.input, styles.customLabelInput]}
                 placeholder="Name this place — Farmhouse, Mum's, …"
-                placeholderTextColor="#9aa0a6"
+                placeholderTextColor="#000"
                 value={customLabel}
                 onChangeText={setCustomLabel}
                 maxLength={50}
@@ -349,7 +349,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 12,
     fontSize: 15,
-    color: '#1a1a1a',
+    color: '#000',
     backgroundColor: '#f9f9f9',
   },
   customLabelInput: { marginTop: 10 },

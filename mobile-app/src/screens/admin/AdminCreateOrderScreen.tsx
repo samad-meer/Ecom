@@ -134,10 +134,12 @@ export const AdminCreateOrderScreen: React.FC = () => {
 
     setSaving(true);
     try {
-      await adminService.createOrder(payload);
-      Alert.alert('Success', 'Order created successfully.', [
-        { text: 'OK', onPress: () => navigation.goBack() },
-      ]);
+      const created = await adminService.createOrder(payload);
+      Alert.alert(
+        created?.id ? `Order #${created.id} created` : 'Order created',
+        'It is now in the orders list, ready to assign to a rider.',
+        [{ text: 'Done', onPress: () => navigation.goBack() }],
+      );
     } catch (e: any) {
       Alert.alert('Error', e?.message || 'Failed to create order.');
     } finally {
@@ -186,7 +188,7 @@ export const AdminCreateOrderScreen: React.FC = () => {
               placeholder="Search by name, phone, or address…"
               value={customerSearch}
               onChangeText={setCustomerSearch}
-              placeholderTextColor="#aaa"
+              placeholderTextColor="#000"
             />
             <ScrollView style={styles.customerList} nestedScrollEnabled>
               {filteredCustomers.map(c => (
@@ -219,7 +221,7 @@ export const AdminCreateOrderScreen: React.FC = () => {
                 placeholder="Who is the order for?"
                 value={guestName}
                 onChangeText={setGuestName}
-                placeholderTextColor="#aaa"
+                placeholderTextColor="#000"
               />
             </View>
             <View>
@@ -230,7 +232,7 @@ export const AdminCreateOrderScreen: React.FC = () => {
                 value={guestPhone}
                 onChangeText={setGuestPhone}
                 keyboardType="phone-pad"
-                placeholderTextColor="#aaa"
+                placeholderTextColor="#000"
               />
             </View>
           </View>
@@ -348,7 +350,7 @@ export const AdminCreateOrderScreen: React.FC = () => {
           value={deliveryNotes}
           onChangeText={setDeliveryNotes}
           multiline
-          placeholderTextColor="#aaa"
+          placeholderTextColor="#000"
           maxLength={500}
         />
         <Text style={styles.fieldHint}>
@@ -403,7 +405,7 @@ const styles = StyleSheet.create({
   modeBtnTextActive: { color: 'white' },
   searchInput: {
     backgroundColor: '#f5f5f5', borderRadius: 8, padding: 10,
-    fontSize: 14, color: '#333', marginBottom: 8,
+    fontSize: 14, color: '#000', marginBottom: 8,
   },
   customerList: { maxHeight: 200 },
   customerItem: {
@@ -417,7 +419,7 @@ const styles = StyleSheet.create({
   guestFields: { gap: 10 },
   input: {
     borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 8,
-    padding: 11, fontSize: 14, color: '#333', backgroundColor: '#fafafa',
+    padding: 11, fontSize: 14, color: '#000', backgroundColor: '#fafafa',
   },
   fieldHint: { fontSize: 11.5, color: '#8a929b', marginTop: 6, lineHeight: 16 },
   productGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },

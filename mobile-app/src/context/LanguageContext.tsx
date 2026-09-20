@@ -17,6 +17,12 @@ interface LanguageContextType {
   isLoading: boolean;
   /** User types allowed to switch language (from admin settings). Empty = no one. */
   allowedUserTypes: string[];
+  /**
+   * Master switch. False means the app is English-only for everyone,
+   * whatever allowedUserTypes says — the office uses it to withdraw a
+   * half-finished Urdu without losing who was allowed to use it.
+   */
+  urduEnabled: boolean;
 }
 
 export const LanguageContext = createContext<LanguageContextType>({
@@ -25,6 +31,7 @@ export const LanguageContext = createContext<LanguageContextType>({
   t: () => '',
   isLoading: true,
   allowedUserTypes: [],
+  urduEnabled: true,
 });
 
 export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -32,6 +39,9 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [translations, setTranslations] = useState<Record<string, Translation>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [allowedUserTypes, setAllowedUserTypes] = useState<string[]>([]);
+  // Defaults to true so a failed settings fetch does not silently strip
+  // Urdu from someone already reading the app in it.
+  const [urduEnabled, setUrduEnabled] = useState(true);
 
   useEffect(() => {
     loadLanguageAndTranslations();
@@ -65,6 +75,7 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (accessRes.status === 'fulfilled' && accessRes.value.ok) {
         const accessData = await accessRes.value.json();
         setAllowedUserTypes(accessData.allowed_user_types ?? []);
+        setUrduEnabled(accessData.urdu_enabled ?? true);
       }
     } catch (error) {
       console.error('Failed to load translations:', error);
@@ -75,7 +86,7 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  const setLanguage = async (lang: Language) => {
+  const setLanguageState_ = async (lang: Language) => {
     setLanguageState(lang);
     await AsyncStorage.setItem('app_language', lang);
   };
@@ -93,8 +104,23 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return text;
   };
 
+  // Someone already reading in Urdu when the office turns it off must not be
+  // stranded there — their saved preference is honoured again if it comes back.
+  useEffect(() => {
+    if (!urduEnabled && language === 'ur') setLanguageState('en');
+  }, [urduEnabled, language]);
+
+  /**
+   * Refuses Urdu while the master switch is off, so a preference saved before
+   * it was turned off cannot keep someone in a language the office withdrew.
+   */
+  const switchLanguage = async (lang: Language) => {
+    if (lang === 'ur' && !urduEnabled) return;
+    await setLanguageState_(lang);
+  };
+
   return (
-    <LanguageContext.Provider value={{ language, setLanguage, t, isLoading, allowedUserTypes }}>
+    <LanguageContext.Provider value={{ language, setLanguage: switchLanguage, t, isLoading, allowedUserTypes, urduEnabled }}>
       {children}
     </LanguageContext.Provider>
   );

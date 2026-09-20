@@ -256,6 +256,70 @@ class LedgerEntry(models.Model):
         return not self.source_ref and not self.is_reversal and not self.is_reversed
 
 
+class PaymentAccount(models.Model):
+    """
+    A bank account or wallet a customer can transfer to.
+
+    Replaces the single set of payment_* fields on LedgerSettings. The business
+    banks with more than one institution, and a customer who banks with the same
+    one transfers instantly and for free — so the rider needs to be able to show
+    whichever account matches, not just the one the office happened to configure
+    first. Those old fields are kept and mirrored from the first active account
+    here, because rider builds already in the field still read them.
+
+    Company accounts only. A rider's own account number on a customer's screen
+    is how collections go missing.
+    """
+
+    bank_name = models.CharField(
+        max_length=120,
+        help_text="Bank or wallet, e.g. Meezan Bank, JazzCash, Easypaisa.",
+    )
+    account_title = models.CharField(
+        max_length=120,
+        help_text="Account holder's name, exactly as the bank shows it — a "
+                  "transfer to a mistyped title bounces.",
+    )
+    account_number = models.CharField(
+        max_length=64, blank=True, default='',
+        help_text="Account number as printed, e.g. 0258 0108357297.",
+    )
+    iban = models.CharField(
+        max_length=34, blank=True, default='',
+        help_text="Full IBAN, e.g. PK13MEZN0002580108357297. Kept separate from "
+                  "the account number because customers are asked for one or the "
+                  "other and guessing wrong bounces the transfer.",
+    )
+    qr = models.ImageField(
+        upload_to='ledger/payment/', blank=True, null=True,
+        help_text="QR the customer scans to pay. Optional — the account details "
+                  "alone are enough to take a transfer.",
+    )
+    instructions = models.CharField(
+        max_length=255, blank=True, default='',
+        help_text="Anything the customer must do after paying, e.g. 'Send the "
+                  "receipt screenshot to the rider before he leaves.'",
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Off hides it from riders and customers without deleting it, "
+                  "so a closed account keeps its history.",
+    )
+    sort_order = models.PositiveIntegerField(
+        default=0, help_text="Lower numbers are shown first.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['sort_order', 'bank_name', 'id']
+        verbose_name = 'Payment account'
+        verbose_name_plural = 'Payment accounts'
+
+    def __str__(self):
+        return f'{self.bank_name} — {self.account_title}'
+
+
 class NumberSequence(models.Model):
     """
     Hands out gapless numbers under a row lock.

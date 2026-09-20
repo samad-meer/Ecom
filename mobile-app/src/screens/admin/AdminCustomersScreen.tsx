@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
-  TextInput, ActivityIndicator, RefreshControl, Modal, ScrollView, Alert,
+  TextInput, ActivityIndicator, RefreshControl, Modal, Alert,
 } from 'react-native';
 import { LoadingScreen } from '../../components/LoadingScreen';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,7 +28,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'white', padding: 12,
     borderBottomWidth: 1, borderBottomColor: '#f0f0f0',
   },
-  searchInput: { flex: 1, fontSize: 14, color: '#333' },
+  searchInput: { flex: 1, fontSize: 14, color: '#000' },
   addBtn: {
     width: 36, height: 36, borderRadius: 10,
     backgroundColor: '#007AFF', alignItems: 'center', justifyContent: 'center',
@@ -72,7 +72,7 @@ const addModal = StyleSheet.create({
   helper: { fontSize: 12, color: '#888', marginTop: 6, lineHeight: 16 },
   input: {
     borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 8,
-    padding: 11, fontSize: 14, color: '#333', backgroundColor: '#fafafa',
+    padding: 11, fontSize: 14, color: '#000', backgroundColor: '#fafafa',
   },
   passwordRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   eyeBtn: {
@@ -114,7 +114,7 @@ const modal = StyleSheet.create({
   inputRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   input: {
     flex: 1, borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 8,
-    padding: 10, fontSize: 14, color: '#333', backgroundColor: '#fafafa',
+    padding: 10, fontSize: 14, color: '#000', backgroundColor: '#fafafa',
   },
   saveBtn: {
     marginTop: 12, backgroundColor: '#007AFF', borderRadius: 10,
@@ -245,14 +245,14 @@ function AddCustomerModal({
                 <FieldLabel text="First Name" />
                 <TextInput
                   style={addModal.input} value={form.first_name} onChangeText={set('first_name')}
-                  placeholder="Ali" placeholderTextColor="#bbb"
+                  placeholder="Ali" placeholderTextColor="#000"
                 />
               </View>
               <View style={{ flex: 1 }}>
                 <FieldLabel text="Last Name" />
                 <TextInput
                   style={addModal.input} value={form.last_name} onChangeText={set('last_name')}
-                  placeholder="Hassan" placeholderTextColor="#bbb"
+                  placeholder="Hassan" placeholderTextColor="#000"
                 />
               </View>
             </View>
@@ -261,7 +261,7 @@ function AddCustomerModal({
               <FieldLabel text="Username" required />
               <TextInput
                 style={addModal.input} value={form.username} onChangeText={set('username')}
-                placeholder="alihassan" placeholderTextColor="#bbb"
+                placeholder="alihassan" placeholderTextColor="#000"
                 autoCapitalize="none" autoCorrect={false}
               />
             </View>
@@ -270,7 +270,7 @@ function AddCustomerModal({
               <FieldLabel text="Phone" />
               <TextInput
                 style={addModal.input} value={form.phone_number} onChangeText={set('phone_number')}
-                placeholder="03xx-xxxxxxx" placeholderTextColor="#bbb" keyboardType="phone-pad"
+                placeholder="03xx-xxxxxxx" placeholderTextColor="#000" keyboardType="phone-pad"
               />
             </View>
 
@@ -290,7 +290,7 @@ function AddCustomerModal({
                 <TextInput
                   style={[addModal.input, { flex: 1 }]}
                   value={form.password} onChangeText={set('password')}
-                  placeholder="Leave blank — no sign-in" placeholderTextColor="#bbb"
+                  placeholder="Leave blank — no sign-in" placeholderTextColor="#000"
                   secureTextEntry={!showPassword}
                   autoCapitalize="none" autoCorrect={false}
                 />
@@ -440,7 +440,7 @@ function CustomerStatsModal({
             </TouchableOpacity>
           </View>
 
-          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <KeyboardAwareScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             {/* Editable contact fields */}
             <Text style={modal.editLabel}>Phone</Text>
             <View style={modal.inputRow}>
@@ -450,7 +450,7 @@ function CustomerStatsModal({
                 value={phone}
                 onChangeText={setPhone}
                 placeholder="03xx-xxxxxxx"
-                placeholderTextColor="#bbb"
+                placeholderTextColor="#000"
                 keyboardType="phone-pad"
               />
             </View>
@@ -546,7 +546,7 @@ function CustomerStatsModal({
             </View>
 
             <View style={{ height: 16 }} />
-          </ScrollView>
+          </KeyboardAwareScrollView>
         </View>
       </View>
     </Modal>
@@ -594,7 +594,7 @@ export const AdminCustomersScreen: React.FC = () => {
           placeholder="Search by name, phone, address…"
           value={search}
           onChangeText={setSearch}
-          placeholderTextColor="#aaa"
+          placeholderTextColor="#000"
         />
         {search.length > 0 && (
           <TouchableOpacity onPress={() => setSearch('')}>

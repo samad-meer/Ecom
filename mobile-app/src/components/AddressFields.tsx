@@ -140,19 +140,23 @@ export const AddressFields = ({ value, onChange, errors = {}, hint }: Props) => 
           <Text style={styles.caption}>House</Text>
           <TextInput
             style={[styles.input, errors.house_number && styles.inputInvalid]}
-            placeholder="H-12"
-            placeholderTextColor="#9aa0a6"
+            placeholder="12"
+            placeholderTextColor="#000"
             value={value.house_number}
             onChangeText={set('house_number')}
             maxLength={50}
           />
+          {/* House numbers here are written several ways, and a single
+              placeholder read as "type H-12". Showing the range stops people
+              inventing a format the rider then has to interpret. */}
+          <Text style={styles.example}>e.g. 12 · 12-B · 762/10 · 293A</Text>
         </View>
         <View style={styles.col}>
           <Text style={styles.caption}>Block</Text>
           <TextInput
             style={styles.input}
             placeholder="Block 6"
-            placeholderTextColor="#9aa0a6"
+            placeholderTextColor="#000"
             value={value.block}
             onChangeText={set('block')}
             maxLength={100}
@@ -187,7 +191,7 @@ export const AddressFields = ({ value, onChange, errors = {}, hint }: Props) => 
       </View>
 
       <View style={styles.areaBlock}>
-        <Text style={styles.caption}>Area</Text>
+        <Text style={styles.caption}>Town / Mohala</Text>
         {areas.length > 0 && (
           <View style={styles.areaChips}>
             {areas.map(a => {
@@ -223,8 +227,8 @@ export const AddressFields = ({ value, onChange, errors = {}, hint }: Props) => 
         {(customArea || areas.length === 0) && (
           <TextInput
             style={[styles.input, errors.area && styles.inputInvalid]}
-            placeholder="Type the area"
-            placeholderTextColor="#9aa0a6"
+            placeholder="Type the town or mohala"
+            placeholderTextColor="#000"
             value={value.area}
             onChangeText={set('area')}
             maxLength={150}
@@ -240,6 +244,9 @@ export const AddressFields = ({ value, onChange, errors = {}, hint }: Props) => 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', gap: 8 },
   col: { flex: 1 },
+  example: {
+    fontSize: 11, color: '#8a929b', marginTop: 5, lineHeight: 15,
+  },
   caption: {
     fontSize: 12,
     fontWeight: '600',
@@ -265,7 +272,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 12,
     fontSize: 15,
-    color: '#1a1a1a',
+    color: '#000',
     backgroundColor: '#f9f9f9',
   },
   inputInvalid: { borderColor: '#D93025', backgroundColor: '#FFF7F7' },

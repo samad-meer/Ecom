@@ -1,0 +1,36 @@
+# ---------------------------------------------------------------------------
+# Apache config for the statically exported site (cPanel shared hosting).
+#
+# `next build` runs with output:"export", so every route becomes a real folder
+# containing index.html — except /products/[id]. Product ids are not known when
+# the site is built, so a product added AFTER the last build has no folder and
+# Apache answers with its own 404 ("The resource requested could not be found
+# on this server!") rather than anything from the app.
+#
+# The build always emits out/products/_/ as a client-rendered shell for exactly
+# this case, and ProductDetailRoute reads the real id out of the address bar.
+# The rewrite below points unknown product ids at that shell.
+#
+# This file lives in web/public/ so `next build` copies it into out/ — it must
+# end up in the document root of the subdomain alongside index.html.
+# ---------------------------------------------------------------------------
+
+# MultiViews makes Apache guess extensions and can shadow the rules below.
+Options -MultiViews
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # Anything that really exists — every static route folder, _next assets,
+  # images, favicon — is served untouched.
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # /products/<id> or /products/<id>/ with no folder on disk -> the shell.
+  # The (?!_/?$) guard excludes the shell itself so this can never loop.
+  RewriteRule ^products/(?!_/?$)[^/]+/?$ /products/_/index.html [L]
+</IfModule>
+
+# Genuine unknown routes get the page Next exports for them.
+ErrorDocument 404 /404.html

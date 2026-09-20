@@ -135,6 +135,11 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
   const renderRiderOrder = ({ item }: { item: Order }) => {
     const pin = toMapPin(item.shipping_latitude, item.shipping_longitude);
     const isDelivered = item.delivery_status === 'Delivered' || item.status === 'Delivered';
+    // Submitting is what closes an order, and the timestamp is what records it.
+    // Orders closed under the older flow sit on a status like 'Not Responding'
+    // but are just as final, so they must not still offer "Manage Delivery" —
+    // the server rejects every write to them.
+    const isSubmitted = isDelivered || !!(item as any).delivery_status_updated_at;
     const received = Number(item.cash_amount ?? 0);
 
     const statusColor = item.delivery_status
@@ -280,11 +285,13 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
             </View>
           </View>
 
-          {/* A completed delivery is final — nothing left to manage. */}
-          {isDelivered ? (
+          {/* A submitted delivery is final — nothing left to manage. */}
+          {isSubmitted ? (
             <View style={styles.riderDoneRow}>
               <Ionicons name="checkmark-circle" size={15} color="#34C759" />
-              <Text style={styles.riderDoneText}>Delivered — no further changes</Text>
+              <Text style={styles.riderDoneText}>
+                {isDelivered ? 'Delivered — no further changes' : 'Submitted — no further changes'}
+              </Text>
             </View>
           ) : item.status !== 'Cancelled' ? (
             <TouchableOpacity

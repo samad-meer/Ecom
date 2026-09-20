@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  View, Text, ScrollView, StyleSheet, TouchableOpacity,
+  View, Text, StyleSheet, TouchableOpacity,
   Alert, Switch, TextInput, ActivityIndicator,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -273,6 +273,7 @@ export const AdminOrderDetailScreen: React.FC = () => {
               multiline
               numberOfLines={3}
               placeholder="Gate code 1234 · Call on arrival · Leave with the guard"
+              placeholderTextColor="#000"
               maxLength={500}
             />
             <Text style={styles.notesHint}>
@@ -406,7 +407,7 @@ const styles = StyleSheet.create({
   notesText: { fontSize: 14, color: '#555', lineHeight: 20 },
   notesInput: {
     borderWidth: 1, borderColor: '#ddd', borderRadius: 8,
-    padding: 10, fontSize: 14, color: '#333', minHeight: 80,
+    padding: 10, fontSize: 14, color: '#000', minHeight: 80,
     textAlignVertical: 'top',
   },
   notesHint: { fontSize: 11.5, color: '#8a929b', marginTop: 6, lineHeight: 16 },

@@ -65,6 +65,7 @@ export const HomeScreen: React.FC = () => {
         <TextInput
           style={styles.searchInput}
           placeholder={t('search_placeholder', 'Search products...')}
+          placeholderTextColor="#000"
           value={searchQuery}
           onChangeText={setSearchQuery}
         />
@@ -135,6 +136,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#ddd',
     fontSize: 16,
+    color: '#000',
   },
   categoriesContainer: {
     marginBottom: 10,

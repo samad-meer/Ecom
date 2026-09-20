@@ -112,17 +112,17 @@ function ProductFormModal({ visible, product, categories, onClose, onSaved }: Fo
 
         <KeyboardAwareScrollView contentContainerStyle={fm.body} extraBottomSpace={28}>
           <Text style={fm.label}>Product Name *</Text>
-          <TextInput style={fm.input} value={name} onChangeText={setName} placeholder="e.g. 20L Water Bottle" placeholderTextColor="#bbb" />
+          <TextInput style={fm.input} value={name} onChangeText={setName} placeholder="e.g. 20L Water Bottle" placeholderTextColor="#000" />
 
           <Text style={fm.label}>Description</Text>
           <TextInput
             style={[fm.input, { height: 80, textAlignVertical: 'top' }]}
             value={description} onChangeText={setDescription}
-            placeholder="Short description…" placeholderTextColor="#bbb" multiline
+            placeholder="Short description…" placeholderTextColor="#000" multiline
           />
 
           <Text style={fm.label}>Price (PKR) *</Text>
-          <TextInput style={fm.input} value={price} onChangeText={setPrice} placeholder="0.00" placeholderTextColor="#bbb" keyboardType="decimal-pad" />
+          <TextInput style={fm.input} value={price} onChangeText={setPrice} placeholder="0.00" placeholderTextColor="#000" keyboardType="decimal-pad" />
 
           <Text style={fm.label}>Category</Text>
           <View style={fm.categoryRow}>
@@ -194,7 +194,7 @@ const fm = StyleSheet.create({
   body: { padding: 16, gap: 4, paddingBottom: 40 },
   label: { fontSize: 13, fontWeight: '600', color: '#555', marginBottom: 6, marginTop: 12 },
   hint: { fontSize: 11, color: '#aaa' },
-  input: { borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: '#333', backgroundColor: 'white' },
+  input: { borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: '#000', backgroundColor: 'white' },
   categoryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   catChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, borderWidth: 1, borderColor: '#e0e0e0', backgroundColor: 'white' },
   catChipActive: { borderColor: '#007AFF', backgroundColor: '#007AFF15' },
@@ -233,9 +233,14 @@ function ProductRow({ product, onEdit, onDeleted, onToggled }: ProductRowProps) 
   };
 
   const handleDelete = () => {
-    Alert.alert(`Delete "${product.name}"?`, 'This cannot be undone.', [
+    Alert.alert(
+      `Delete "${product.name}"?`,
+      `Every past order that included this product loses that line — the order total stays but the item disappears from its history.
+
+Turning the product off instead stops you selling it and keeps the records intact.`,
+      [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
+      { text: 'Delete anyway', style: 'destructive', onPress: async () => {
           try { await adminService.deleteProduct(product.id); onDeleted(); }
           catch { Alert.alert('Error', 'Failed to delete.'); }
         },
@@ -351,8 +356,8 @@ function CategoryRow({ category, onChanged }: { category: AdminCategory; onChang
   if (editing) {
     return (
       <View style={cm.editRow}>
-        <TextInput style={[cm.input, { flex: 1 }]} value={name} onChangeText={setName} placeholder="Name" placeholderTextColor="#bbb" autoFocus />
-        <TextInput style={[cm.input, { width: 84 }]} value={icon} onChangeText={setIcon} placeholder="icon" placeholderTextColor="#bbb" />
+        <TextInput style={[cm.input, { flex: 1 }]} value={name} onChangeText={setName} placeholder="Name" placeholderTextColor="#000" autoFocus />
+        <TextInput style={[cm.input, { width: 84 }]} value={icon} onChangeText={setIcon} placeholder="icon" placeholderTextColor="#000" />
         <TouchableOpacity onPress={save} disabled={saving} style={cm.iconBtn}>
           {saving ? <ActivityIndicator size="small" color="#34C759" /> : <Ionicons name="checkmark" size={20} color="#34C759" />}
         </TouchableOpacity>
@@ -434,8 +439,8 @@ function CategoryManagerModal({ visible, categories, onClose, onChanged }: Categ
           <View style={cm.addCard}>
             <Text style={cm.addTitle}>Add category</Text>
             <View style={cm.addRow}>
-              <TextInput style={[cm.input, { flex: 1 }]} value={newName} onChangeText={setNewName} placeholder="e.g. Water Bottles" placeholderTextColor="#bbb" />
-              <TextInput style={[cm.input, { width: 84 }]} value={newIcon} onChangeText={setNewIcon} placeholder="icon" placeholderTextColor="#bbb" />
+              <TextInput style={[cm.input, { flex: 1 }]} value={newName} onChangeText={setNewName} placeholder="e.g. Water Bottles" placeholderTextColor="#000" />
+              <TextInput style={[cm.input, { width: 84 }]} value={newIcon} onChangeText={setNewIcon} placeholder="icon" placeholderTextColor="#000" />
               <TouchableOpacity style={[cm.addBtn, adding && { opacity: 0.5 }]} onPress={add} disabled={adding}>
                 {adding ? <ActivityIndicator size="small" color="white" /> : <Ionicons name="add" size={20} color="white" />}
               </TouchableOpacity>
@@ -470,7 +475,7 @@ const cm = StyleSheet.create({
   addCard: { backgroundColor: 'white', borderRadius: 12, padding: 12, marginBottom: 16 },
   addTitle: { fontSize: 12, fontWeight: '700', color: '#888', textTransform: 'uppercase', marginBottom: 8 },
   addRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  input: { borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, fontSize: 14, color: '#333', backgroundColor: 'white' },
+  input: { borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, fontSize: 14, color: '#000', backgroundColor: 'white' },
   addBtn: { backgroundColor: '#007AFF', width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   hint: { fontSize: 11, color: '#aaa', marginTop: 8 },
   listCard: { backgroundColor: 'white', borderRadius: 12, overflow: 'hidden' },
@@ -569,7 +574,7 @@ export const AdminShopScreen: React.FC = () => {
           <TextInput
             style={styles.searchInput}
             placeholder="Search products…"
-            placeholderTextColor="#bbb"
+            placeholderTextColor="#000"
             value={search}
             onChangeText={setSearch}
           />
@@ -650,7 +655,7 @@ const styles = StyleSheet.create({
   catBtn: { marginLeft: 'auto', backgroundColor: '#007AFF15', width: 38, height: 38, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   filterRow: { padding: 12, gap: 8, backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#eee' },
   searchWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#f5f5f5', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8 },
-  searchInput: { flex: 1, fontSize: 13, color: '#333' },
+  searchInput: { flex: 1, fontSize: 13, color: '#000' },
   segmentRow: { flexDirection: 'row', gap: 6 },
   segment: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: '#f5f5f5' },
   segmentActive: { backgroundColor: '#007AFF15' },

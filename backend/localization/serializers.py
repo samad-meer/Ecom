@@ -9,4 +9,4 @@ class TranslationSerializer(serializers.ModelSerializer):
 class LanguageAccessSettingSerializer(serializers.ModelSerializer):
     class Meta:
         model = LanguageAccessSetting
-        fields = ['allowed_user_types']
+        fields = ['urdu_enabled', 'allowed_user_types']

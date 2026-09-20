@@ -34,6 +34,10 @@ const CATEGORY_COLORS: Record<string, string> = {
   rider: '#34C759',
   customer: '#AF52DE',
   user: '#FF9500',
+  settings: '#8E8E93',
+  // Red because this segment is a to-do list, not a history: a number already
+  // on file, a number that is not one, an address a rider cannot find.
+  data: '#FF3B30',
 };
 
 const LIMIT = 40;
@@ -73,6 +77,8 @@ const CATEGORIES = [
   { label: 'Riders', value: 'rider' },
   { label: 'Customers', value: 'customer' },
   { label: 'Users', value: 'user' },
+  { label: 'Settings', value: 'settings' },
+  { label: 'Issues', value: 'data' },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -154,6 +160,8 @@ export const AdminActivityScreen: React.FC = () => {
 
   const [range, setRange] = useState<RangeKey>('all');
   const [category, setCategory] = useState('');
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [totalAll, setTotalAll] = useState(0);
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
 
@@ -178,8 +186,17 @@ export const AdminActivityScreen: React.FC = () => {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) throw new Error('Failed');
-        const data: { count: number; results: ActivityEntry[] } = await res.json();
+        const data: {
+          count: number;
+          counts?: Record<string, number>;
+          total_all?: number;
+          results: ActivityEntry[];
+        } = await res.json();
         setTotal(data.count);
+        // Counted before the category filter, so switching segment does not
+        // zero every other badge.
+        setCounts(data.counts ?? {});
+        setTotalAll(data.total_all ?? data.count);
         if (reset) {
           setEntries(data.results);
         } else {
@@ -231,33 +248,39 @@ export const AdminActivityScreen: React.FC = () => {
         })}
       </View>
 
-      {/* Category chips */}
+      {/* Category segments. The count rides on the chip so the admin can see
+          there is something in Issues without opening it. */}
       <View style={styles.chips}>
-        {CATEGORIES.map((c) => (
-          <TouchableOpacity
-            key={c.value}
-            style={[
-              styles.chip,
-              category === c.value && {
-                backgroundColor: (CATEGORY_COLORS[c.value] ?? '#1a1a1a') + '22',
-                borderColor: CATEGORY_COLORS[c.value] ?? '#1a1a1a',
-              },
-            ]}
-            onPress={() => setCategory(c.value)}
-          >
-            <Text
+        {CATEGORIES.map((c) => {
+          const active = category === c.value;
+          const tint = CATEGORY_COLORS[c.value] ?? '#1a1a1a';
+          const n = c.value === '' ? totalAll : (counts[c.value] ?? 0);
+          const urgent = c.value === 'data' && n > 0;
+          return (
+            <TouchableOpacity
+              key={c.value}
               style={[
-                styles.chipText,
-                category === c.value && {
-                  color: CATEGORY_COLORS[c.value] ?? '#1a1a1a',
-                  fontWeight: '700',
-                },
+                styles.chip,
+                active && { backgroundColor: tint + '22', borderColor: tint },
+                urgent && !active && { borderColor: tint + '88' },
               ]}
+              onPress={() => setCategory(c.value)}
             >
-              {c.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
+              <Text
+                style={[
+                  styles.chipText,
+                  active && { color: tint, fontWeight: '700' },
+                  urgent && !active && { color: tint },
+                ]}
+              >
+                {c.label}
+              </Text>
+              <View style={[styles.chipCount, urgent && { backgroundColor: tint + '22' }]}>
+                <Text style={[styles.chipCountText, urgent && { color: tint }]}>{n}</Text>
+              </View>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       {/* Search */}
@@ -265,7 +288,7 @@ export const AdminActivityScreen: React.FC = () => {
         <TextInput
           style={styles.searchInput}
           placeholder="Search actions..."
-          placeholderTextColor="#bbb"
+          placeholderTextColor="#000"
           value={searchInput}
           onChangeText={setSearchInput}
           onSubmitEditing={() => setSearch(searchInput)}
@@ -322,6 +345,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'white',
   },
   chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 5,
     borderRadius: 20,
@@ -329,6 +355,15 @@ const styles = StyleSheet.create({
     borderColor: '#e0e0e0',
     backgroundColor: '#f5f5f5',
   },
+  chipCount: {
+    minWidth: 20,
+    alignItems: 'center',
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 9,
+    backgroundColor: '#e6e8eb',
+  },
+  chipCountText: { fontSize: 11, fontWeight: '700', color: '#6b7280' },
   rangeRow: {
     flexDirection: 'row', gap: 8,
     paddingHorizontal: 12, paddingTop: 10, paddingBottom: 2,
@@ -360,7 +395,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5f5f5',
     paddingHorizontal: 12,
     fontSize: 14,
-    color: '#1a1a1a',
+    color: '#000',
   },
   clearBtn: {
     paddingHorizontal: 10,

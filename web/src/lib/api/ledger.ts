@@ -27,7 +27,57 @@ function query(filters: StatementFilters = {}): string {
  * the customer owes money. That is the opposite of the stored account_balance
  * and matches the printed statement, so never mix the two.
  */
+
+/** One bank account or wallet a customer can transfer to. */
+export interface PaymentAccount {
+  id: number;
+  bank_name: string;
+  account_title: string;
+  account_number: string;
+  iban: string;
+  qr: string | null;
+  instructions: string;
+  is_active: boolean;
+  sort_order: number;
+}
+
+export type PaymentAccountInput = Omit<PaymentAccount, "id" | "qr"> & {
+  /** A file when the admin picks one, null to leave the existing QR alone. */
+  qr?: File | null;
+};
+
 export const ledgerApi = {
+  // ── Payment accounts ──────────────────────────────────────────────────────
+  // Sent as multipart because the QR is a file upload; the API accepts JSON
+  // too, but one code path is easier to keep correct than two.
+
+  paymentAccounts(): Promise<PaymentAccount[]> {
+    return apiFetch<PaymentAccount[]>("/ledger/admin/payment-accounts/", { auth: true });
+  },
+
+  createPaymentAccount(input: PaymentAccountInput) {
+    return apiFetch<PaymentAccount>("/ledger/admin/payment-accounts/", {
+      method: "POST",
+      auth: true,
+      body: toPaymentForm(input),
+    });
+  },
+
+  updatePaymentAccount(id: number, input: Partial<PaymentAccountInput>) {
+    return apiFetch<PaymentAccount>(`/ledger/admin/payment-accounts/${id}/`, {
+      method: "PATCH",
+      auth: true,
+      body: toPaymentForm(input),
+    });
+  },
+
+  deletePaymentAccount(id: number) {
+    return apiFetch<void>(`/ledger/admin/payment-accounts/${id}/`, {
+      method: "DELETE",
+      auth: true,
+    });
+  },
+
   /** Business identity. Readable signed-out — it is what the storefront's
    *  "contact us" button uses — so no `auth` here. */
   business() {
@@ -124,3 +174,24 @@ export const ledgerApi = {
     );
   },
 };
+
+/**
+ * Build the multipart body for a payment account.
+ *
+ * `qr` is omitted entirely when it is null or undefined — sending an empty
+ * value would clear a QR the admin never touched.
+ */
+function toPaymentForm(input: Partial<PaymentAccountInput>): FormData {
+  const form = new FormData();
+  for (const [key, value] of Object.entries(input)) {
+    if (value === undefined || value === null) continue;
+    if (key === "qr") {
+      form.append("qr", value as File);
+    } else if (typeof value === "boolean") {
+      form.append(key, value ? "true" : "false");
+    } else {
+      form.append(key, String(value));
+    }
+  }
+  return form;
+}

@@ -383,7 +383,7 @@ export const AdminNotificationScreen: React.FC = () => {
                 <TextInput
                   style={styles.input}
                   placeholder="e.g. New offer available!"
-                  placeholderTextColor="#bbb"
+                  placeholderTextColor="#000"
                   value={title}
                   onChangeText={setTitle}
                   maxLength={80}
@@ -397,7 +397,7 @@ export const AdminNotificationScreen: React.FC = () => {
                 <TextInput
                   style={[styles.input, styles.textArea]}
                   placeholder="Enter notification message…"
-                  placeholderTextColor="#bbb"
+                  placeholderTextColor="#000"
                   value={body}
                   onChangeText={setBody}
                   multiline
@@ -412,7 +412,7 @@ export const AdminNotificationScreen: React.FC = () => {
                 <TextInput
                   style={styles.input}
                   placeholder="https://example.com/image.png"
-                  placeholderTextColor="#bbb"
+                  placeholderTextColor="#000"
                   value={imageUrl}
                   onChangeText={setImageUrl}
                   keyboardType="url"
@@ -777,7 +777,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     marginBottom: 6,
   },
-  input: { fontSize: 15, color: '#1a1a1a', minHeight: 24 },
+  input: { fontSize: 15, color: '#000', minHeight: 24 },
   textArea: { minHeight: 80 },
   charCount: { fontSize: 11, color: '#ccc', textAlign: 'right', marginTop: 4 },
   inputDivider: { height: 1, backgroundColor: '#f5f5f5', marginHorizontal: 14 },

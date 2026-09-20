@@ -146,6 +146,23 @@ export const getDeliveryOrders = async () => {
   }
 };
 
+/**
+ * One order, straight from the server.
+ *
+ * The detail screen is opened with a snapshot captured when the rider tapped
+ * the row, and a snapshot cannot know that the order has since been delivered,
+ * cancelled by the office, or closed on another device. Everything that screen
+ * locks depends on the CURRENT state, so it re-reads it here.
+ */
+export const getDeliveryOrder = async (orderId: number) => {
+  const token = await getAuthToken();
+  const response = await fetch(`${API_URL}/orders/delivery/orders/${orderId}/`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error(`Failed to fetch order ${orderId}`);
+  return response.json();
+};
+
 export const updateOrderStatus = async (orderId: number, status: string, additionalData?: any) => {
   const token = await getAuthToken();
   try {
@@ -171,7 +188,18 @@ export const updateOrderStatus = async (orderId: number, status: string, additio
     if (!response.ok) {
       const errorData = await response.text();
       console.error('❌ Update failed:', errorData);
-      throw new Error('Failed to update order status');
+      // The server explains WHY it refused — "This delivery is complete and can
+      // no longer be changed." Throwing a generic message instead made a
+      // deliberate refusal look like a network fault, so the rider would stand
+      // at the gate retrying something that will never succeed.
+      let message = 'Failed to update order status';
+      try {
+        const parsed = JSON.parse(errorData);
+        message = parsed?.error || parsed?.detail || message;
+      } catch {
+        // Not JSON — a proxy error page or an empty body. Keep the generic text.
+      }
+      throw new Error(message);
     }
 
     const result = await response.json();

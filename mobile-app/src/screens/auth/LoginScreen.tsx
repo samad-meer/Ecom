@@ -8,6 +8,7 @@ import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { AuthContext } from '../../context/AuthContext';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import { FieldError } from '../../components/FormField';
 import { useLanguage } from '../../context/LanguageContext';
 import { GoogleSignInButton } from '../../components/GoogleSignInButton';
 import { IS_GOOGLE_SIGNIN_CONFIGURED } from '../../constants/googleConfig';
@@ -38,8 +39,12 @@ const LoginScreen = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  // Which box is at fault, so the person is not left hunting for it.
+  const [fieldErrors, setFieldErrors] = useState<{ username?: string; password?: string }>({});
   const [remember, setRemember] = useState(false);
-  const { login, isLoading, error } = useContext(AuthContext);
+  const { login, isLoading, error, clearError } = useContext(AuthContext);
+  // Whatever failed on some other screen is not this form's problem.
+  useEffect(() => { clearError(); }, [clearError]);
   const { t } = useLanguage();
   const navigation = useNavigation<any>();
   const reducedMotion = useReducedMotion();
@@ -229,10 +234,15 @@ const LoginScreen = () => {
   }, []);
 
   const handleLogin = async () => {
-    if (!username || !password) {
-      Alert.alert(t('error', 'Error'), t('fill_all_fields', 'Please fill in all fields'));
-      return;
-    }
+    // Marked on the fields themselves. A dialog saying "fill in all fields"
+    // covers the form it is complaining about and makes the person find the
+    // empty box for themselves.
+    const missing: { username?: string; password?: string } = {};
+    if (!username.trim()) missing.username = t('username_required', 'Enter your username');
+    if (!password) missing.password = t('password_required', 'Enter your password');
+    setFieldErrors(missing);
+    if (missing.username || missing.password) return;
+
     try {
       await login({ username, password });
       // Only after the server accepts them — remembering a rejected password
@@ -413,34 +423,45 @@ const LoginScreen = () => {
           </Animated.Text>
 
           {/* Username */}
-          <Animated.View style={[styles.field, fieldStyle(userFocus)]}>
+          <Animated.View
+            style={[styles.field, fieldStyle(userFocus), !!fieldErrors.username && styles.fieldInvalid]}
+          >
             <View style={styles.fieldIconWrap}>
               <Ionicons name="person-outline" size={18} color={BRAND_BLUE} />
             </View>
             <TextInput
               style={styles.fieldInput}
               placeholder={t('username_placeholder', 'Username')}
-              placeholderTextColor="#aaa"
+              placeholderTextColor="#000"
               value={username}
-              onChangeText={setUsername}
+              onChangeText={(v) => {
+                setUsername(v);
+                if (fieldErrors.username) setFieldErrors((e) => ({ ...e, username: undefined }));
+              }}
               onFocus={() => animateFocus(userFocus, 1)}
               onBlur={() => animateFocus(userFocus, 0)}
               autoCapitalize="none"
               returnKeyType="next"
             />
           </Animated.View>
+          <FieldError message={fieldErrors.username} />
 
           {/* Password */}
-          <Animated.View style={[styles.field, fieldStyle(passFocus)]}>
+          <Animated.View
+            style={[styles.field, fieldStyle(passFocus), !!fieldErrors.password && styles.fieldInvalid]}
+          >
             <View style={styles.fieldIconWrap}>
               <Ionicons name="lock-closed-outline" size={18} color={BRAND_BLUE} />
             </View>
             <TextInput
               style={styles.fieldInput}
               placeholder={t('password_placeholder', 'Password')}
-              placeholderTextColor="#aaa"
+              placeholderTextColor="#000"
               value={password}
-              onChangeText={setPassword}
+              onChangeText={(v) => {
+                setPassword(v);
+                if (fieldErrors.password) setFieldErrors((e) => ({ ...e, password: undefined }));
+              }}
               onFocus={() => animateFocus(passFocus, 1)}
               onBlur={() => animateFocus(passFocus, 0)}
               secureTextEntry={!showPassword}
@@ -457,6 +478,7 @@ const LoginScreen = () => {
               <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color="#aaa" />
             </TouchableOpacity>
           </Animated.View>
+          <FieldError message={fieldErrors.password} />
 
           {/* Remember me — unticking it wipes anything already saved, so the
               box doubles as the way to forget a shared device. */}
@@ -661,8 +683,12 @@ const styles = StyleSheet.create({
   fieldIconWrap: {
     width: 42, height: 52, alignItems: 'center', justifyContent: 'center',
   },
+  fieldInvalid: {
+    borderColor: '#D93025',
+    backgroundColor: '#FFF7F7',
+  },
   fieldInput: {
-    flex: 1, height: 52, fontSize: 15, color: '#1a1a1a',
+    flex: 1, height: 52, fontSize: 15, color: '#000',
     paddingRight: 12,
   },
   eyeBtn: { paddingHorizontal: 12 },

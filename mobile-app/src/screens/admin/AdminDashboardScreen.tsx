@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback, useContext, useMemo } from 'react';
 import {
-  View, Text, ScrollView, StyleSheet, TouchableOpacity,
+  View, Text, StyleSheet, TouchableOpacity,
   RefreshControl, TextInput,
 } from 'react-native';
 import { LoadingScreen } from '../../components/LoadingScreen';
+import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
+import { useRefetchOnFocus } from '../../hooks/useRefetchOnFocus';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
@@ -102,6 +104,11 @@ export const AdminDashboardScreen: React.FC = () => {
 
   useEffect(() => { load(); }, [load]);
 
+  // The tiles count orders, so they go stale the moment the admin taps into
+  // the order list and changes something. load() never raises the spinner
+  // itself — it only clears it — so re-running it on focus is silent.
+  useRefetchOnFocus(() => load());
+
   const onRefresh = () => { setRefreshing(true); load(); };
 
   if (loading) {
@@ -118,7 +125,7 @@ export const AdminDashboardScreen: React.FC = () => {
     : `${rangeLabel}${periodDates ? ` · ${periodDates}` : ''}`;
 
   return (
-    <ScrollView
+    <KeyboardAwareScrollView
       style={styles.container}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
@@ -158,7 +165,7 @@ export const AdminDashboardScreen: React.FC = () => {
             <TextInput
               style={[styles.customInput, !!customError && styles.customInputInvalid]}
               placeholder="YYYY-MM-DD"
-              placeholderTextColor="#bbb"
+              placeholderTextColor="#000"
               value={customFrom}
               onChangeText={setCustomFrom}
               autoCapitalize="none"
@@ -169,7 +176,7 @@ export const AdminDashboardScreen: React.FC = () => {
             <TextInput
               style={[styles.customInput, !!customError && styles.customInputInvalid]}
               placeholder="YYYY-MM-DD"
-              placeholderTextColor="#bbb"
+              placeholderTextColor="#000"
               value={customTo}
               onChangeText={setCustomTo}
               autoCapitalize="none"
@@ -286,7 +293,7 @@ export const AdminDashboardScreen: React.FC = () => {
       </View>
 
       <View style={{ height: 32 }} />
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 };
 
@@ -338,7 +345,7 @@ const styles = StyleSheet.create({
   customInput: {
     flex: 1, height: 38, borderRadius: 10,
     borderWidth: 1, borderColor: '#e4e6ea', backgroundColor: '#fafafa',
-    paddingHorizontal: 10, fontSize: 13, color: '#1a1a1a',
+    paddingHorizontal: 10, fontSize: 13, color: '#000',
   },
   customInputInvalid: { borderColor: '#D93025', backgroundColor: '#FFF7F7' },
   customArrow: { fontSize: 14, color: '#aaa' },

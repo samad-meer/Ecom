@@ -26,7 +26,12 @@ interface Look {
 }
 
 const LOOKS: Record<TrackingState, Look | null> = {
-  active: { color: '#34C759', icon: 'navigate-circle', title: 'Location sharing is ON' },
+  // Nothing to say when it is simply working: the rider is told at sign-in
+  // that dispatch can see them, the OS shows its own persistent notification
+  // while background location runs, and RiderLocationGate does not let them
+  // reach this screen at all unless sharing is on. A permanent green banner
+  // on top of the delivery list was just noise.
+  active: null,
   foreground_only: {
     color: '#FF9500',
     icon: 'navigate-circle-outline',

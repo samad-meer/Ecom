@@ -37,7 +37,7 @@ describe('LoginScreen Password Toggle', () => {
     loginWithGoogle: jest.fn(),
     updateProfile: jest.fn(),
     logout: jest.fn(),
-    checkAuthStatus: jest.fn(),
+    checkAuthStatus: jest.fn(), clearError: jest.fn(),
   };
 
   it('toggles password visibility when eye icon is pressed', () => {

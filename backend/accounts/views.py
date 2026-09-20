@@ -20,6 +20,8 @@ from django.utils.dateparse import parse_datetime
 
 from core.timeframes import scope_to_days
 from core.address import normalize_portion
+from activities.service import log_data_issue
+from .phone import duplicate_phone_error, normalize_phone
 from .serializers import (
     AreaSerializer, DiscountCategorySerializer, RegisterSerializer, UserSerializer,
     UpdateProfileSerializer, ChangePasswordSerializer,
@@ -520,7 +522,39 @@ class AdminCustomerDetailView(APIView):
         profile = user.profile
         changed_profile = []
         if 'phone_number' in data:
-            profile.phone_number = (data['phone_number'] or '').strip() or None
+            raw = (data['phone_number'] or '').strip()
+            if raw:
+                # Same canonical form and same one-number-one-customer rule as
+                # creation, or an edit becomes the way around both.
+                normalized = normalize_phone(raw)
+                if normalized is None:
+                    log_data_issue(
+                        request.user, 'Invalid Phone Rejected',
+                        target_type='customer', target_id=user.pk,
+                        target_label=user.get_full_name() or user.username,
+                        details={'entered': raw, 'where': 'admin edit'},
+                    )
+                    return Response(
+                        {'phone_number': 'Enter a valid mobile number, e.g. 0300-1234567.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                duplicate = duplicate_phone_error(normalized, exclude_user_id=user.pk)
+                if duplicate:
+                    log_data_issue(
+                        request.user, 'Duplicate Phone Blocked',
+                        target_type='customer',
+                        target_id=duplicate['existing_customer']['id'],
+                        target_label=duplicate['existing_customer']['name'],
+                        details={
+                            'phone': normalized,
+                            'tried_on': user.get_full_name() or user.username,
+                            'where': 'admin edit',
+                        },
+                    )
+                    return Response(duplicate, status=status.HTTP_400_BAD_REQUEST)
+                profile.phone_number = normalized
+            else:
+                profile.phone_number = None
             changed_profile.append('phone_number')
         if 'address' in data:
             profile.address = (data['address'] or '').strip() or None
@@ -672,6 +706,32 @@ class CustomerAddressViewSet(viewsets.ModelViewSet):
         return Response(self.get_serializer(address).data)
 
 
+def _log_address_gaps(actor, user, profile, *, where, missing_phone=False):
+    """
+    Note what is missing from a customer record that a rider will need.
+
+    Not a validation error on purpose. Walk-in and phone customers are often
+    entered from half a conversation, and refusing the save would only teach
+    the operator to type '-' into the box. Logging leaves the record usable and
+    the gap findable.
+    """
+    missing = []
+    if not (profile.house_number or '').strip():
+        missing.append('house number')
+    if not (profile.area or '').strip():
+        missing.append('area')
+    if missing_phone:
+        missing.append('phone')
+    if not missing:
+        return
+    log_data_issue(
+        actor, 'Incomplete Customer Record',
+        target_type='customer', target_id=user.id,
+        target_label=user.get_full_name() or user.username,
+        details={'missing': ', '.join(missing), 'where': where},
+    )
+
+
 class AdminCustomerCreateView(APIView):
     """Admin creates a customer account in one request.
 
@@ -705,6 +765,40 @@ class AdminCustomerCreateView(APIView):
             return Response({'username': 'Username is required.'}, status=status.HTTP_400_BAD_REQUEST)
         if User.objects.filter(username__iexact=username).exists():
             return Response({'username': 'Username already taken.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # The number is stored canonical so that '0300-1234567' typed here and
+        # '03001234567' from the signup form are one customer, not two. Without
+        # this the duplicate check below cannot see across the two entry points.
+        if phone:
+            normalized = normalize_phone(phone)
+            if normalized is None:
+                log_data_issue(
+                    request.user, 'Invalid Phone Rejected',
+                    target_type='customer', target_label=username,
+                    details={'entered': phone, 'where': 'admin create'},
+                )
+                return Response(
+                    {'phone_number': 'Enter a valid mobile number, e.g. 0300-1234567.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            phone = normalized
+            # Carries the existing customer's id so the UI can offer to open
+            # that record rather than making the operator go and find it.
+            duplicate = duplicate_phone_error(phone)
+            if duplicate:
+                log_data_issue(
+                    request.user, 'Duplicate Phone Blocked',
+                    target_type='customer',
+                    target_id=duplicate['existing_customer']['id'],
+                    target_label=duplicate['existing_customer']['name'],
+                    details={
+                        'phone': phone,
+                        'tried_to_create': username,
+                        'where': 'admin create',
+                    },
+                )
+                return Response(duplicate, status=status.HTTP_400_BAD_REQUEST)
+
         if password:
             policy_error = password_policy_error(password)
             if policy_error:
@@ -746,6 +840,14 @@ class AdminCustomerCreateView(APIView):
             target_type='customer', target_id=user.id,
             target_label=user.get_full_name() or user.username,
             details={'username': user.username, 'can_sign_in': bool(password)},
+        )
+
+        # A customer with no house number or no area cannot be navigated to.
+        # The record still saves — refusing it would just push the operator to
+        # invent something — but the gap is logged so it can be chased.
+        _log_address_gaps(
+            request.user, user, profile,
+            where='admin create', missing_phone=not phone,
         )
         return Response({
             'id': user.id,

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Languages, Check } from "lucide-react";
+import { Languages, Check, Power } from "lucide-react";
 import { localizationApi } from "@/lib/api/localization";
 import { Button, Skeleton, useToast } from "@/components/ui";
 import { SettingsSection } from "../SettingsSection";
@@ -17,12 +17,19 @@ export function LanguageSettings() {
   const notify = useToast();
   const [allowed, setAllowed] = useState<string[]>([]);
   const [saved, setSaved] = useState<string[]>([]);
+  const [urduEnabled, setUrduEnabled] = useState(true);
+  const [savedUrdu, setSavedUrdu] = useState(true);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     localizationApi.getLanguageAccess()
-      .then((data) => { setAllowed(data.allowed_user_types); setSaved(data.allowed_user_types); })
+      .then((data) => {
+        setAllowed(data.allowed_user_types);
+        setSaved(data.allowed_user_types);
+        setUrduEnabled(data.urdu_enabled);
+        setSavedUrdu(data.urdu_enabled);
+      })
       .catch(() => notify("Failed to load language access settings.", "error"))
       .finally(() => setLoading(false));
   }, []);
@@ -33,13 +40,19 @@ export function LanguageSettings() {
     );
   };
 
-  const isDirty = JSON.stringify([...allowed].sort()) !== JSON.stringify([...saved].sort());
+  const isDirty =
+    JSON.stringify([...allowed].sort()) !== JSON.stringify([...saved].sort()) ||
+    urduEnabled !== savedUrdu;
 
   const save = async () => {
     setSaving(true);
     try {
-      const result = await localizationApi.updateLanguageAccess(allowed);
+      const result = await localizationApi.updateLanguageAccess({
+        urdu_enabled: urduEnabled,
+        allowed_user_types: allowed,
+      });
       setSaved(result.allowed_user_types);
+      setSavedUrdu(result.urdu_enabled);
       notify("Language access settings saved.");
     } catch (e) {
       notify(e instanceof Error ? e.message : "Save failed.", "error");
@@ -53,7 +66,7 @@ export function LanguageSettings() {
       id="language"
       icon={Languages}
       title="Language Access"
-      description="Choose which user types can switch the app language (English / Urdu) on their mobile device."
+      description="Turn Urdu on or off for the whole app, and choose which user types may switch to it."
     >
       {loading ? (
         <div className="flex flex-col gap-2">
@@ -61,6 +74,46 @@ export function LanguageSettings() {
         </div>
       ) : (
         <div className="flex flex-col gap-2">
+          {/* The master switch. Off means English-only for everyone, so the
+              per-type list below is dimmed rather than hidden — the office can
+              still see and edit who gets Urdu when it comes back on. */}
+          <button
+            onClick={() => setUrduEnabled((v) => !v)}
+            className={`flex items-center justify-between rounded-xl border px-4 py-3.5 text-left transition ${
+              urduEnabled
+                ? "border-emerald-400/40 bg-emerald-400/10"
+                : "border-white/10 bg-white/5"
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <Power size={17} className={urduEnabled ? "text-emerald-300" : "text-mist/40"} />
+              <div>
+                <p className="text-sm font-semibold text-mist">Urdu (اردو)</p>
+                <p className="mt-0.5 text-xs text-mist/45">
+                  {urduEnabled
+                    ? "Available in the app, to the user types ticked below."
+                    : "Turned off — the app is English-only for everyone."}
+                </p>
+              </div>
+            </div>
+            <span
+              className={`relative h-6 w-11 shrink-0 rounded-full transition ${
+                urduEnabled ? "bg-emerald-400" : "bg-white/15"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${
+                  urduEnabled ? "left-[22px]" : "left-0.5"
+                }`}
+              />
+            </span>
+          </button>
+
+          <p className="mb-1 mt-3 text-xs font-semibold uppercase tracking-wide text-mist/35">
+            Who can switch
+          </p>
+
+          <div className={urduEnabled ? "" : "pointer-events-none opacity-40"}>
           {USER_TYPES.map(({ value, label }) => {
             const active = allowed.includes(value);
             return (
@@ -89,6 +142,7 @@ export function LanguageSettings() {
               </button>
             );
           })}
+          </div>
 
           <div className="flex items-center gap-3 pt-2">
             <Button onClick={save} loading={saving} disabled={!isDirty}>
@@ -96,7 +150,7 @@ export function LanguageSettings() {
             </Button>
             {isDirty && (
               <button
-                onClick={() => setAllowed(saved)}
+                onClick={() => { setAllowed(saved); setUrduEnabled(savedUrdu); }}
                 className="text-sm text-mist/50 hover:text-mist transition"
               >
                 Discard changes

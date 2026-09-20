@@ -232,6 +232,20 @@ async function adminFetch<T>(path: string, options: RequestInit = {}): Promise<T
 
 // ─── API ──────────────────────────────────────────────────────────────────────
 
+/** A bank account or wallet a customer can transfer to. */
+export interface PaymentAccount {
+  id: number;
+  bank_name: string;
+  account_title: string;
+  account_number: string;
+  iban: string;
+  /** Absolute URL, or null when no QR has been uploaded. */
+  qr: string | null;
+  instructions: string;
+  is_active: boolean;
+  sort_order: number;
+}
+
 export const adminService = {
   /**
    * Headline stats. Passing a range scopes every figure to it; passing nothing
@@ -551,6 +565,44 @@ export const adminService = {
   },
 
   // ─── Shop / Products ──────────────────────────────────────────────────────
+
+  // ── Payment accounts ──────────────────────────────────────────────────────
+  // Multipart throughout, because the QR is a file upload and one code path is
+  // easier to keep correct than two.
+
+  getPaymentAccounts(): Promise<PaymentAccount[]> {
+    return adminFetch('/ledger/admin/payment-accounts/');
+  },
+
+  createPaymentAccount(formData: FormData): Promise<PaymentAccount> {
+    return getAuthToken().then((token) =>
+      fetch(`${API_URL}/ledger/admin/payment-accounts/`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      }).then(async (res) => {
+        if (!res.ok) throw new Error(await errorMessage(res, 'Failed to add the account.'));
+        return res.json();
+      }),
+    );
+  },
+
+  updatePaymentAccount(id: number, formData: FormData): Promise<PaymentAccount> {
+    return getAuthToken().then((token) =>
+      fetch(`${API_URL}/ledger/admin/payment-accounts/${id}/`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      }).then(async (res) => {
+        if (!res.ok) throw new Error(await errorMessage(res, 'Failed to update the account.'));
+        return res.json();
+      }),
+    );
+  },
+
+  deletePaymentAccount(id: number): Promise<void> {
+    return adminFetch(`/ledger/admin/payment-accounts/${id}/`, { method: 'DELETE' });
+  },
 
   getProducts(): Promise<AdminProduct[]> {
     return adminFetch('/products/');

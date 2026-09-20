@@ -8,7 +8,20 @@ USER_TYPE_CHOICES = [
 ]
 
 class LanguageAccessSetting(models.Model):
-    """Singleton: which user types are allowed to switch the app language."""
+    """Singleton: whether Urdu is offered at all, and to whom.
+
+    Two switches, because they answer different questions. `urdu_enabled` is
+    the master: off means the app is English-only for everybody, however the
+    list below is set — useful while translations are still being filled in, or
+    to withdraw a half-finished Urdu without losing who was allowed to use it.
+    """
+
+    urdu_enabled = models.BooleanField(
+        default=True,
+        help_text='Off makes the app English-only for everyone, whatever the '
+                  'list below says. Turning it back on restores the previous '
+                  'per-user-type access.',
+    )
     allowed_user_types = models.JSONField(
         default=list,
         help_text='List of user_type values that can toggle language (e.g. ["customer", "delivery_boy"]). Empty = no one.',

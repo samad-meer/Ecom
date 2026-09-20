@@ -6,7 +6,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import {
-  PaymentDetails, businessService, formatPaymentDetails,
+  PaymentAccount, PaymentDetails, businessService, formatPaymentDetails,
 } from '../services/businessService';
 
 const BRAND_BLUE = '#0A84FF';
@@ -46,10 +46,39 @@ export const RiderPaymentScreen: React.FC = () => {
   // without them restarting the app.
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const share = async () => {
+  /**
+   * Every account to show, newest API shape first.
+   *
+   * A server that predates `payment_accounts` still sends only the flat
+   * payment_* fields, so those are folded into a single synthetic account
+   * rather than leaving the rider with a blank screen after a partial deploy.
+   */
+  const accounts: PaymentAccount[] = details?.payment_accounts?.length
+    ? details.payment_accounts
+    : details && (details.payment_account_number || details.payment_qr)
+      ? [{
+          id: 0,
+          bank_name: details.payment_bank_name,
+          account_title: details.payment_account_title,
+          account_number: details.payment_account_number,
+          iban: '',
+          qr: details.payment_qr,
+          instructions: details.payment_instructions,
+        }]
+      : [];
+
+  const shareAccount = async (account: PaymentAccount) => {
     if (!details) return;
+    const message = [
+      `${details.name} — online payment`,
+      account.bank_name && `Bank: ${account.bank_name}`,
+      account.account_title && `Title: ${account.account_title}`,
+      account.account_number && `Account: ${account.account_number}`,
+      account.iban && `IBAN: ${account.iban}`,
+      account.instructions,
+    ].filter(Boolean).join('\n');
     try {
-      await Share.share({ message: formatPaymentDetails(details) });
+      await Share.share({ message });
     } catch {
       Alert.alert('Could not share', 'The share sheet did not open.');
     }
@@ -94,43 +123,60 @@ export const RiderPaymentScreen: React.FC = () => {
       ) : details ? (
         <>
           <Text style={styles.pageTitle}>Pay {details.name}</Text>
-          <Text style={styles.pageSub}>Show this to the customer to take a transfer.</Text>
+          <Text style={styles.pageSub}>
+            {accounts.length > 1
+              ? 'Show the customer whichever bank they use — a transfer between the same bank arrives instantly.'
+              : 'Show this to the customer to take a transfer.'}
+          </Text>
 
-          {!!details.payment_qr && (
-            <View style={styles.qrCard}>
-              <Image
-                source={{ uri: details.payment_qr }}
-                style={{ width: qrSize, height: qrSize }}
-                resizeMode="contain"
-                accessibilityLabel="Payment QR code"
-              />
-              <Text style={styles.qrCaption}>Scan to pay</Text>
+          {accounts.map((account, index) => (
+            <View key={account.id ?? index} style={styles.accountBlock}>
+              {accounts.length > 1 && (
+                <Text style={styles.accountHeading}>{account.bank_name}</Text>
+              )}
+
+              {!!account.qr && (
+                <View style={styles.qrCard}>
+                  <Image
+                    source={{ uri: account.qr }}
+                    style={{ width: qrSize, height: qrSize }}
+                    resizeMode="contain"
+                    accessibilityLabel={`${account.bank_name} payment QR code`}
+                  />
+                  <Text style={styles.qrCaption}>Scan to pay</Text>
+                </View>
+              )}
+
+              <View style={styles.detailCard}>
+                {!!account.bank_name && <Row label="Bank" value={account.bank_name} />}
+                {!!account.account_title && (
+                  <Row label="Account title" value={account.account_title} divided />
+                )}
+                {!!account.account_number && (
+                  <Row label="Account number" value={account.account_number} divided mono />
+                )}
+                {!!account.iban && <Row label="IBAN" value={account.iban} divided mono />}
+              </View>
+
+              {!!account.instructions && (
+                <View style={styles.noteBox}>
+                  <Ionicons name="information-circle" size={16} color="#8a6100" />
+                  <Text style={styles.noteText}>{account.instructions}</Text>
+                </View>
+              )}
+
+              <TouchableOpacity
+                style={styles.shareBtn}
+                onPress={() => shareAccount(account)}
+                activeOpacity={0.9}
+              >
+                <Ionicons name="share-social" size={18} color="#fff" />
+                <Text style={styles.shareBtnText}>
+                  {accounts.length > 1 ? `Send ${account.bank_name} details` : 'Send details to customer'}
+                </Text>
+              </TouchableOpacity>
             </View>
-          )}
-
-          <View style={styles.detailCard}>
-            {!!details.payment_bank_name && (
-              <Row label="Bank" value={details.payment_bank_name} />
-            )}
-            {!!details.payment_account_title && (
-              <Row label="Account title" value={details.payment_account_title} divided />
-            )}
-            {!!details.payment_account_number && (
-              <Row label="Account number" value={details.payment_account_number} divided mono />
-            )}
-          </View>
-
-          {!!details.payment_instructions && (
-            <View style={styles.noteBox}>
-              <Ionicons name="information-circle" size={16} color="#8a6100" />
-              <Text style={styles.noteText}>{details.payment_instructions}</Text>
-            </View>
-          )}
-
-          <TouchableOpacity style={styles.shareBtn} onPress={share} activeOpacity={0.9}>
-            <Ionicons name="share-social" size={18} color="#fff" />
-            <Text style={styles.shareBtnText}>Send details to customer</Text>
-          </TouchableOpacity>
+          ))}
 
           <Text style={styles.footnote}>
             Record the payment on the delivery as an online payment, not as cash —
@@ -161,6 +207,11 @@ const styles = StyleSheet.create({
   pageTitle: { fontSize: 22, fontWeight: '800', color: '#1a2530' },
   pageSub: { fontSize: 13.5, color: '#8a929b', marginTop: 4, marginBottom: 18 },
 
+  accountBlock: { marginBottom: 26 },
+  accountHeading: {
+    fontSize: 15, fontWeight: '800', color: '#1a2530',
+    marginBottom: 10, marginTop: 4,
+  },
   qrCard: {
     backgroundColor: '#fff', borderRadius: 20, padding: 18,
     alignItems: 'center', marginBottom: 16,
