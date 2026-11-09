@@ -38,6 +38,8 @@ export interface Order {
   cash_received?: boolean;
   cash_amount?: number;
   delivery_notes?: string;
+  /** Rider view only: what became of an Online tap on this delivery. */
+  online_claim?: { amount: string; status: 'waiting' | 'confirmed' | 'not_found' } | null;
 }
 
 export interface DeliveryStatus {

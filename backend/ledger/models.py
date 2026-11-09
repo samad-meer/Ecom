@@ -320,6 +320,83 @@ class PaymentAccount(models.Model):
         return f'{self.bank_name} — {self.account_title}'
 
 
+class PaymentClaim(models.Model):
+    """
+    Someone saying an online payment was made. Not the money itself.
+
+    A rider tapping Online proves only that the customer said so, and a transfer
+    screenshot can be edited, so a claim never moves a balance on its own. The
+    office checks the bank or wallet and calls service.confirm_claim(), which is
+    the only thing that turns a claim into a ledger payment.
+
+    Not Found is not final: a transfer the office cannot see today may still
+    arrive tomorrow, so those claims stay confirmable.
+    """
+
+    WAITING = 'waiting'
+    CONFIRMED = 'confirmed'
+    NOT_FOUND = 'not_found'
+
+    STATUS_CHOICES = [
+        (WAITING, 'Waiting for the office'),
+        (CONFIRMED, 'Confirmed in the bank'),
+        (NOT_FOUND, 'Not found in the bank'),
+    ]
+
+    # Null on a guest phone-in order: guests have no ledger, so confirming one
+    # marks the order paid and posts nothing.
+    customer = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.PROTECT,
+        related_name='payment_claims',
+    )
+    order = models.ForeignKey(
+        'orders.Order', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='payment_claims',
+    )
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    status = models.CharField(
+        max_length=12, choices=STATUS_CHOICES, default=WAITING, db_index=True,
+    )
+    reference = models.CharField(
+        max_length=64, blank=True,
+        help_text="Bank or wallet transaction id, added when the office confirms.",
+    )
+    note = models.CharField(
+        max_length=255, blank=True,
+        help_text="Why it was not found, or why a confirmation was voided.",
+    )
+    # 'order:12:online', so one delivery can never queue the same payment twice.
+    # NULL for anything that does not come from a delivery — both MySQL and
+    # Postgres treat NULLs as distinct in a UNIQUE index.
+    source_key = models.CharField(
+        max_length=64, unique=True, null=True, blank=True, editable=False,
+    )
+
+    claimed_by = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='payment_claims_made',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_by = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='payment_claims_resolved',
+    )
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    entry = models.OneToOneField(
+        LedgerEntry, null=True, blank=True, on_delete=models.PROTECT,
+        related_name='claim',
+        help_text="The payment this became. Empty until confirmed, and on guests.",
+    )
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+        verbose_name = 'Payment claim'
+        verbose_name_plural = 'Payment claims'
+
+    def __str__(self):
+        return f'{self.get_status_display()} — PKR {self.amount}'
+
+
 class NumberSequence(models.Model):
     """
     Hands out gapless numbers under a row lock.

@@ -17,7 +17,7 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
-from .models import LedgerEntry, LedgerSettings, PaymentAccount
+from .models import LedgerEntry, LedgerSettings, PaymentAccount, PaymentClaim
 
 ZERO = Decimal('0')
 
@@ -112,6 +112,77 @@ class ManualEntrySerializer(serializers.Serializer):
 
 class VoidEntrySerializer(serializers.Serializer):
     reason = serializers.CharField(max_length=255)
+
+
+class PaymentClaimSerializer(serializers.ModelSerializer):
+    """One row of the office's online payments list."""
+
+    customer_name = serializers.SerializerMethodField()
+    customer_code = serializers.SerializerMethodField()
+    phone = serializers.SerializerMethodField()
+    order_total = serializers.DecimalField(
+        source='order.total_price', max_digits=10, decimal_places=2,
+        read_only=True, allow_null=True,
+    )
+    claimed_by_name = serializers.SerializerMethodField()
+    resolved_by_name = serializers.SerializerMethodField()
+    receipt_number = serializers.CharField(
+        source='entry.receipt_number', read_only=True, allow_null=True,
+    )
+
+    class Meta:
+        model = PaymentClaim
+        fields = [
+            'id', 'status', 'amount', 'reference', 'note',
+            'order', 'order_total',
+            'customer', 'customer_name', 'customer_code', 'phone',
+            'claimed_by_name', 'created_at',
+            'resolved_by_name', 'resolved_at',
+            'entry', 'receipt_number',
+        ]
+        read_only_fields = fields
+
+    @staticmethod
+    def _name(user):
+        return (user.get_full_name() or user.username) if user else None
+
+    @staticmethod
+    def _profile(obj):
+        return getattr(obj.customer, 'profile', None) if obj.customer_id else None
+
+    def get_customer_name(self, obj):
+        if obj.customer_id:
+            return self._name(obj.customer)
+        return getattr(obj.order, 'guest_name', None) or 'Guest'
+
+    def get_customer_code(self, obj):
+        return getattr(self._profile(obj), 'customer_code', None)
+
+    def get_phone(self, obj):
+        if obj.customer_id:
+            return getattr(self._profile(obj), 'phone_number', None)
+        return getattr(obj.order, 'guest_phone', None)
+
+    def get_claimed_by_name(self, obj):
+        return self._name(obj.claimed_by)
+
+    def get_resolved_by_name(self, obj):
+        return self._name(obj.resolved_by)
+
+
+class ConfirmClaimSerializer(serializers.Serializer):
+    """The office has seen the money. The transaction id stops it paying twice."""
+
+    reference = serializers.CharField(
+        max_length=64, required=False, allow_blank=True, default='',
+    )
+    entry_date = serializers.DateField(required=False, allow_null=True)
+
+
+class ClaimNotFoundSerializer(serializers.Serializer):
+    note = serializers.CharField(
+        max_length=255, required=False, allow_blank=True, default='',
+    )
 
 
 class ReceivableSerializer(serializers.Serializer):

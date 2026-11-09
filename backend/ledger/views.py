@@ -15,12 +15,15 @@ from accounts.models import UserProfile
 from activities.service import log as activity_log
 
 from . import service
-from .models import LedgerEntry, PaymentAccount
+from .models import LedgerEntry, PaymentAccount, PaymentClaim
 from .permissions import CanRecordPayment, CanViewLedger, CanVoidLedger
 from .serializers import (
     BusinessSettingsSerializer,
+    ClaimNotFoundSerializer,
+    ConfirmClaimSerializer,
     LedgerEntrySerializer,
     ManualEntrySerializer,
+    PaymentClaimSerializer,
     ReceivableSerializer,
     RecordPaymentSerializer,
     VoidEntrySerializer,
@@ -369,6 +372,102 @@ class VoidEntryView(APIView):
             details={'reason': payload.validated_data['reason']},
         )
         return Response(LedgerEntrySerializer(reversal).data, status=status.HTTP_201_CREATED)
+
+
+# ─── Online payment claims ───────────────────────────────────────────────────
+
+@api_view(['GET'])
+@permission_classes([CanViewLedger])
+def payment_claims(request):
+    """
+    The office's online payments list, oldest first so nothing sits forgotten.
+    Defaults to what still needs checking; `?status=` opens the closed ones.
+    """
+    claim_status = request.query_params.get('status') or PaymentClaim.WAITING
+    claims = (
+        PaymentClaim.objects.filter(status=claim_status)
+        .select_related('customer', 'customer__profile', 'order', 'claimed_by', 'resolved_by', 'entry')
+        .order_by('created_at', 'id')
+    )
+
+    search = (request.query_params.get('search') or '').strip()
+    if search:
+        claims = claims.filter(
+            Q(customer__username__icontains=search)
+            | Q(customer__first_name__icontains=search)
+            | Q(customer__last_name__icontains=search)
+            | Q(customer__profile__phone_number__icontains=search)
+            | Q(customer__profile__customer_code__icontains=search)
+            | Q(order__guest_name__icontains=search)
+            | Q(order__guest_phone__icontains=search)
+        )
+
+    page, limit, offset = _paginate(request, claims)
+    return Response({
+        'count': claims.count(),
+        'total_amount': claims.aggregate(total=Sum('amount'))['total'] or 0,
+        'limit': limit,
+        'offset': offset,
+        'results': PaymentClaimSerializer(page, many=True).data,
+    })
+
+
+class ConfirmClaimView(APIView):
+    """The money is in the bank: post the payment and close the claim."""
+
+    permission_classes = [CanRecordPayment]
+
+    def post(self, request, pk):
+        claim = get_object_or_404(PaymentClaim, pk=pk)
+        payload = ConfirmClaimSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+
+        if claim.customer_id:
+            service.ensure_customer_code(claim.customer)
+        try:
+            claim = service.confirm_claim(
+                claim,
+                reference=data['reference'],
+                entry_date=data.get('entry_date'),
+                actor=request.user,
+            )
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        activity_log(
+            request.user, 'customer', 'Online Payment Confirmed',
+            target_type='payment_claim', target_id=claim.pk,
+            target_label=claim.entry.receipt_number if claim.entry else f'Claim #{claim.pk}',
+            details={'amount': str(claim.amount), 'reference': claim.reference},
+        )
+        return Response(PaymentClaimSerializer(claim).data)
+
+
+class ClaimNotFoundView(APIView):
+    """The bank does not show it. Nothing moves, and it can still be confirmed."""
+
+    permission_classes = [CanRecordPayment]
+
+    def post(self, request, pk):
+        claim = get_object_or_404(PaymentClaim, pk=pk)
+        payload = ClaimNotFoundSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+
+        try:
+            claim = service.mark_claim_not_found(
+                claim, note=payload.validated_data['note'], actor=request.user,
+            )
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        activity_log(
+            request.user, 'customer', 'Online Payment Not Found',
+            target_type='payment_claim', target_id=claim.pk,
+            target_label=f'Claim #{claim.pk}',
+            details={'amount': str(claim.amount), 'note': claim.note},
+        )
+        return Response(PaymentClaimSerializer(claim).data)
 
 
 # ─── Documents ───────────────────────────────────────────────────────────────

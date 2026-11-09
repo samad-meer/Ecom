@@ -75,10 +75,13 @@ class RiderDeliveryUpdateTests(TestCase):
         self.assertIsNotNone(self.order.delivery_completed_at)
         self.assertIsNotNone(self.order.delivery_status_updated_at)
 
-    def test_online_payment_marks_order_paid(self):
+    def test_online_payment_waits_for_the_office(self):
+        """The rider cannot see the bank, so Online no longer settles an order.
+        The rest of this flow is covered in ledger/test_payment_claims.py."""
         self._deliver(cash_received=False, is_paid=True, cash_amount=500)
         self.order.refresh_from_db()
-        self.assertTrue(self.order.is_paid)
+        self.assertFalse(self.order.is_paid)
+        self.assertEqual(self.order.payment_claims.get().amount, Decimal('500.00'))
 
     def test_locked_after_delivery(self):
         self._deliver()

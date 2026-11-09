@@ -667,8 +667,8 @@ export type LedgerEntryType =
   | "adjustment"
   | "refund";
 
-/** Cash only. */
-export type LedgerPaymentMethod = "Cash";
+/** "Online" entries only appear once the office confirms a transfer. */
+export type LedgerPaymentMethod = "Cash" | "Online";
 
 export interface LedgerEntry {
   id: number;
@@ -705,6 +705,36 @@ export interface LedgerEntry {
   created_by_name: string | null;
   created_at: string;
   notes: string;
+}
+
+export type PaymentClaimStatus = "waiting" | "confirmed" | "not_found";
+
+/** Someone saying an online payment was made. Not money until confirmed. */
+export interface PaymentClaim {
+  id: number;
+  status: PaymentClaimStatus;
+  amount: string;
+  reference: string;
+  note: string;
+  order: number | null;
+  order_total: string | null;
+  /** Null on a guest order, which has no ledger. */
+  customer: number | null;
+  customer_name: string;
+  customer_code: string | null;
+  phone: string | null;
+  claimed_by_name: string | null;
+  created_at: string;
+  resolved_by_name: string | null;
+  resolved_at: string | null;
+  entry: number | null;
+  receipt_number: string | null;
+}
+
+export interface PaymentClaimList {
+  count: number;
+  total_amount: string | number;
+  results: PaymentClaim[];
 }
 
 export interface LedgerStatement {

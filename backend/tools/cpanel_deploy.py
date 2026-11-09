@@ -73,6 +73,21 @@ else:
     for migration, _backwards in plan:
         print(f"   {migration.app_label}.{migration.name}")
 
+# Read-only. Confirming an online payment posts a credit; with auto charge off
+# the delivery it pays for was never charged, so the customer lands in credit.
+rule("LEDGER SETTINGS")
+try:
+    from ledger.models import LedgerSettings
+
+    cfg = LedgerSettings.objects.filter(pk=1).first()
+    if cfg is None:
+        print("no settings row yet - auto charge is OFF (the default)  <-- turn it on in admin")
+    else:
+        print("auto_charge_enabled :", cfg.auto_charge_enabled,
+              "" if cfg.auto_charge_enabled else "  <-- turn it on in admin before confirming payments")
+except Exception as exc:  # noqa: BLE001
+    print("could not read ledger settings:", exc)
+
 if not APPLY:
     rule("DRY RUN - NOTHING WAS CHANGED")
     print("Back up the database in phpMyAdmin first, then re-run with 'apply':")

@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import LedgerEntry, LedgerSettings, NumberSequence, PaymentAccount
+from .models import LedgerEntry, LedgerSettings, NumberSequence, PaymentAccount, PaymentClaim
 
 
 @admin.register(LedgerEntry)
@@ -68,3 +68,25 @@ class PaymentAccountAdmin(admin.ModelAdmin):
     list_editable = ('is_active', 'sort_order')
     list_filter = ('is_active', 'bank_name')
     search_fields = ('bank_name', 'account_title', 'account_number', 'iban')
+
+
+@admin.register(PaymentClaim)
+class PaymentClaimAdmin(admin.ModelAdmin):
+    """Read-only: confirming here would skip the ledger posting in service.py."""
+
+    list_display = (
+        'created_at', 'customer', 'order', 'amount', 'status', 'reference',
+        'claimed_by', 'resolved_by',
+    )
+    list_filter = ('status',)
+    search_fields = ('customer__username', 'reference', 'order__guest_phone')
+    list_select_related = ('customer', 'order', 'claimed_by', 'resolved_by')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

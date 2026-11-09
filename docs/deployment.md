@@ -111,6 +111,13 @@ print('dist/backend-deploy.zip packaged successfully.')
 ### C. Run Migrations & Collect Static Files
 Use the automated cPanel runner scripts provided in `tools/`:
 
+0. **Check first (changes nothing)**:
+   In **Setup Python App** &rarr; **Execute python script**, enter:
+   ```
+   /home3/zipnixte/public_html/centuryy/ecom-app/tools/cpanel_deploy.py
+   ```
+   The output lists the pending migrations and shows `auto_charge_enabled`. If it says `False`, turn it on in Django admin &rarr; Ledger settings before anyone confirms an online payment.
+
 1. **Run Migrations**:
    In **Setup Python App** &rarr; **Execute python script**, enter:
    ```
@@ -124,6 +131,7 @@ Use the automated cPanel runner scripts provided in `tools/`:
    - `ledger.0006_payment_accounts`
    - `ledger.0007_carry_over_existing_payment_account`
    - `ledger.0008_seed_meezan_account`
+   - `ledger.0009_paymentclaim`
    - `localization.0004_urdu_master_switch`
 
 2. **Collect Static Files**:
@@ -131,6 +139,13 @@ Use the automated cPanel runner scripts provided in `tools/`:
    ```
    /home3/zipnixte/public_html/centuryy/ecom-app/manage.py collectstatic --noinput
    ```
+
+3. **Check old online payments (once, after `ledger.0009_paymentclaim`)**:
+   Rider Online taps used to credit the customer with nobody checking the bank. This read-only report lists them so they can be compared with the bank statement:
+   ```
+   /home3/zipnixte/public_html/centuryy/ecom-app/manage.py ledger_unverified_online
+   ```
+   *(Add `--since 2026-08-01` to shorten the list.)*
 
 ### D. Restart the Python App
 1. In **Setup Python App**, click the **Restart** button.

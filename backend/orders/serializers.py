@@ -220,10 +220,12 @@ class DeliveryBoyOrderSerializer(OrderSerializer):
 
     customer = serializers.SerializerMethodField()
     today_visits = serializers.SerializerMethodField()
+    online_claim = serializers.SerializerMethodField()
 
     class Meta(OrderSerializer.Meta):
         fields = OrderSerializer.Meta.fields + [
             'delivery_notes', 'rider_note', 'customer', 'today_visits',
+            'online_claim',
         ]
         read_only_fields = OrderSerializer.Meta.read_only_fields + ['rider_note']
 
@@ -246,6 +248,7 @@ class DeliveryBoyOrderSerializer(OrderSerializer):
                 'address': obj.shipping_address,
                 'area': None,
                 'account_balance': None,
+                'online_waiting': None,
                 'bottles_held': 0,
                 'last_delivery_days': None,
                 'customer_latitude': None,
@@ -262,6 +265,7 @@ class DeliveryBoyOrderSerializer(OrderSerializer):
                 maps['last_plant_delivery'].get(user.id),
             ) if d
         ]
+        online_waiting = maps['online_waiting'].get(user.id, ZERO)
         return {
             'id': user.id,
             'customer_code': profile.customer_code if profile else None,
@@ -270,11 +274,15 @@ class DeliveryBoyOrderSerializer(OrderSerializer):
             'address': (profile.address if profile else None) or obj.shipping_address,
             'area': profile.area if profile else None,
             # Owed-positive string — the receivables convention, because this
-            # is the figure the rider asks for at the door.
+            # is the figure the rider asks for at the door. Online payments
+            # still waiting for the office are left out, so the next rider does
+            # not ask for the same money again. Once the office marks one Not
+            # Found it is due again and the rider collects it.
             'account_balance': (
-                str((ZERO - (profile.account_balance or 0)).quantize(ZERO))
+                str((ZERO - (profile.account_balance or 0) - online_waiting).quantize(ZERO))
                 if profile else None
             ),
+            'online_waiting': str(online_waiting.quantize(ZERO)),
             'bottles_held': maps['bottles_held'].get(user.id, 0),
             'last_delivery_days': (
                 (timezone.localdate() - max(last_dates)).days if last_dates else None
@@ -289,6 +297,13 @@ class DeliveryBoyOrderSerializer(OrderSerializer):
                 if profile and profile.customer_longitude is not None else None
             ),
         }
+
+    def get_online_claim(self, obj):
+        """What became of an Online tap on this delivery, for the locked screen."""
+        claim = self._maps(obj)['online_claims'].get(obj.id)
+        if claim is None:
+            return None
+        return {'amount': str(claim.amount), 'status': claim.status}
 
     def get_today_visits(self, obj):
         """Today's NO NEED / NO RESPONSE marks, so the app can show
@@ -310,7 +325,7 @@ def rider_card_maps(orders):
     whole page of orders, never one per order. Handed to
     DeliveryBoyOrderSerializer via context {'rider_card_maps': ...}.
     """
-    from ledger.models import LedgerEntry   # local imports keep orders import-light
+    from ledger.models import LedgerEntry, PaymentClaim  # local imports keep orders import-light
     from plant.models import DeliveryRecord
 
     user_ids = {order.user_id for order in orders if order.user_id}
@@ -339,12 +354,24 @@ def rider_card_maps(orders):
         ).order_by('created_at')
     ):
         today_visits[visit.order_id].append(visit)
+    online_waiting = {
+        row['customer_id']: row['total']
+        for row in PaymentClaim.objects.filter(
+            customer_id__in=user_ids, status=PaymentClaim.WAITING,
+        ).values('customer_id').annotate(total=Sum('amount'))
+    }
+    online_claims = {
+        claim.order_id: claim
+        for claim in PaymentClaim.objects.filter(order_id__in=order_ids)
+    }
 
     return {
         'bottles_held': bottles_held,
         'last_shop_delivery': last_shop,
         'last_plant_delivery': last_plant,
         'today_visits': today_visits,
+        'online_waiting': online_waiting,
+        'online_claims': online_claims,
     }
 
 

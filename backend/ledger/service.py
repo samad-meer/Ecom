@@ -19,7 +19,7 @@ from django.utils import timezone
 
 from accounts.models import UserProfile
 
-from .models import LedgerEntry, LedgerSettings, NumberSequence
+from .models import LedgerEntry, LedgerSettings, NumberSequence, PaymentClaim
 
 ZERO = Decimal('0')
 
@@ -247,7 +247,9 @@ def sync_order(order, actor=None, force=False):
         item_label='Amount Received',
         document_number=str(order.pk),
         order=order,
-        payment_method=order.payment_method or '',
+        # Always cash now: an online payment arrives as a PaymentClaim and only
+        # reaches the ledger through confirm_claim().
+        payment_method=LedgerEntry.CASH,
         actor=actor,
     )
 
@@ -370,6 +372,8 @@ def record_payment(*, customer, amount, payment_method='Cash', entry_date=None,
     amount = _dec(amount)
     if amount <= ZERO:
         raise ValueError('Payment amount must be greater than zero.')
+    if payment_method == LedgerEntry.ONLINE:
+        _assert_reference_unused(reference)
 
     entry_date = entry_date or timezone.localdate()
     return post_entry(
@@ -435,7 +439,7 @@ def void_entry(entry, *, reason, actor=None):
     if not (reason or '').strip():
         raise ValueError('A reason is required to void an entry.')
 
-    return post_entry(
+    reversal = post_entry(
         customer=entry.customer,
         entry_type=entry.entry_type,
         amount=-_dec(entry.amount),
@@ -445,6 +449,141 @@ def void_entry(entry, *, reason, actor=None):
         void_reason=reason.strip(),
         actor=actor,
     )
+
+    # Voiding a confirmed online payment means the money was not there after
+    # all, so the claim goes back on the office's list rather than staying
+    # "confirmed" against a payment that no longer counts.
+    claim = getattr(entry, 'claim', None)
+    if claim is not None:
+        _reopen_claim(claim, note=reason.strip(), actor=actor)
+
+    return reversal
+
+
+# ─── Online payment claims ───────────────────────────────────────────────────
+
+def claim_online_payment(*, order, amount, actor=None):
+    """
+    Record that a rider reported an online payment for `order`.
+
+    Moves no money: the balance stays where it is until the office confirms the
+    transfer. Keyed on the order, so a retried submission cannot queue the same
+    payment twice.
+    """
+    amount = _dec(amount)
+    if amount <= ZERO:
+        return None
+    claim, _ = PaymentClaim.objects.get_or_create(
+        source_key=f'order:{order.pk}:online',
+        defaults={
+            'customer_id': order.user_id,
+            'order': order,
+            'amount': amount,
+            'claimed_by': actor,
+        },
+    )
+    return claim
+
+
+def _assert_reference_unused(reference):
+    """One bank transaction pays once, however many screenshots of it exist."""
+    reference = (reference or '').strip()
+    if not reference:
+        return
+    used = LedgerEntry.objects.filter(
+        payment_method=LedgerEntry.ONLINE,
+        reference__iexact=reference,
+        reversal__isnull=True,
+    ).first()
+    if used:
+        raise ValueError(
+            f'Transaction {reference} is already on receipt {used.receipt_number}.'
+        )
+
+
+@transaction.atomic
+def confirm_claim(claim, *, reference='', entry_date=None, actor=None):
+    """
+    The office saw the money: post it and close the claim.
+
+    The ONLY path from a claim to a ledger payment. Works on a Not Found claim
+    too, because a late transfer is a normal day at the bank. A guest order has
+    no ledger, so it is simply marked paid.
+
+    Deliberately no source_ref: this is a staff action, so the entry stays
+    voidable if the confirmation turns out to be wrong.
+    """
+    claim = PaymentClaim.objects.select_for_update().get(pk=claim.pk)
+    if claim.status == PaymentClaim.CONFIRMED:
+        raise ValueError('This payment has already been confirmed.')
+
+    reference = (reference or '').strip()
+    _assert_reference_unused(reference)
+
+    order = claim.order
+    entry = None
+    if claim.customer_id:
+        entry_date = entry_date or timezone.localdate()
+        entry = post_entry(
+            customer=claim.customer,
+            entry_type=LedgerEntry.ORDER_PAYMENT if order else LedgerEntry.PAYMENT,
+            amount=claim.amount,
+            entry_date=entry_date,
+            description=f'Online payment for order #{order.pk}' if order else 'Online payment',
+            item_label='Amount Received',
+            document_number=str(order.pk) if order else '',
+            order=order,
+            payment_method=LedgerEntry.ONLINE,
+            reference=reference,
+            receipt_number=next_receipt_number(entry_date),
+            actor=actor,
+        )
+
+    claim.status = PaymentClaim.CONFIRMED
+    claim.reference = reference
+    claim.entry = entry
+    claim.note = ''
+    claim.resolved_by = actor
+    claim.resolved_at = timezone.now()
+    claim.save()
+
+    # The rider asks for old dues too, so a claim can exceed this one order —
+    # and a part payment must leave it unpaid.
+    if order and claim.amount >= _dec(order.total_price) and not order.is_paid:
+        order.is_paid = True
+        order.save(update_fields=['is_paid'])
+    return claim
+
+
+@transaction.atomic
+def mark_claim_not_found(claim, *, note='', actor=None):
+    """Close a claim the bank does not show. The ledger is not touched."""
+    claim = PaymentClaim.objects.select_for_update().get(pk=claim.pk)
+    if claim.status != PaymentClaim.WAITING:
+        raise ValueError('Only a waiting payment can be marked not found.')
+
+    claim.status = PaymentClaim.NOT_FOUND
+    claim.note = (note or '').strip()
+    claim.resolved_by = actor
+    claim.resolved_at = timezone.now()
+    claim.save()
+    return claim
+
+
+def _reopen_claim(claim, *, note='', actor=None):
+    """Undo a confirmation after its ledger entry has been voided."""
+    claim.status = PaymentClaim.NOT_FOUND
+    claim.entry = None
+    claim.reference = ''
+    claim.note = note
+    claim.resolved_by = actor
+    claim.resolved_at = timezone.now()
+    claim.save()
+
+    order = claim.order
+    if order and order.is_paid and _dec(order.cash_amount) < _dec(order.total_price):
+        order.is_paid = False
+        order.save(update_fields=['is_paid'])
 
 
 # ─── Reconciliation ──────────────────────────────────────────────────────────

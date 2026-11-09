@@ -18,6 +18,12 @@ urlpatterns = [
     path('entries/<int:pk>/void/', views.VoidEntryView.as_view(), name='ledger-void-entry'),
     path('entries/<int:pk>/receipt/', views.receipt_pdf, name='ledger-receipt-pdf'),
 
+    # Online payment claims — what riders reported, waiting for the office to
+    # see the money before anything reaches a balance.
+    path('claims/', views.payment_claims, name='ledger-payment-claims'),
+    path('claims/<int:pk>/confirm/', views.ConfirmClaimView.as_view(), name='ledger-claim-confirm'),
+    path('claims/<int:pk>/not-found/', views.ClaimNotFoundView.as_view(), name='ledger-claim-not-found'),
+
     # Payment accounts — staff manage them here; riders and customers read the
     # active ones from business/ above, which they already call.
     path('admin/payment-accounts/', views.AdminPaymentAccountListCreateView.as_view(),

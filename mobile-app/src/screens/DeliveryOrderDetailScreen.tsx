@@ -24,6 +24,12 @@ const PAYMENT_OPTIONS: { key: PaymentMode; label: string; icon: string; color: s
   { key: 'online', label: 'Online / Transfer', icon: 'phone-portrait-outline', color: '#007AFF', bg: '#e8f0fe' },
 ];
 
+const CLAIM_LABELS: Record<string, string> = {
+  waiting: 'Waiting for the office',
+  confirmed: 'Confirmed by the office',
+  not_found: 'Not found in the bank',
+};
+
 export const DeliveryOrderDetailScreen: React.FC = () => {
   const navigation = useNavigation();
   const route = useRoute();
@@ -82,6 +88,8 @@ export const DeliveryOrderDetailScreen: React.FC = () => {
   const orderTotal = Number(order.total_price ?? 0);
   const previousDue = Number(order.customer?.account_balance ?? 0);
   const totalDue = Math.max(0, previousDue + orderTotal);
+  // Already left out of account_balance, so nobody collects it a second time.
+  const onlineWaiting = Number(order.customer?.online_waiting ?? 0);
 
   // Pre-filled and editable. `cash_amount` is a DRF decimal STRING, so an order
   // with nothing collected sends "0.00" — truthy — and the old `||` chain never
@@ -113,7 +121,7 @@ export const DeliveryOrderDetailScreen: React.FC = () => {
   const confirmSubmit = async () => {
     const paymentLine =
       paymentMode === 'cash'   ? `Cash collected: PKR ${parseFloat(amount) || 0}`
-      : paymentMode === 'online' ? `Paid online: PKR ${parseFloat(amount) || 0}`
+      : paymentMode === 'online' ? `Online payment for the office to check: PKR ${parseFloat(amount) || 0}`
       : 'No payment collected';
 
     const ok = await confirm({
@@ -147,7 +155,9 @@ Nothing on this order can be changed afterwards — the office will have to corr
       const recorded =
         paymentMode === 'none'
           ? 'No payment recorded.'
-          : `${paymentMode === 'cash' ? 'Cash' : 'Online'} received: PKR ${parseFloat(amount) || 0}.`;
+          : paymentMode === 'cash'
+            ? `Cash received: PKR ${parseFloat(amount) || 0}.`
+            : `Online payment noted: PKR ${parseFloat(amount) || 0}. The office will check it against the bank.`;
       await notify({
         title: `Order #${order.id} delivered`,
         message: `${recorded}
@@ -343,6 +353,20 @@ The office can see it now. You cannot change it from here.`,
           </View>
         )}
 
+        {/* An Online tap is only a report until the office sees the money. */}
+        {isSubmitted && !!order.online_claim && (
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Online payment</Text>
+            <View style={styles.lockedStatus}>
+              <Text style={styles.lockedStatusText}>
+                PKR {Number(order.online_claim.amount).toLocaleString('en-PK')}
+                {' · '}
+                {CLAIM_LABELS[order.online_claim.status] ?? order.online_claim.status}
+              </Text>
+            </View>
+          </View>
+        )}
+
         {/* Amount — shown for cash or online */}
         {!isSubmitted && paymentMode !== 'none' && (
           <View style={styles.inputGroup}>
@@ -369,6 +393,12 @@ The office can see it now. You cannot change it from here.`,
                       : `PKR ${previousDue.toLocaleString('en-PK')}`}
                   </Text>
                 </View>
+                {onlineWaiting > 0 && (
+                  <View style={styles.dueRow}>
+                    <Text style={styles.dueLabel}>Online, office checking (not included)</Text>
+                    <Text style={styles.dueValue}>PKR {onlineWaiting.toLocaleString('en-PK')}</Text>
+                  </View>
+                )}
                 <View style={styles.dueRow}>
                   <Text style={styles.dueLabel}>This order</Text>
                   <Text style={styles.dueValue}>PKR {orderTotal.toLocaleString('en-PK')}</Text>

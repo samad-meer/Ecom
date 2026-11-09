@@ -5,6 +5,9 @@ import type {
   LedgerStatement,
   LedgerSummary,
   ManualEntryInput,
+  PaymentClaim,
+  PaymentClaimList,
+  PaymentClaimStatus,
   Receivable,
   RecordPaymentInput,
   StatementFilters,
@@ -138,6 +141,33 @@ export const ledgerApi = {
       method: "POST",
       auth: true,
       body: { reason },
+    });
+  },
+
+  // ── Online payment claims ─────────────────────────────────────────────────
+
+  paymentClaims(opts: { status?: PaymentClaimStatus; search?: string; limit?: number } = {}) {
+    const params = new URLSearchParams();
+    if (opts.status) params.set("status", opts.status);
+    if (opts.search) params.set("search", opts.search);
+    if (opts.limit) params.set("limit", String(opts.limit));
+    const qs = params.toString();
+    return apiFetch<PaymentClaimList>(`/ledger/claims/${qs ? `?${qs}` : ""}`, { auth: true });
+  },
+
+  confirmClaim(claimId: number, reference: string) {
+    return apiFetch<PaymentClaim>(`/ledger/claims/${claimId}/confirm/`, {
+      method: "POST",
+      auth: true,
+      body: { reference },
+    });
+  },
+
+  markClaimNotFound(claimId: number) {
+    return apiFetch<PaymentClaim>(`/ledger/claims/${claimId}/not-found/`, {
+      method: "POST",
+      auth: true,
+      body: {},
     });
   },
 

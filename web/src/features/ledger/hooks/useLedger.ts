@@ -2,7 +2,7 @@
 
 import { useAsync } from "@/hooks/useAsync";
 import { ledgerApi } from "@/lib/api";
-import type { StatementFilters } from "@/lib/types";
+import type { PaymentClaimStatus, StatementFilters } from "@/lib/types";
 
 /** Serialize filters so a fresh object identity doesn't re-trigger the fetch. */
 const filterKey = (f: StatementFilters) =>
@@ -13,6 +13,18 @@ export function useReceivables(search: string, onlyOwing: boolean) {
     () => ledgerApi.receivables({ search, only_owing: onlyOwing }),
     [search, onlyOwing]
   );
+}
+
+export function usePaymentClaims(status: PaymentClaimStatus, search: string) {
+  return useAsync(
+    () => ledgerApi.paymentClaims({ status, search }),
+    [status, search]
+  );
+}
+
+/** Just the count, for the badge that says there is checking to do. */
+export function useWaitingClaimCount() {
+  return useAsync(() => ledgerApi.paymentClaims({ limit: 1 }), []);
 }
 
 export function useStatement(userId: number | null, filters: StatementFilters) {

@@ -8,8 +8,9 @@ import { formatPrice } from "@/lib/format";
 import { Card, EmptyState, PageHeader, Skeleton } from "@/components/ui";
 import { balanceReminderMessage, canWhatsApp, openWhatsApp } from "@/lib/whatsapp";
 import { cn } from "@/lib/cn";
-import { useReceivables } from "../hooks/useLedger";
+import { useReceivables, useWaitingClaimCount } from "../hooks/useLedger";
 import { CustomerStatement } from "./CustomerStatement";
+import { PaymentClaimsPanel } from "./PaymentClaimsPanel";
 
 function ReceivablesTable({ onOpen }: { onOpen: (id: number) => void }) {
   const [search, setSearch] = useState("");
@@ -132,6 +133,42 @@ function ReceivablesTable({ onOpen }: { onOpen: (id: number) => void }) {
   );
 }
 
+function LedgerLanding({ onOpen }: { onOpen: (id: number) => void }) {
+  const [view, setView] = useState<"balances" | "online">("balances");
+  const waiting = useWaitingClaimCount();
+  const waitingCount = waiting.data?.count ?? 0;
+
+  const tabClass = (active: boolean) => cn(
+    "rounded-full border px-4 py-2 text-sm font-medium transition",
+    active
+      ? "border-sky-400/40 bg-sky-400/15 text-sky-200"
+      : "border-white/10 text-mist/60 hover:text-mist"
+  );
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-wrap gap-2">
+        <button onClick={() => setView("balances")} className={tabClass(view === "balances")}>
+          Balances
+        </button>
+        <button onClick={() => setView("online")} className={tabClass(view === "online")}>
+          Online payments
+          {waitingCount > 0 && (
+            <span className="ml-2 rounded-full bg-amber-400/20 px-2 py-0.5 text-xs text-amber-200">
+              {waitingCount}
+            </span>
+          )}
+        </button>
+      </div>
+      {view === "balances" ? (
+        <ReceivablesTable onOpen={onOpen} />
+      ) : (
+        <PaymentClaimsPanel onOpen={onOpen} onChanged={waiting.reload} />
+      )}
+    </div>
+  );
+}
+
 function LedgerPageInner() {
   const router = useRouter();
   const params = useSearchParams();
@@ -153,7 +190,7 @@ function LedgerPageInner() {
       {userId ? (
         <CustomerStatement userId={userId} onBack={back} />
       ) : (
-        <ReceivablesTable onOpen={open} />
+        <LedgerLanding onOpen={open} />
       )}
     </div>
   );

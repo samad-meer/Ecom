@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
@@ -83,6 +84,22 @@ class DeliveryBoyOrderListView(generics.ListAPIView):
         )
 
 
+def _rider_online_amount(payload):
+    """
+    The amount a rider marked Online, or None if this submission is not that.
+
+    Read from the shape the rider app has always sent (is_paid set, cash not
+    received), so builds already on riders' phones work without an update.
+    """
+    if payload.get('cash_received') or not payload.get('is_paid'):
+        return None
+    try:
+        amount = Decimal(str(payload.get('cash_amount') or 0))
+    except InvalidOperation:
+        return None
+    return amount if amount > 0 else None
+
+
 class DeliveryBoyOrderDetailView(generics.RetrieveUpdateAPIView):
     serializer_class = DeliveryBoyOrderSerializer
     permission_classes = [IsDeliveryBoy]
@@ -136,7 +153,17 @@ class DeliveryBoyOrderDetailView(generics.RetrieveUpdateAPIView):
         if not instance.delivery_completed_at:
             data['delivery_completed_at'] = timezone.now()
 
-        # `status`, `is_paid` and `delivery_status_updated_at` are read-only on
+        # Online is the customer's word, not money in the account, and the rider
+        # cannot see the bank from the doorstep. It goes to the office as a claim
+        # instead of the cash fields, which would post straight to the ledger.
+        # For the same reason a rider can no longer mark an order paid: the old
+        # request field is ignored, and only the office settles an order.
+        online_amount = _rider_online_amount(request.data)
+        if online_amount:
+            data['cash_received'] = False
+            data['cash_amount'] = 0
+
+        # `status` and `delivery_status_updated_at` are read-only on
         # OrderSerializer, so DRF silently drops them from validated_data. These
         # are server-derived rather than client input, so they get written
         # straight to the model after the serializer has saved the rest.
@@ -145,8 +172,6 @@ class DeliveryBoyOrderDetailView(generics.RetrieveUpdateAPIView):
             'status': 'Delivered',
             'delivery_status_updated_at': timezone.now(),
         }
-        if 'is_paid' in request.data:
-            derived['is_paid'] = bool(request.data['is_paid'])
 
         serializer = self.get_serializer(instance, data=data, partial=True)
         serializer.is_valid(raise_exception=True)
@@ -162,8 +187,10 @@ class DeliveryBoyOrderDetailView(generics.RetrieveUpdateAPIView):
         # Post the charge and the rider-collected cash to the customer's ledger.
         # This path used to bypass the balance entirely, so cash a rider took at
         # the door never showed up against the account.
-        from ledger.service import sync_order
+        from ledger.service import claim_online_payment, sync_order
         sync_order(instance, actor=request.user)
+        if online_amount:
+            claim_online_payment(order=instance, amount=online_amount, actor=request.user)
 
         # Activity logging for rider delivery actions. One submission per order
         # means one entry, and it is always a completion.
