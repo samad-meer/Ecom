@@ -1,8 +1,8 @@
 import { colors, radius, card, pagePadding } from '../../theme';
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
-  TextInput, ActivityIndicator, RefreshControl, Modal, Alert,
+  TextInput, ActivityIndicator, RefreshControl, Modal, Alert, ScrollView,
 } from 'react-native';
 import { LoadingScreen } from '../../components/LoadingScreen';
 import { EmptyState, ErrorState, StatusPill, friendlyError, Tone } from '../../components/ui';
@@ -20,6 +20,8 @@ import { matchesCustomerSearch } from '../../utils/customerSearch';
 import { useRefetchOnFocus } from '../../hooks/useRefetchOnFocus';
 import { FieldLabel, PasswordRules, isPasswordValid } from '../../components/FormField';
 import { KeyboardAwareScrollView, SheetScrollView } from '../../components/KeyboardAwareScrollView';
+import { CalendarModal } from '../../components/CalendarModal';
+import { isoDate } from '../../utils/dateRange';
 
 const money = (n: number) => Math.abs(n).toLocaleString('en-PK', { maximumFractionDigits: 0 });
 
@@ -61,10 +63,32 @@ const styles = StyleSheet.create({
     width: 48, height: 48, borderRadius: radius.md,
     backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center',
   },
-  countText: {
-    fontSize: 14, fontWeight: '700', color: colors.textSecondary,
-    paddingHorizontal: pagePadding, paddingTop: 14, paddingBottom: 10,
+  filterBar: { flexGrow: 0, marginTop: 4 },
+  filterBarContent: { paddingHorizontal: pagePadding, paddingVertical: 8, gap: 8 },
+  filterChip: {
+    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, height: 38,
+    borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line,
+    backgroundColor: colors.surface,
   },
+  filterChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  filterChipActiveYellow: { backgroundColor: colors.sun, borderColor: colors.sun },
+  filterChipActiveOwes: { backgroundColor: colors.danger, borderColor: colors.danger },
+  filterChipActiveSuccess: { backgroundColor: colors.success, borderColor: colors.success },
+  filterChipText: { fontSize: 13, color: colors.ink, fontWeight: '700' },
+  filterChipTextActive: { color: colors.white },
+  filterChipTextActiveDark: { color: colors.ink, fontWeight: '800' },
+  calendarChip: { borderColor: colors.primarySoft, backgroundColor: colors.primaryTint },
+  chipClearBtn: { marginLeft: 6, padding: 2 },
+  chipDivider: { width: 1, height: 22, backgroundColor: colors.line, alignSelf: 'center', marginHorizontal: 2 },
+  countRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: pagePadding, paddingTop: 4, paddingBottom: 6,
+  },
+  countText: {
+    fontSize: 13, fontWeight: '700', color: colors.textSecondary,
+  },
+  resetFilterBtn: { paddingVertical: 4, paddingHorizontal: 6 },
+  resetFilterText: { fontSize: 13, fontWeight: '700', color: colors.primary },
   list: { paddingHorizontal: pagePadding, paddingBottom: 24, flexGrow: 1 },
 
   card: { ...card, padding: 16, marginBottom: 12 },
@@ -669,6 +693,23 @@ function CustomerStatsModal({
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
+type CustomerFilterKey =
+  | 'all'
+  | 'owes'
+  | 'credit'
+  | 'settled'
+  | 'this_month'
+  | 'missing_address'
+  | 'with_phone';
+
+const formatDateChip = (iso: string) => {
+  const d = new Date(iso + 'T00:00:00');
+  if (isNaN(d.getTime())) return iso;
+  const today = isoDate(new Date());
+  if (iso === today) return 'Today';
+  return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
+};
+
 export const AdminCustomersScreen: React.FC = () => {
   const [customers, setCustomers] = useState<AdminCustomer[]>([]);
   // Owed-positive ledger figures by customer id. Missing entries simply show no
@@ -680,6 +721,11 @@ export const AdminCustomersScreen: React.FC = () => {
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<AdminCustomer | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+
+  // Filters
+  const [activeFilter, setActiveFilter] = useState<CustomerFilterKey>('all');
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [calendarVisible, setCalendarVisible] = useState(false);
 
   // A late answer from an older load must not overwrite a newer one.
   const requestId = useRef(0);
@@ -726,9 +772,259 @@ export const AdminCustomersScreen: React.FC = () => {
 
   // Multi-word, digit-tolerant on phones, and aware of the structured address
   // parts. Same rules as the server's search and the web admin's.
-  const filtered = search
-    ? customers.filter(c => matchesCustomerSearch(c, search))
-    : customers;
+  const filtered = useMemo(() => {
+    return customers.filter(c => {
+      // 1. Search query
+      if (search && !matchesCustomerSearch(c, search)) {
+        return false;
+      }
+
+      // 2. Date joined calendar filter
+      if (selectedDate) {
+        if (!c.date_joined) return false;
+        const joinedIso = isoDate(new Date(c.date_joined));
+        if (joinedIso !== selectedDate) return false;
+      }
+
+      // 3. Status filter
+      if (activeFilter === 'owes') {
+        const bal = balances[c.id] ? Number(balances[c.id].balance) : 0;
+        return bal > 0;
+      }
+      if (activeFilter === 'credit') {
+        const bal = balances[c.id] ? Number(balances[c.id].balance) : 0;
+        return bal < 0;
+      }
+      if (activeFilter === 'settled') {
+        const bal = balances[c.id] ? Number(balances[c.id].balance) : 0;
+        return bal === 0;
+      }
+      if (activeFilter === 'this_month') {
+        if (!c.date_joined) return false;
+        const d = new Date(c.date_joined);
+        const now = new Date();
+        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+      }
+      if (activeFilter === 'missing_address') {
+        return !c.address || !c.address.trim();
+      }
+      if (activeFilter === 'with_phone') {
+        return !!c.phone && !!c.phone.trim();
+      }
+
+      return true;
+    });
+  }, [customers, search, selectedDate, activeFilter, balances]);
+
+  const filterCounts = useMemo(() => {
+    let owes = 0;
+    let credit = 0;
+    let settled = 0;
+    let thisMonth = 0;
+    let missingAddress = 0;
+    let withPhone = 0;
+
+    const now = new Date();
+    customers.forEach(c => {
+      const bal = balances[c.id] ? Number(balances[c.id].balance) : 0;
+      if (bal > 0) owes++;
+      else if (bal < 0) credit++;
+      else settled++;
+
+      if (c.date_joined) {
+        const d = new Date(c.date_joined);
+        if (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) {
+          thisMonth++;
+        }
+      }
+
+      if (!c.address || !c.address.trim()) {
+        missingAddress++;
+      }
+      if (c.phone && c.phone.trim()) {
+        withPhone++;
+      }
+    });
+
+    return {
+      all: customers.length,
+      owes,
+      credit,
+      settled,
+      thisMonth,
+      missingAddress,
+      withPhone,
+    };
+  }, [customers, balances]);
+
+  const renderFilterBar = () => {
+    return (
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.filterBar}
+        contentContainerStyle={styles.filterBarContent}
+      >
+        {/* All */}
+        <TouchableOpacity
+          style={[styles.filterChip, activeFilter === 'all' && !selectedDate && styles.filterChipActiveYellow]}
+          onPress={() => {
+            setActiveFilter('all');
+            setSelectedDate(null);
+          }}
+          accessibilityRole="button"
+        >
+          <Text style={[styles.filterChipText, activeFilter === 'all' && !selectedDate && styles.filterChipTextActiveDark]}>
+            All ({filterCounts.all})
+          </Text>
+        </TouchableOpacity>
+
+        {/* Owes */}
+        <TouchableOpacity
+          style={[styles.filterChip, activeFilter === 'owes' && styles.filterChipActiveOwes]}
+          onPress={() => setActiveFilter(activeFilter === 'owes' ? 'all' : 'owes')}
+          accessibilityRole="button"
+        >
+          <Ionicons
+            name="alert-circle"
+            size={14}
+            color={activeFilter === 'owes' ? colors.white : colors.danger}
+            style={{ marginRight: 4 }}
+          />
+          <Text style={[styles.filterChipText, activeFilter === 'owes' && styles.filterChipTextActive]}>
+            Owes ({filterCounts.owes})
+          </Text>
+        </TouchableOpacity>
+
+        {/* In Credit */}
+        <TouchableOpacity
+          style={[styles.filterChip, activeFilter === 'credit' && styles.filterChipActiveSuccess]}
+          onPress={() => setActiveFilter(activeFilter === 'credit' ? 'all' : 'credit')}
+          accessibilityRole="button"
+        >
+          <Ionicons
+            name="wallet-outline"
+            size={14}
+            color={activeFilter === 'credit' ? colors.white : colors.success}
+            style={{ marginRight: 4 }}
+          />
+          <Text style={[styles.filterChipText, activeFilter === 'credit' && styles.filterChipTextActive]}>
+            In Credit ({filterCounts.credit})
+          </Text>
+        </TouchableOpacity>
+
+        {/* Settled */}
+        <TouchableOpacity
+          style={[styles.filterChip, activeFilter === 'settled' && styles.filterChipActive]}
+          onPress={() => setActiveFilter(activeFilter === 'settled' ? 'all' : 'settled')}
+          accessibilityRole="button"
+        >
+          <Ionicons
+            name="checkmark-circle-outline"
+            size={14}
+            color={activeFilter === 'settled' ? colors.white : colors.textSecondary}
+            style={{ marginRight: 4 }}
+          />
+          <Text style={[styles.filterChipText, activeFilter === 'settled' && styles.filterChipTextActive]}>
+            Settled ({filterCounts.settled})
+          </Text>
+        </TouchableOpacity>
+
+        <View style={styles.chipDivider} />
+
+        {/* Date Joined Calendar Filter */}
+        <TouchableOpacity
+          style={[
+            styles.filterChip,
+            selectedDate !== null ? styles.filterChipActiveYellow : styles.calendarChip,
+          ]}
+          onPress={() => setCalendarVisible(true)}
+          accessibilityRole="button"
+        >
+          <Ionicons
+            name="calendar"
+            size={14}
+            color={selectedDate ? colors.ink : colors.primary}
+            style={{ marginRight: 4 }}
+          />
+          <Text
+            style={[
+              styles.filterChipText,
+              selectedDate !== null && styles.filterChipTextActiveDark,
+              !selectedDate && { color: colors.primary, fontWeight: '700' },
+            ]}
+          >
+            {selectedDate ? `Joined ${formatDateChip(selectedDate)}` : 'Joined Date'}
+          </Text>
+          {selectedDate && (
+            <TouchableOpacity
+              onPress={(e) => {
+                e.stopPropagation();
+                setSelectedDate(null);
+              }}
+              style={styles.chipClearBtn}
+              accessibilityLabel="Clear date filter"
+            >
+              <Ionicons name="close-circle" size={16} color={colors.ink} />
+            </TouchableOpacity>
+          )}
+        </TouchableOpacity>
+
+        {/* This Month */}
+        <TouchableOpacity
+          style={[styles.filterChip, activeFilter === 'this_month' && styles.filterChipActive]}
+          onPress={() => setActiveFilter(activeFilter === 'this_month' ? 'all' : 'this_month')}
+          accessibilityRole="button"
+        >
+          <Ionicons
+            name="sparkles-outline"
+            size={14}
+            color={activeFilter === 'this_month' ? colors.white : colors.primary}
+            style={{ marginRight: 4 }}
+          />
+          <Text style={[styles.filterChipText, activeFilter === 'this_month' && styles.filterChipTextActive]}>
+            This Month ({filterCounts.thisMonth})
+          </Text>
+        </TouchableOpacity>
+
+        <View style={styles.chipDivider} />
+
+        {/* Missing Address */}
+        <TouchableOpacity
+          style={[styles.filterChip, activeFilter === 'missing_address' && styles.filterChipActive]}
+          onPress={() => setActiveFilter(activeFilter === 'missing_address' ? 'all' : 'missing_address')}
+          accessibilityRole="button"
+        >
+          <Ionicons
+            name="location-outline"
+            size={14}
+            color={activeFilter === 'missing_address' ? colors.white : colors.warning}
+            style={{ marginRight: 4 }}
+          />
+          <Text style={[styles.filterChipText, activeFilter === 'missing_address' && styles.filterChipTextActive]}>
+            No Address ({filterCounts.missingAddress})
+          </Text>
+        </TouchableOpacity>
+
+        {/* With Phone */}
+        <TouchableOpacity
+          style={[styles.filterChip, activeFilter === 'with_phone' && styles.filterChipActive]}
+          onPress={() => setActiveFilter(activeFilter === 'with_phone' ? 'all' : 'with_phone')}
+          accessibilityRole="button"
+        >
+          <Ionicons
+            name="call-outline"
+            size={14}
+            color={activeFilter === 'with_phone' ? colors.white : colors.primary}
+            style={{ marginRight: 4 }}
+          />
+          <Text style={[styles.filterChipText, activeFilter === 'with_phone' && styles.filterChipTextActive]}>
+            With Phone ({filterCounts.withPhone})
+          </Text>
+        </TouchableOpacity>
+      </ScrollView>
+    );
+  };
 
   const renderItem = ({ item }: { item: AdminCustomer }) => {
     const receivable = balances[item.id];
@@ -803,10 +1099,30 @@ export const AdminCustomersScreen: React.FC = () => {
         </TouchableOpacity>
       </View>
 
+      {/* Filter Bar */}
+      {!(error && customers.length === 0) && renderFilterBar()}
+
+      {/* Count & Reset Row */}
       {!(error && customers.length === 0) && (
-        <Text style={styles.countText}>
-          {filtered.length} {filtered.length === 1 ? 'customer' : 'customers'}
-        </Text>
+        <View style={styles.countRow}>
+          <Text style={styles.countText}>
+            {filtered.length} {filtered.length === 1 ? 'customer' : 'customers'}
+            {filtered.length !== customers.length ? ` (filtered from ${customers.length})` : ''}
+          </Text>
+          {(activeFilter !== 'all' || selectedDate !== null || search.length > 0) && (
+            <TouchableOpacity
+              onPress={() => {
+                setActiveFilter('all');
+                setSelectedDate(null);
+                setSearch('');
+              }}
+              style={styles.resetFilterBtn}
+              accessibilityLabel="Reset all filters"
+            >
+              <Text style={styles.resetFilterText}>Reset filters</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       )}
 
       {loading ? (
@@ -836,8 +1152,14 @@ export const AdminCustomersScreen: React.FC = () => {
               search ? (
                 <EmptyState
                   icon="search-outline"
-                  title="No customers match"
+                  title="No customers match search"
                   text="Try a different name, phone number or part of the address."
+                />
+              ) : activeFilter !== 'all' || selectedDate ? (
+                <EmptyState
+                  icon="filter-outline"
+                  title="No customers match filter"
+                  text="No customers match the current filter selection. Tap Reset to view all."
                 />
               ) : (
                 <EmptyState
@@ -863,6 +1185,19 @@ export const AdminCustomersScreen: React.FC = () => {
         visible={addOpen}
         onClose={() => setAddOpen(false)}
         onCreated={() => load(true)}
+      />
+
+      {/* Responsive Calendar Modal */}
+      <CalendarModal
+        visible={calendarVisible}
+        onClose={() => setCalendarVisible(false)}
+        selectedDate={selectedDate || undefined}
+        onSelectDate={(date) => {
+          setSelectedDate(date);
+          setCalendarVisible(false);
+        }}
+        title="Filter by Registration Date"
+        quickPresets={true}
       />
     </View>
   );

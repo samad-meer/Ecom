@@ -77,6 +77,8 @@ export interface AdminCustomer {
   area?: string | null;
   phone: string | null;
   price: number;
+  date_joined?: string;
+  is_active?: boolean;
 }
 
 export interface CustomerStats {
