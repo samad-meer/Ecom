@@ -379,11 +379,12 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   button: {
-    height: 46,
+    minHeight: 46,
     borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   cancelButton: {
     backgroundColor: colors.surfaceTint,

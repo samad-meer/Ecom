@@ -43,7 +43,7 @@ export const SETTINGS_SECTIONS: SettingsSectionEntry[] = [
   },
   {
     id: "rider-contact",
-    label: "Rider Contact",
+    label: "Rider & Delivery",
     icon: PhoneCall,
     Component: RiderContactSettings,
   },

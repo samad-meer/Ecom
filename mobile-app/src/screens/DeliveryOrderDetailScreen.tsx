@@ -22,7 +22,7 @@ type PaymentMode = 'none' | 'cash' | 'online';
 const PAYMENT_OPTIONS: { key: PaymentMode; label: string; sub: string; icon: string; color: string; bg: string }[] = [
   { key: 'cash',   label: 'Cash',   sub: 'received',          icon: 'cash-outline',            color: colors.success, bg: colors.successBg },
   { key: 'online', label: 'Online', sub: 'office will check', icon: 'phone-portrait-outline',  color: colors.primaryDark, bg: colors.primaryTint },
-  { key: 'none',   label: 'None',   sub: 'no payment',        icon: 'remove-circle-outline',   color: colors.textSecondary, bg: colors.lineSoft },
+  { key: 'none',   label: 'Credit', sub: 'unpaid',            icon: 'alert-circle-outline',    color: colors.danger, bg: colors.dangerBg },
 ];
 
 const CLAIM_LABELS: Record<string, string> = {
@@ -68,6 +68,10 @@ export const DeliveryOrderDetailScreen: React.FC = () => {
   // served by an older build that predates it.
   const customerName: string = order.customer?.name || order.user || 'Customer';
   const customerPhone: string | null = order.customer?.phone_number ?? order.guest_phone ?? null;
+
+  // Delivery settings set by admin: whether rider can call or WhatsApp customer
+  const riderCanCall = order.delivery_settings?.rider_can_call ?? true;
+  const riderCanWhatsApp = order.delivery_settings?.rider_can_whatsapp ?? true;
 
   // Payment
   const initPaymentMode = (): PaymentMode => {
@@ -143,13 +147,14 @@ export const DeliveryOrderDetailScreen: React.FC = () => {
     const paymentLine =
       paymentMode === 'cash'   ? `Cash collected: PKR ${parseFloat(amount) || 0}`
       : paymentMode === 'online' ? `Online payment for the office to check: PKR ${parseFloat(amount) || 0}`
-      : 'No payment collected';
+      : `Credit (Unpaid): PKR ${orderTotal.toLocaleString('en-PK')} added to balance`;
+
+    const defaultDeliveryNote = 'Once marked as delivered, this order is locked. Any changes or corrections must be handled by the office.';
+    const confirmationNote = order.delivery_settings?.delivery_confirmation_note?.trim() || defaultDeliveryNote;
 
     const ok = await confirm({
       title: `Deliver order #${order.id}?`,
-      message: `${paymentLine}
-
-Nothing on this order can be changed afterwards — the office will have to correct it.`,
+      message: `${paymentLine}\n\n${confirmationNote}`,
       confirmLabel: 'Yes, deliver',
       tone: 'success',
     });
@@ -175,7 +180,7 @@ Nothing on this order can be changed afterwards — the office will have to corr
       void startRiderTracking();
       const recorded =
         paymentMode === 'none'
-          ? 'No payment recorded.'
+          ? `Delivered on Credit (unpaid). PKR ${orderTotal.toLocaleString('en-PK')} added to customer balance.`
           : paymentMode === 'cash'
             ? `Cash received: PKR ${parseFloat(amount) || 0}.`
             : `Online payment noted: PKR ${parseFloat(amount) || 0}. The office will check it against the bank.`;
@@ -200,68 +205,36 @@ The office can see it now. You cannot change it from here.`,
   return (
     <View style={styles.screen}>
     <KeyboardAwareScrollView style={styles.container} extraBottomSpace={32}>
-      {/* ── Address hero ─────────────────────────────────────────── */}
-      <View style={styles.addressCard}>
-        <View style={styles.addressIconWrap}>
-          <Ionicons name="location" size={22} color={colors.white} />
-        </View>
-        <View style={styles.addressBody}>
-          <View style={styles.addressLabelRow}>
-            <Text style={styles.addressLabel}>Delivery Address</Text>
-            {!!order.shipping_label && (
-              <View style={styles.labelChip}>
-                <Text style={styles.labelChipText}>{order.shipping_label}</Text>
-              </View>
-            )}
-          </View>
-          <Text style={styles.addressText}>{order.shipping_address || '—'}</Text>
-        </View>
-      </View>
-
-      {/* ── Map pin ───────────────────────────────────────────────
-          A rider at the gate needs the pin, not the wording of the address, so
-          the map and Navigate sit directly under the hero — above the order
-          details they only read once they have arrived. */}
-      <View style={styles.card}>
-        <OrderLocationMap
-          orderId={order.id}
-          latitude={order.shipping_latitude}
-          longitude={order.shipping_longitude}
-          label={order.shipping_label}
-          variant="rider"
-        />
-      </View>
-
-      {/* ── Order summary ─────────────────────────────────────────── */}
+      {/* ── Order summary (Customer name and order details on top) ──── */}
       <View style={styles.card}>
         <View style={styles.orderHeaderRow}>
           <Text style={styles.orderId}>Order #{order.id}</Text>
           <Text style={styles.orderAmount}>PKR {order.total_price}</Text>
         </View>
         <Text style={styles.customerText}>
-          <Ionicons name="person-outline" size={13} color={colors.muted} /> {customerName}
+          <Ionicons name="person-outline" size={13} color={colors.primary} /> {customerName}
         </Text>
       </View>
 
       {/* ── Contact ───────────────────────────────────────────────────
-          A rider at a locked gate needs the number in one tap, and which app
-          to use is not ours to decide: WhatsApp is free but the customer may
-          not have it or may not be online, so the SIM is always offered too.
-          Guest phone-in orders carry their number here as well. */}
+          Shows Call and WhatsApp buttons according to admin settings.
+          If disabled by admin, contact options are hidden. */}
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>Customer</Text>
         <View style={styles.contactRow}>
           <View style={styles.contactBody}>
             <Text style={styles.contactName}>{customerName}</Text>
-            <Text style={[styles.contactPhone, !customerPhone && styles.contactPhoneMissing]}>
-              {customerPhone || 'No phone number on this order'}
+            <Text style={[styles.contactPhone, (!customerPhone || (!riderCanCall && !riderCanWhatsApp)) && styles.contactPhoneMissing]}>
+              {!riderCanCall && !riderCanWhatsApp
+                ? 'Contact details hidden by admin'
+                : customerPhone || 'No phone number on this order'}
             </Text>
           </View>
         </View>
 
-        {canCall(customerPhone) || canWhatsApp(customerPhone) ? (
+        {(canCall(customerPhone) && riderCanCall) || (canWhatsApp(customerPhone) && riderCanWhatsApp) ? (
           <View style={styles.contactActions}>
-            {canCall(customerPhone) && (
+            {canCall(customerPhone) && riderCanCall && (
               <TouchableOpacity
                 style={[styles.contactBtn, styles.callBtn]}
                 onPress={() => callNumber(customerPhone)}
@@ -273,7 +246,7 @@ The office can see it now. You cannot change it from here.`,
                 <Text style={styles.contactBtnText}>Call</Text>
               </TouchableOpacity>
             )}
-            {canWhatsApp(customerPhone) && (
+            {canWhatsApp(customerPhone) && riderCanWhatsApp && (
               <TouchableOpacity
                 style={[styles.contactBtn, styles.waBtn]}
                 onPress={() => openWhatsApp(
@@ -297,6 +270,10 @@ The office can see it now. You cannot change it from here.`,
               </TouchableOpacity>
             )}
           </View>
+        ) : !riderCanCall && !riderCanWhatsApp ? (
+          <Text style={styles.contactHint}>
+            Customer calling and WhatsApp options are disabled by admin. Ask the office if you cannot find the address.
+          </Text>
         ) : (
           <Text style={styles.contactHint}>
             Ask the office for a number if you cannot find the address.
@@ -304,7 +281,7 @@ The office can see it now. You cannot change it from here.`,
         )}
       </View>
 
-      {/* ── Products ─────────────────────────────────────────────── */}
+      {/* ── Products (Order Details) ────────────────────────────────── */}
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>Products</Text>
         {order.items?.map((item: any, idx: number) => (
@@ -320,6 +297,35 @@ The office can see it now. You cannot change it from here.`,
           <Text style={styles.totalLabel}>Total Bottles</Text>
           <Text style={styles.totalValue}>{totalBottles}</Text>
         </View>
+      </View>
+
+      {/* ── Address hero ─────────────────────────────────────────── */}
+      <View style={styles.addressCard}>
+        <View style={styles.addressIconWrap}>
+          <Ionicons name="location" size={22} color={colors.white} />
+        </View>
+        <View style={styles.addressBody}>
+          <View style={styles.addressLabelRow}>
+            <Text style={styles.addressLabel}>Delivery Address</Text>
+            {!!order.shipping_label && (
+              <View style={styles.labelChip}>
+                <Text style={styles.labelChipText}>{order.shipping_label}</Text>
+              </View>
+            )}
+          </View>
+          <Text style={styles.addressText}>{order.shipping_address || '—'}</Text>
+        </View>
+      </View>
+
+      {/* ── Map pin ─────────────────────────────────────────────── */}
+      <View style={styles.card}>
+        <OrderLocationMap
+          orderId={order.id}
+          latitude={order.shipping_latitude}
+          longitude={order.shipping_longitude}
+          label={order.shipping_label}
+          variant="rider"
+        />
       </View>
 
       {/* ── Delivery form ─────────────────────────────────────────── */}
@@ -381,24 +387,51 @@ The office can see it now. You cannot change it from here.`,
             <View style={styles.paymentRow}>
               {PAYMENT_OPTIONS.map((opt) => {
                 const active = paymentMode === opt.key;
+                const isCredit = opt.key === 'none';
                 return (
                   <TouchableOpacity
                     key={opt.key}
                     style={[
                       styles.paymentOption,
+                      isCredit && !active && styles.creditOptionInactive,
                       active && { backgroundColor: opt.bg, borderColor: opt.color, borderWidth: 2 },
                     ]}
                     onPress={() => setPaymentMode(opt.key)}
                   >
-                    <Ionicons name={opt.icon as any} size={24} color={active ? opt.color : colors.muted} />
-                    <Text style={[styles.paymentLabel, active && { color: opt.color, fontWeight: '800' }]}>
+                    <Ionicons
+                      name={opt.icon as any}
+                      size={24}
+                      color={active ? opt.color : isCredit ? colors.danger : colors.muted}
+                    />
+                    <Text
+                      style={[
+                        styles.paymentLabel,
+                        isCredit && !active && { color: colors.danger },
+                        active && { color: opt.color, fontWeight: '800' },
+                      ]}
+                    >
                       {opt.label}
                     </Text>
-                    <Text style={styles.paymentSub}>{opt.sub}</Text>
+                    <Text
+                      style={[
+                        styles.paymentSub,
+                        isCredit && { color: colors.danger, opacity: active ? 0.9 : 0.7 },
+                      ]}
+                    >
+                      {opt.sub}
+                    </Text>
                   </TouchableOpacity>
                 );
               })}
             </View>
+            {!isSubmitted && paymentMode === 'none' && (
+              <View style={styles.creditNoticeBox}>
+                <Ionicons name="alert-circle" size={18} color={colors.danger} />
+                <Text style={styles.creditNoticeText}>
+                  Delivering on Credit: PKR {orderTotal.toLocaleString('en-PK')} will be added to the customer's outstanding balance.
+                </Text>
+              </View>
+            )}
           </View>
         )}
 
@@ -651,8 +684,31 @@ const styles = StyleSheet.create({
     flex: 1, alignItems: 'center', paddingVertical: 16, paddingHorizontal: 4, borderRadius: radius.lg,
     borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surfaceTint, gap: 4,
   },
+  creditOptionInactive: {
+    borderColor: colors.dangerLine,
+    backgroundColor: '#FFF8F8',
+  },
   paymentLabel: { fontSize: 17, fontWeight: '700', color: colors.ink, textAlign: 'center' },
   paymentSub: { fontSize: 12, color: colors.muted, textAlign: 'center' },
+  creditNoticeBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    backgroundColor: colors.dangerBg,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.dangerLine,
+  },
+  creditNoticeText: {
+    flex: 1,
+    fontSize: 13,
+    color: colors.danger,
+    fontWeight: '600',
+    lineHeight: 18,
+  },
 
   lockedStatus: { backgroundColor: colors.lineSoft, padding: 12, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line },
   lockedStatusText: { fontSize: 15, color: colors.ink, fontWeight: '600' },

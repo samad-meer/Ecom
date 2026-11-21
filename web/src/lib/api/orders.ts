@@ -187,6 +187,7 @@ export interface DeliverySettings {
   id?: number;
   rider_can_call: boolean;
   rider_can_whatsapp: boolean;
+  delivery_confirmation_note?: string;
   updated_at?: string;
 }
 

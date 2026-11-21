@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  TextInput, ActivityIndicator, Alert, Switch,
+  TextInput, ActivityIndicator, Alert, Switch, Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -556,11 +556,18 @@ const mps = StyleSheet.create({
 
 // ─── Rider Contact Section ───────────────────────────────────────────────────
 
+const DEFAULT_DELIVERY_CONFIRMATION_NOTE =
+  'Once marked as delivered, this order is locked. Any changes or corrections must be handled by the office.';
+
 function RiderContactSection() {
   const [canCall, setCanCall] = useState(true);
   const [canWhatsApp, setCanWhatsApp] = useState(true);
+  const [note, setNote] = useState(DEFAULT_DELIVERY_CONFIRMATION_NOTE);
+
   const [savedCall, setSavedCall] = useState(true);
   const [savedWhatsApp, setSavedWhatsApp] = useState(true);
+  const [savedNote, setSavedNote] = useState(DEFAULT_DELIVERY_CONFIRMATION_NOTE);
+
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -573,6 +580,9 @@ function RiderContactSection() {
         setSavedCall(s.rider_can_call);
         setCanWhatsApp(s.rider_can_whatsapp);
         setSavedWhatsApp(s.rider_can_whatsapp);
+        const fetchedNote = s.delivery_confirmation_note?.trim() || DEFAULT_DELIVERY_CONFIRMATION_NOTE;
+        setNote(fetchedNote);
+        setSavedNote(fetchedNote);
       })
       .catch((e: any) => setLoadError(e?.message || 'Could not load rider contact settings.'))
       .finally(() => setLoading(false));
@@ -580,7 +590,12 @@ function RiderContactSection() {
 
   useEffect(() => { load(); }, [load]);
 
-  const dirty = canCall !== savedCall || canWhatsApp !== savedWhatsApp;
+  const dirty =
+    canCall !== savedCall ||
+    canWhatsApp !== savedWhatsApp ||
+    note.trim() !== savedNote.trim();
+
+  const effectiveNote = note.trim() || DEFAULT_DELIVERY_CONFIRMATION_NOTE;
 
   const save = async () => {
     setSaving(true);
@@ -588,12 +603,16 @@ function RiderContactSection() {
       const updated = await adminService.updateDeliverySettings({
         rider_can_call: canCall,
         rider_can_whatsapp: canWhatsApp,
+        delivery_confirmation_note: note.trim() || DEFAULT_DELIVERY_CONFIRMATION_NOTE,
       });
       setCanCall(updated.rider_can_call);
       setSavedCall(updated.rider_can_call);
       setCanWhatsApp(updated.rider_can_whatsapp);
       setSavedWhatsApp(updated.rider_can_whatsapp);
-      Alert.alert('Saved', 'Rider customer contact settings updated.');
+      const updatedNote = updated.delivery_confirmation_note?.trim() || DEFAULT_DELIVERY_CONFIRMATION_NOTE;
+      setNote(updatedNote);
+      setSavedNote(updatedNote);
+      Alert.alert('Saved', 'Rider delivery settings updated.');
     } catch (e: any) {
       Alert.alert('Error', `Could not save settings: ${friendlyError(e?.message)}`);
     } finally {
@@ -604,13 +623,18 @@ function RiderContactSection() {
   const handleDiscard = () => {
     setCanCall(savedCall);
     setCanWhatsApp(savedWhatsApp);
+    setNote(savedNote);
+  };
+
+  const handleResetNote = () => {
+    setNote(DEFAULT_DELIVERY_CONFIRMATION_NOTE);
   };
 
   return (
     <View style={styles.section}>
-      <SectionHeader icon="call" tone="primary" title="Rider Customer Contact" />
+      <SectionHeader icon="bicycle" tone="primary" title="Rider & Delivery Settings" />
       <Text style={styles.sectionDesc}>
-        Choose whether delivery riders can call or WhatsApp customers directly from the delivery screen.
+        Manage rider customer communication channels and customize the confirmation notice displayed to riders before completing a delivery.
       </Text>
 
       {loading ? (
@@ -657,6 +681,33 @@ function RiderContactSection() {
             </View>
           )}
 
+          {/* Delivery Confirmation Note Input */}
+          <View style={rcs.noteContainer}>
+            <View style={rcs.noteHeader}>
+              <Text style={rcs.noteLabel}>Delivery Confirmation Popup Notice</Text>
+              <Text style={rcs.noteCounter}>{note.length} / 500</Text>
+            </View>
+            <Text style={rcs.noteDesc}>
+              Displayed to riders on the confirmation popup before finalizing an order.
+            </Text>
+            <TextInput
+              style={rcs.noteInput}
+              value={note}
+              onChangeText={setNote}
+              maxLength={500}
+              multiline
+              placeholder={DEFAULT_DELIVERY_CONFIRMATION_NOTE}
+              placeholderTextColor={colors.muted}
+            />
+            {note !== DEFAULT_DELIVERY_CONFIRMATION_NOTE && (
+              <TouchableOpacity onPress={handleResetNote} style={rcs.resetNoteBtn}>
+                <Ionicons name="refresh-outline" size={14} color={colors.muted} />
+                <Text style={rcs.resetNoteText}>Reset default notice</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Action Row */}
           <View style={rcs.actionRow}>
             <TouchableOpacity
               style={[rcs.saveBtn, (!dirty || saving) && { opacity: 0.4 }]}
@@ -666,7 +717,7 @@ function RiderContactSection() {
               {saving ? (
                 <ActivityIndicator size="small" color={colors.white} />
               ) : (
-                <Text style={rcs.saveBtnText}>Save Contact Settings</Text>
+                <Text style={rcs.saveBtnText}>Save Delivery Settings</Text>
               )}
             </TouchableOpacity>
             {dirty && (
@@ -674,6 +725,29 @@ function RiderContactSection() {
                 <Text style={rcs.discardText}>Discard</Text>
               </TouchableOpacity>
             )}
+          </View>
+
+          {/* Live Mobile Dialog Preview */}
+          <View style={rcs.previewCard}>
+            <View style={rcs.previewHeader}>
+              <Ionicons name="phone-portrait-outline" size={14} color={colors.primary} />
+              <Text style={rcs.previewTitle}>Rider Delivery Dialog Preview</Text>
+            </View>
+            <View style={rcs.previewBox}>
+              <Ionicons name="checkmark-circle" size={36} color={colors.success} />
+              <Text style={rcs.previewHeading}>Deliver order #9?</Text>
+              <Text style={rcs.previewSub}>No payment collected</Text>
+              <View style={rcs.previewDivider} />
+              <Text style={rcs.previewNote}>{effectiveNote}</Text>
+              <View style={rcs.previewBtnRow}>
+                <View style={rcs.previewCancelBtn}>
+                  <Text style={rcs.previewCancelText}>Cancel</Text>
+                </View>
+                <View style={rcs.previewConfirmBtn}>
+                  <Text style={rcs.previewConfirmText}>Yes, deliver</Text>
+                </View>
+              </View>
+            </View>
           </View>
         </View>
       )}
@@ -714,6 +788,42 @@ const rcs = StyleSheet.create({
     borderColor: colors.warningLine,
   },
   warningText: { flex: 1, fontSize: fontSize.xs, color: colors.warningText, lineHeight: 18 },
+  noteContainer: {
+    padding: space.md,
+    backgroundColor: colors.surfaceTint,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  noteHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  noteLabel: { fontSize: fontSize.sm, fontWeight: '700', color: colors.ink },
+  noteCounter: { fontSize: fontSize.xs, color: colors.muted, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' },
+  noteDesc: { fontSize: fontSize.xs, color: colors.muted, marginBottom: space.sm, lineHeight: 18 },
+  noteInput: {
+    minHeight: 68,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.sm,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: fontSize.sm,
+    color: colors.ink,
+    backgroundColor: colors.white,
+    textAlignVertical: 'top',
+  },
+  resetNoteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 8,
+    alignSelf: 'flex-start',
+  },
+  resetNoteText: { fontSize: fontSize.xs, color: colors.muted, fontWeight: '600' },
   actionRow: { flexDirection: 'row', gap: space.md, marginTop: space.xs },
   saveBtn: {
     flex: 1,
@@ -734,6 +844,95 @@ const rcs = StyleSheet.create({
     justifyContent: 'center',
   },
   discardText: { color: colors.ink, fontSize: fontSize.sm, fontWeight: '700' },
+  previewCard: {
+    marginTop: space.xs,
+    padding: space.md,
+    backgroundColor: colors.surfaceTint,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  previewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: space.sm,
+  },
+  previewTitle: {
+    fontSize: fontSize.xs,
+    fontWeight: '700',
+    color: colors.ink,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  previewBox: {
+    backgroundColor: colors.white,
+    borderRadius: radius.md,
+    padding: space.md,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  previewHeading: {
+    fontSize: fontSize.md,
+    fontWeight: '800',
+    color: colors.ink,
+    marginTop: space.xs,
+    marginBottom: 2,
+  },
+  previewSub: {
+    fontSize: fontSize.xs,
+    fontWeight: '600',
+    color: colors.muted,
+    marginBottom: space.xs,
+  },
+  previewDivider: {
+    width: '100%',
+    height: 1,
+    backgroundColor: colors.lineSoft,
+    marginVertical: space.xs,
+  },
+  previewNote: {
+    fontSize: fontSize.xs,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: space.md,
+  },
+  previewBtnRow: {
+    flexDirection: 'row',
+    gap: 8,
+    width: '100%',
+  },
+  previewCancelBtn: {
+    flex: 1,
+    backgroundColor: colors.surfaceTint,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.sm,
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  previewCancelText: {
+    fontSize: fontSize.xs,
+    fontWeight: '700',
+    color: colors.ink,
+  },
+  previewConfirmBtn: {
+    flex: 1,
+    backgroundColor: colors.success,
+    borderRadius: radius.sm,
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  previewConfirmText: {
+    fontSize: fontSize.xs,
+    fontWeight: '800',
+    color: colors.white,
+  },
 });
 
 // ─── Message Templates Navigation Section ───────────────────────────────────

@@ -31,6 +31,7 @@ export interface AdminOrder {
   payment_number: string | null;
   is_paid: boolean;
   is_hidden: boolean;
+  show_to_rider?: boolean;
   created_at: string;
   assigned_delivery_boy: number | null;
   assigned_delivery_boy_name: string | null;
@@ -363,6 +364,7 @@ export const adminService = {
     status: string;
     is_paid: boolean;
     is_hidden: boolean;
+    show_to_rider: boolean;
     assigned_delivery_boy: number | null;
     delivery_notes: string;
     rider_note: string;
@@ -902,7 +904,32 @@ export const adminService = {
   getTrackingConfig(): Promise<TrackingConfig> {
     return adminFetch('/auth/tracking-config/');
   },
+
+  getDeliverySettings(): Promise<DeliverySettings> {
+    return adminFetch('/orders/delivery/settings/');
+  },
+
+  updateDeliverySettings(data: {
+    rider_can_call?: boolean;
+    rider_can_whatsapp?: boolean;
+    delivery_confirmation_note?: string;
+  }): Promise<DeliverySettings> {
+    return adminFetch('/orders/delivery/settings/', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  },
 };
+
+// ── Delivery Settings types ──────────────────────────────────────────────────
+
+export interface DeliverySettings {
+  id?: number;
+  rider_can_call: boolean;
+  rider_can_whatsapp: boolean;
+  delivery_confirmation_note?: string;
+  updated_at?: string;
+}
 
 // ── Ledger types ─────────────────────────────────────────────────────────────
 

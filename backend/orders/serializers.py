@@ -135,7 +135,7 @@ class OrderSerializer(serializers.ModelSerializer):
                   # bottle count"), not something the customer is meant to read
                   # back. The rider and admin serializers below add it. Same
                   # rule as rider_note.
-                  'assigned_delivery_boy', 'assigned_delivery_boy_name',
+                  'assigned_delivery_boy', 'assigned_delivery_boy_name', 'show_to_rider',
                   'delivery_assigned_at', 'delivery_completed_at',
                   'number_of_bottles', 'delivery_status', 'delivery_status_updated_at',
                   'cash_received', 'cash_amount'] + DISCOUNT_SNAPSHOT_FIELDS
@@ -236,6 +236,7 @@ class DeliveryBoyOrderSerializer(OrderSerializer):
         return {
             'rider_can_call': ds.rider_can_call,
             'rider_can_whatsapp': ds.rider_can_whatsapp,
+            'delivery_confirmation_note': ds.delivery_confirmation_note,
         }
 
     def _maps(self, obj):
@@ -482,7 +483,7 @@ class AdminOrderUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Order
         fields = [
-            'status', 'is_paid', 'is_hidden',
+            'status', 'is_paid', 'is_hidden', 'show_to_rider',
             'assigned_delivery_boy', 'delivery_notes', 'rider_note',
             'cash_amount', 'cash_received',
             'delivery_status',          # staff can override anytime — lock only applies to rider mobile app
@@ -607,7 +608,7 @@ class AdminOrderCreateSerializer(serializers.ModelSerializer):
             'shipping_latitude', 'shipping_longitude', 'shipping_label',
             'payment_method', 'payment_number',
             'assigned_delivery_boy', 'delivery_notes', 'rider_note',
-            'status', 'items', 'discount_override',
+            'status', 'items', 'discount_override', 'show_to_rider',
         ]
         extra_kwargs = {
             'status': {'default': 'Processing'},
@@ -701,7 +702,7 @@ class MessageTemplateSerializer(serializers.ModelSerializer):
 class DeliverySettingsSerializer(serializers.ModelSerializer):
     class Meta:
         model = DeliverySettings
-        fields = ['id', 'rider_can_call', 'rider_can_whatsapp', 'updated_at']
+        fields = ['id', 'rider_can_call', 'rider_can_whatsapp', 'delivery_confirmation_note', 'updated_at']
         read_only_fields = ['id', 'updated_at']
 
 

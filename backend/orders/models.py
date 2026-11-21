@@ -123,6 +123,10 @@ class Order(models.Model):
         limit_choices_to={'user_type': 'delivery_boy'},
         help_text="Delivery boy assigned to this order"
     )
+    show_to_rider = models.BooleanField(
+        default=True,
+        help_text="Whether this order is visible to the assigned rider",
+    )
     delivery_assigned_at = models.DateTimeField(null=True, blank=True)
     delivery_completed_at = models.DateTimeField(null=True, blank=True)
     delivery_notes = models.TextField(blank=True, null=True)
@@ -264,6 +268,11 @@ class DeliverySettings(models.Model):
     rider_can_whatsapp = models.BooleanField(
         default=True,
         help_text="Allow riders to open WhatsApp to message customers from the delivery screen.",
+    )
+    delivery_confirmation_note = models.TextField(
+        blank=True,
+        default='Once marked as delivered, this order is locked. Any changes or corrections must be handled by the office.',
+        help_text="Note displayed to riders on the delivery confirmation popup before completing an order.",
     )
     updated_at = models.DateTimeField(auto_now=True)
 
