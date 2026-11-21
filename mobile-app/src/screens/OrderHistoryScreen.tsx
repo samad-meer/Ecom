@@ -1,5 +1,5 @@
 import { colors, radius, card, pagePadding } from '../theme';
-import React, { useEffect, useState, useContext } from 'react';
+import React, { useEffect, useState, useContext, useMemo } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, RefreshControl, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LoadingScreen } from '../components/LoadingScreen';
@@ -14,6 +14,8 @@ import { AuthContext } from '../context/AuthContext';
 import { useFocusEffect } from '@react-navigation/native';
 import { canWhatsApp, openWhatsApp, orderDispatchMessage } from '../utils/whatsapp';
 import { callNumber, canCall } from '../utils/phone';
+import { CalendarModal } from '../components/CalendarModal';
+import { isoDate } from '../utils/dateRange';
 
 type Props = BottomTabScreenProps<MainTabParamList, 'Orders'>;
 
@@ -27,6 +29,14 @@ const money = (value: string | number | null | undefined) => {
   return n.toLocaleString('en-PK', { maximumFractionDigits: 2 });
 };
 
+const formatDateChip = (iso: string) => {
+  const d = new Date(iso + 'T00:00:00');
+  if (isNaN(d.getTime())) return iso;
+  const today = isoDate(new Date());
+  if (iso === today) return 'Today';
+  return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
+};
+
 export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
   const { t } = useLanguage();
   const { user } = useContext(AuthContext);
@@ -38,6 +48,9 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
   const [error, setError] = useState<string | null>(null);
   const [deliveryStatuses, setDeliveryStatuses] = useState<DeliveryStatus[]>([]);
   const [selectedFilter, setSelectedFilter] = useState<StatusFilter>('All');
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [calendarVisible, setCalendarVisible] = useState(false);
+  const [riderStatusFilter, setRiderStatusFilter] = useState<'all' | 'to_deliver' | 'delivered'>('all');
   const isDeliveryBoy = user?.user_type === 'delivery_boy';
 
   const fetchOrders = async () => {
@@ -90,12 +103,44 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
     return { bg: colors.primaryTint, text: colors.primary, border: colors.primary };
   };
 
-  const filteredOrders = selectedFilter === 'All'
-    ? orders
-    : orders.filter(o => o.status === selectedFilter);
+  const filteredOrders = useMemo(() => {
+    return orders.filter(o => {
+      // 1. Date filter (if active)
+      if (selectedDate) {
+        const orderDate = isoDate(new Date(o.created_at));
+        if (orderDate !== selectedDate) return false;
+      }
 
-  const renderFilterChips = () => {
-    if (isDeliveryBoy) return null;
+      // 2. Rider status filter
+      if (isDeliveryBoy) {
+        const isDelivered = o.delivery_status === 'Delivered' || o.status === 'Delivered';
+        if (riderStatusFilter === 'to_deliver' && isDelivered) return false;
+        if (riderStatusFilter === 'delivered' && !isDelivered) return false;
+        return true;
+      }
+
+      // 3. Customer status filter
+      if (selectedFilter !== 'All' && o.status !== selectedFilter) {
+        return false;
+      }
+      return true;
+    });
+  }, [orders, selectedDate, selectedFilter, riderStatusFilter, isDeliveryBoy]);
+
+  // Counts for rider quick chips
+  const riderCounts = useMemo(() => {
+    const pool = selectedDate
+      ? orders.filter(o => isoDate(new Date(o.created_at)) === selectedDate)
+      : orders;
+    const toDeliver = pool.filter(o => o.delivery_status !== 'Delivered' && o.status !== 'Delivered').length;
+    const delivered = pool.filter(o => o.delivery_status === 'Delivered' || o.status === 'Delivered').length;
+    return { all: pool.length, toDeliver, delivered };
+  }, [orders, selectedDate]);
+
+  const renderRiderFilterChips = () => {
+    const todayStr = isoDate(new Date());
+    const isToday = selectedDate === todayStr;
+
     return (
       <ScrollView
         horizontal
@@ -103,9 +148,178 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
         style={styles.filterBar}
         contentContainerStyle={styles.filterBarContent}
       >
+        {/* Date: All Dates */}
+        <TouchableOpacity
+          style={[styles.filterChip, selectedDate === null && styles.filterChipActiveYellow]}
+          onPress={() => setSelectedDate(null)}
+          accessibilityRole="button"
+        >
+          <Text style={[styles.filterChipText, selectedDate === null && styles.filterChipTextActiveDark]}>
+            All Dates
+          </Text>
+        </TouchableOpacity>
+
+        {/* Date: Today quick chip */}
+        <TouchableOpacity
+          style={[styles.filterChip, isToday && styles.filterChipActiveYellow]}
+          onPress={() => setSelectedDate(isToday ? null : todayStr)}
+          accessibilityRole="button"
+        >
+          <Ionicons
+            name="today-outline"
+            size={14}
+            color={isToday ? colors.ink : colors.muted}
+            style={{ marginRight: 4 }}
+          />
+          <Text style={[styles.filterChipText, isToday && styles.filterChipTextActiveDark]}>
+            Today
+          </Text>
+        </TouchableOpacity>
+
+        {/* Date: Pick Date using responsive Calendar Modal */}
+        <TouchableOpacity
+          style={[
+            styles.filterChip,
+            selectedDate && !isToday ? styles.filterChipActiveYellow : styles.calendarChip,
+          ]}
+          onPress={() => setCalendarVisible(true)}
+          accessibilityRole="button"
+        >
+          <Ionicons
+            name="calendar"
+            size={14}
+            color={selectedDate && !isToday ? colors.ink : colors.primary}
+            style={{ marginRight: 4 }}
+          />
+          <Text
+            style={[
+              styles.filterChipText,
+              selectedDate && !isToday && styles.filterChipTextActiveDark,
+              !selectedDate && { color: colors.primary, fontWeight: '700' },
+            ]}
+          >
+            {selectedDate && !isToday ? formatDateChip(selectedDate) : 'Pick Date'}
+          </Text>
+          {selectedDate && (
+            <TouchableOpacity
+              onPress={(e) => {
+                e.stopPropagation();
+                setSelectedDate(null);
+              }}
+              style={styles.chipClearBtn}
+              accessibilityLabel="Clear date filter"
+            >
+              <Ionicons name="close-circle" size={16} color={colors.ink} />
+            </TouchableOpacity>
+          )}
+        </TouchableOpacity>
+
+        <View style={styles.chipDivider} />
+
+        {/* Status: All */}
+        <TouchableOpacity
+          style={[styles.filterChip, riderStatusFilter === 'all' && styles.filterChipActive]}
+          onPress={() => setRiderStatusFilter('all')}
+          accessibilityRole="button"
+        >
+          <Text style={[styles.filterChipText, riderStatusFilter === 'all' && styles.filterChipTextActive]}>
+            All ({riderCounts.all})
+          </Text>
+        </TouchableOpacity>
+
+        {/* Status: To Deliver */}
+        <TouchableOpacity
+          style={[styles.filterChip, riderStatusFilter === 'to_deliver' && styles.filterChipActive]}
+          onPress={() => setRiderStatusFilter('to_deliver')}
+          accessibilityRole="button"
+        >
+          <Ionicons
+            name="time-outline"
+            size={14}
+            color={riderStatusFilter === 'to_deliver' ? colors.white : colors.warning}
+            style={{ marginRight: 4 }}
+          />
+          <Text style={[styles.filterChipText, riderStatusFilter === 'to_deliver' && styles.filterChipTextActive]}>
+            To Deliver ({riderCounts.toDeliver})
+          </Text>
+        </TouchableOpacity>
+
+        {/* Status: Delivered */}
+        <TouchableOpacity
+          style={[styles.filterChip, riderStatusFilter === 'delivered' && styles.filterChipActive]}
+          onPress={() => setRiderStatusFilter('delivered')}
+          accessibilityRole="button"
+        >
+          <Ionicons
+            name="checkmark-circle-outline"
+            size={14}
+            color={riderStatusFilter === 'delivered' ? colors.white : colors.success}
+            style={{ marginRight: 4 }}
+          />
+          <Text style={[styles.filterChipText, riderStatusFilter === 'delivered' && styles.filterChipTextActive]}>
+            Delivered ({riderCounts.delivered})
+          </Text>
+        </TouchableOpacity>
+      </ScrollView>
+    );
+  };
+
+  const renderCustomerFilterChips = () => {
+    return (
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.filterBar}
+        contentContainerStyle={styles.filterBarContent}
+      >
+        {/* Date Filter Chip */}
+        <TouchableOpacity
+          style={[
+            styles.filterChip,
+            selectedDate !== null ? styles.filterChipActiveYellow : styles.calendarChip,
+          ]}
+          onPress={() => setCalendarVisible(true)}
+          accessibilityRole="button"
+        >
+          <Ionicons
+            name="calendar"
+            size={14}
+            color={selectedDate ? colors.ink : colors.primary}
+            style={{ marginRight: 4 }}
+          />
+          <Text
+            style={[
+              styles.filterChipText,
+              selectedDate !== null && styles.filterChipTextActiveDark,
+              !selectedDate && { color: colors.primary, fontWeight: '700' },
+            ]}
+          >
+            {selectedDate ? formatDateChip(selectedDate) : 'Date'}
+          </Text>
+          {selectedDate && (
+            <TouchableOpacity
+              onPress={(e) => {
+                e.stopPropagation();
+                setSelectedDate(null);
+              }}
+              style={styles.chipClearBtn}
+              accessibilityLabel="Clear date filter"
+            >
+              <Ionicons name="close-circle" size={16} color={colors.ink} />
+            </TouchableOpacity>
+          )}
+        </TouchableOpacity>
+
+        <View style={styles.chipDivider} />
+
+        {/* Status filters */}
         {STATUS_FILTERS.map(filter => {
           const active = selectedFilter === filter;
-          const count = filter !== 'All' ? orders.filter(o => o.status === filter).length : 0;
+          const count = filter !== 'All'
+            ? (selectedDate
+                ? orders.filter(o => o.status === filter && isoDate(new Date(o.created_at)) === selectedDate).length
+                : orders.filter(o => o.status === filter).length)
+            : 0;
           return (
             <TouchableOpacity
               key={filter}
@@ -123,6 +337,10 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
         })}
       </ScrollView>
     );
+  };
+
+  const renderFilterChips = () => {
+    return isDeliveryBoy ? renderRiderFilterChips() : renderCustomerFilterChips();
   };
 
   /**
@@ -399,14 +617,20 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
                 ? isDeliveryBoy
                   ? t('no_delivery_orders', 'No delivery orders assigned')
                   : t('no_orders', 'No orders found')
-                : `No ${selectedFilter.toLowerCase()} orders`
+                : selectedDate
+                  ? `No orders on ${formatDateChip(selectedDate)}`
+                  : isDeliveryBoy
+                    ? `No ${riderStatusFilter === 'to_deliver' ? 'pending' : 'delivered'} orders`
+                    : `No ${selectedFilter.toLowerCase()} orders`
             }
             text={
               orders.length === 0
                 ? isDeliveryBoy
                   ? 'New deliveries from the office will show up here. Pull down to check again.'
                   : 'Your orders will appear here once you place one.'
-                : 'Try another filter to see your other orders.'
+                : selectedDate
+                  ? 'There are no orders matching this date filter. Tap below to clear the date filter.'
+                  : 'Try another filter to see your other orders.'
             }
           />
           {!isDeliveryBoy && orders.length === 0 && (
@@ -414,7 +638,12 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
               <Text style={styles.shopNowText}>{t('start_shopping', 'Start Shopping')}</Text>
             </TouchableOpacity>
           )}
-          {selectedFilter !== 'All' && (
+          {selectedDate !== null && (
+            <TouchableOpacity style={styles.clearFilterButton} onPress={() => setSelectedDate(null)}>
+              <Text style={styles.clearFilterText}>Clear date filter</Text>
+            </TouchableOpacity>
+          )}
+          {selectedFilter !== 'All' && selectedDate === null && (
             <TouchableOpacity style={styles.clearFilterButton} onPress={() => setSelectedFilter('All')}>
               <Text style={styles.clearFilterText}>Show all orders</Text>
             </TouchableOpacity>
@@ -429,6 +658,19 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
           refreshControl={refreshControl}
         />
       )}
+
+      {/* Responsive Calendar Modal */}
+      <CalendarModal
+        visible={calendarVisible}
+        onClose={() => setCalendarVisible(false)}
+        selectedDate={selectedDate || undefined}
+        onSelectDate={(date) => {
+          setSelectedDate(date);
+          setCalendarVisible(false);
+        }}
+        title={isDeliveryBoy ? 'Filter Deliveries by Date' : 'Filter Orders by Date'}
+        quickPresets={true}
+      />
     </View>
   );
 };
@@ -462,6 +704,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     borderColor: colors.primary,
   },
+  filterChipActiveYellow: {
+    backgroundColor: colors.sun,
+    borderColor: colors.sun,
+  },
   filterChipText: {
     fontSize: 14,
     color: colors.ink,
@@ -469,6 +715,25 @@ const styles = StyleSheet.create({
   },
   filterChipTextActive: {
     color: colors.white,
+  },
+  filterChipTextActiveDark: {
+    color: colors.ink,
+    fontWeight: '800',
+  },
+  calendarChip: {
+    borderColor: colors.primarySoft,
+    backgroundColor: colors.primaryTint,
+  },
+  chipClearBtn: {
+    marginLeft: 6,
+    padding: 2,
+  },
+  chipDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: colors.line,
+    alignSelf: 'center',
+    marginHorizontal: 4,
   },
   listContent: {
     paddingHorizontal: pagePadding,

@@ -167,12 +167,14 @@ const TabPill = ({ icon, label, focused, showLabel }: {
       showLabel ? tabStyles.itemWithLabel : tabStyles.itemIconOnly,
       focused && (showLabel ? tabStyles.itemActiveWithLabel : tabStyles.itemActiveIconOnly),
     ]}
+    accessibilityRole="button"
+    accessibilityState={{ selected: focused }}
     accessibilityLabel={label}
   >
     <Ionicons
       name={focused ? icon[0] : icon[1]}
       size={24}
-      color={focused ? colors.ink : 'rgba(255, 255, 255, 0.75)'}
+      color={focused ? colors.ink : 'rgba(255, 255, 255, 0.85)'}
     />
     {focused && showLabel ? <Text style={tabStyles.label} numberOfLines={1}>{label}</Text> : null}
   </View>
@@ -198,19 +200,44 @@ const useFloatingTabBar = () => {
 
 const tabStyles = StyleSheet.create({
   itemWithLabel: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    height: 44, minWidth: 44, paddingHorizontal: 12, borderRadius: radius.pill, gap: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 44,
+    minWidth: 44,
+    paddingHorizontal: 12,
+    borderRadius: 22,
+    gap: 6,
   },
-  itemActiveWithLabel: { backgroundColor: colors.sun, paddingHorizontal: 16 },
+  itemActiveWithLabel: {
+    backgroundColor: colors.sun,
+    paddingHorizontal: 16,
+    height: 44,
+    borderRadius: 22,
+    ...shadow.card,
+  },
   itemIconOnly: {
-    width: 44, height: 44, borderRadius: 22,
-    alignItems: 'center', justifyContent: 'center',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   itemActiveIconOnly: {
     backgroundColor: colors.sun,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
     ...shadow.card,
   },
-  label: { color: colors.ink, fontSize: 13, fontWeight: '800' },
+  label: {
+    color: colors.ink,
+    fontSize: 13,
+    fontWeight: '800',
+    marginLeft: 2,
+  },
 });
 
 // ─── Customer / Rider tabs ────────────────────────────────────────────────────
@@ -283,7 +310,7 @@ const AdminTabs = () => {
     screenOptions={({ route }) => ({
       tabBarIcon: ({ focused }) => {
         const icons: Record<string, [IconPair, string]> = {
-          Dashboard:      [['stats-chart', 'stats-chart-outline'], 'Dashboard'],
+          Dashboard:      [['grid', 'grid-outline'], 'Dashboard'],
           AdminOrders:    [['receipt', 'receipt-outline'], 'Orders'],
           AdminCustomers: [['people', 'people-outline'], 'Customers'],
           AdminManage:    [['construct', 'construct-outline'], 'Manage'],
