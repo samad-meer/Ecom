@@ -6,12 +6,15 @@ import type {
   AdminOrderSummary,
   AdminOrderUpdatePayload,
   CreateAdminOrderPayload,
+  CreateMessageTemplatePayload,
   CreateOrderPayload,
   CustomerOrderStats,
   DeliveryBoy,
   DeliveryStatusOption,
+  MessageTemplate,
   Order,
   Paginated,
+  UpdateMessageTemplatePayload,
 } from "../types";
 
 function buildAdminQuery(filters: AdminOrderFilters = {}): string {
@@ -135,3 +138,70 @@ export const deliveryStatusesApi = {
     return apiFetch<void>(`/orders/admin/delivery-statuses/${id}/`, { method: "DELETE", auth: true });
   },
 };
+
+export const messageTemplatesApi = {
+  list(category?: string): Promise<MessageTemplate[]> {
+    const qs = category ? `?category=${category}` : "";
+    return apiFetch<MessageTemplate[] | Paginated<MessageTemplate>>(
+      `/orders/templates/${qs}`,
+      { auth: true }
+    ).then(unwrapList);
+  },
+
+  get(id: number): Promise<MessageTemplate> {
+    return apiFetch<MessageTemplate>(`/orders/templates/${id}/`, { auth: true });
+  },
+
+  create(payload: CreateMessageTemplatePayload): Promise<MessageTemplate> {
+    return apiFetch<MessageTemplate>("/orders/templates/", {
+      method: "POST",
+      auth: true,
+      body: payload,
+    });
+  },
+
+  update(id: number, payload: UpdateMessageTemplatePayload): Promise<MessageTemplate> {
+    return apiFetch<MessageTemplate>(`/orders/templates/${id}/`, {
+      method: "PATCH",
+      auth: true,
+      body: payload,
+    });
+  },
+
+  remove(id: number): Promise<void> {
+    return apiFetch<void>(`/orders/templates/${id}/`, {
+      method: "DELETE",
+      auth: true,
+    });
+  },
+
+  setDefault(id: number): Promise<MessageTemplate> {
+    return apiFetch<MessageTemplate>(`/orders/templates/${id}/set-default/`, {
+      method: "POST",
+      auth: true,
+    });
+  },
+};
+
+export interface DeliverySettings {
+  id?: number;
+  rider_can_call: boolean;
+  rider_can_whatsapp: boolean;
+  updated_at?: string;
+}
+
+export const deliverySettingsApi = {
+  get(): Promise<DeliverySettings> {
+    return apiFetch<DeliverySettings>("/orders/delivery/settings/", { auth: true });
+  },
+
+  update(payload: Partial<DeliverySettings>): Promise<DeliverySettings> {
+    return apiFetch<DeliverySettings>("/orders/delivery/settings/", {
+      method: "PATCH",
+      auth: true,
+      body: payload,
+    });
+  },
+};
+
+

@@ -33,6 +33,7 @@ import { AdminCustomersScreen } from './src/screens/admin/AdminCustomersScreen';
 import { AdminManageScreen } from './src/screens/admin/AdminManageScreen';
 import { AdminStaffScreen } from './src/screens/admin/AdminStaffScreen';
 import { AdminSettingsScreen } from './src/screens/admin/AdminSettingsScreen';
+import { AdminMessageTemplatesScreen } from './src/screens/admin/AdminMessageTemplatesScreen';
 import { AdminActivityScreen } from './src/screens/admin/AdminActivityScreen';
 import { AdminNotificationScreen } from './src/screens/admin/AdminNotificationScreen';
 import { AdminPlantScreen } from './src/screens/admin/AdminPlantScreen';
@@ -152,15 +153,13 @@ const SplashScreen = () => {
 };
 
 // ─── Floating tab bar ─────────────────────────────────────────────────────────
-// A navy pill that floats above the page. The tab you are on becomes a sunny
-// yellow pill with its name; the others are crisp icons. With five tabs
-// (admin) there is no room for names, so the active tab is a clean circular
-// yellow badge with a bold, high-contrast icon.
+// A navy pill that floats above the page. The active tab is a clean circular
+// yellow badge with a bold, high-contrast icon; the others are crisp white icons.
 
 type IconPair = [keyof typeof Ionicons.glyphMap, keyof typeof Ionicons.glyphMap];
 
-const TabPill = ({ icon, label, focused, showLabel }: {
-  icon: IconPair; label: string; focused: boolean; showLabel: boolean;
+const TabPill = ({ icon, label, focused, showLabel = false }: {
+  icon: IconPair; label: string; focused: boolean; showLabel?: boolean;
 }) => (
   <View
     style={[
@@ -260,7 +259,7 @@ const MainTabs = () => {
             label = isDeliveryBoy ? 'Deliveries' : 'Orders';
           } else if (route.name === 'RiderPayment') { icon = ['qr-code', 'qr-code-outline']; label = 'Pay'; }
           else if (route.name === 'Profile') { icon = ['person-circle', 'person-circle-outline']; label = 'Profile'; }
-          return <TabPill icon={icon} label={label} focused={focused} showLabel />;
+          return <TabPill icon={icon} label={label} focused={focused} showLabel={false} />;
         },
         tabBarShowLabel: false,
         tabBarLabelPosition: 'beside-icon',
@@ -414,6 +413,7 @@ const AppContent = () => {
                 <Stack.Screen name="AdminCreateOrder"   component={AdminCreateOrderScreen}   options={{ headerTitle: 'New Order' }} />
                 <Stack.Screen name="AdminStaff"         component={AdminStaffScreen}         options={{ headerTitle: 'Staff' }} />
                 <Stack.Screen name="AdminSettings"      component={AdminSettingsScreen}      options={{ headerTitle: 'Settings' }} />
+                <Stack.Screen name="AdminMessageTemplates" component={AdminMessageTemplatesScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="AdminActivity"      component={AdminActivityScreen}      options={{ headerTitle: 'Activity Log' }} />
                 <Stack.Screen name="AdminNotification"  component={AdminNotificationScreen}  options={{ headerTitle: 'Notifications' }} />
                 <Stack.Screen name="AdminPlant"         component={AdminPlantScreen}         options={{ headerTitle: 'Plant / Deliveries' }} />

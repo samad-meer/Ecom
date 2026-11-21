@@ -1,13 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  Alert, Switch, TextInput, ActivityIndicator,
+  Alert, Switch, TextInput, ActivityIndicator, Modal, ScrollView,
 } from 'react-native';
 import { useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, fontSize, card, pagePadding } from '../../theme';
 import { StatusPill, orderStatusTone, friendlyError } from '../../components/ui';
-import { adminService, AdminOrder, DeliveryBoy } from '../../services/adminService';
+import { adminService, AdminOrder, DeliveryBoy, MessageTemplate } from '../../services/adminService';
 import { OrderLocationMap } from '../../components/OrderLocationMap';
 import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
 import { canWhatsApp, openWhatsApp, orderDispatchMessage } from '../../utils/whatsapp';
@@ -39,6 +39,36 @@ export const AdminOrderDetailScreen: React.FC = () => {
   const [notes, setNotes] = useState(order.delivery_notes || '');
   const [editingNotes, setEditingNotes] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
+  const [templates, setTemplates] = useState<MessageTemplate[]>([]);
+  const [templatePickerVisible, setTemplatePickerVisible] = useState(false);
+
+  useEffect(() => {
+    adminService.getMessageTemplates().then(setTemplates).catch(() => {});
+  }, []);
+
+  const sendWhatsApp = (chosenTemplate?: MessageTemplate) => {
+    const tpl =
+      chosenTemplate ||
+      templates.find((t) => t.is_default && t.category === 'order_info') ||
+      templates.find((t) => t.is_default) ||
+      templates[0];
+
+    openWhatsApp(
+      order.customer_phone,
+      orderDispatchMessage({
+        customerName: order.customer_name,
+        orderId: order.id,
+        items: order.items,
+        orderTotal: order.total_price,
+        previousBalance: order.customer_balance,
+        isPaid: order.is_paid,
+        shippingAddress: order.shipping_address,
+        mode: 'info',
+        template: tpl?.content,
+      })
+    );
+    setTemplatePickerVisible(false);
+  };
 
   const patch = async (field: string, data: object) => {
     setSaving(field);
@@ -159,28 +189,26 @@ export const AdminOrderDetailScreen: React.FC = () => {
               </TouchableOpacity>
             )}
             {canWhatsApp(order.customer_phone) && (
-              <TouchableOpacity
-                style={[styles.contactBtn, styles.waBtn]}
-                onPress={() => openWhatsApp(
-                  order.customer_phone,
-                  orderDispatchMessage({
-                    customerName: order.customer_name,
-                    orderId: order.id,
-                    items: order.items,
-                    orderTotal: order.total_price,
-                    previousBalance: order.customer_balance,
-                    isPaid: order.is_paid,
-                    shippingAddress: order.shipping_address,
-                    mode: 'info',
-                  }),
-                )}
-                activeOpacity={0.85}
-                accessibilityRole="button"
-                accessibilityLabel={`WhatsApp ${order.customer_name}`}
-              >
-                <Ionicons name="logo-whatsapp" size={18} color={colors.ink} />
-                <Text style={styles.waBtnText}>WhatsApp</Text>
-              </TouchableOpacity>
+              <View style={[styles.contactBtn, styles.waBtnWrap]}>
+                <TouchableOpacity
+                  style={styles.waBtnMain}
+                  onPress={() => sendWhatsApp()}
+                  onLongPress={() => setTemplatePickerVisible(true)}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityLabel={`WhatsApp ${order.customer_name}`}
+                >
+                  <Ionicons name="logo-whatsapp" size={18} color={colors.ink} />
+                  <Text style={styles.waBtnText}>WhatsApp</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.waBtnChevron}
+                  onPress={() => setTemplatePickerVisible(true)}
+                  accessibilityLabel="Choose WhatsApp template"
+                >
+                  <Ionicons name="chevron-down" size={14} color={colors.ink} />
+                </TouchableOpacity>
+              </View>
             )}
           </View>
         )}
@@ -388,6 +416,55 @@ export const AdminOrderDetailScreen: React.FC = () => {
         onSaved={(updated) => setOrder(updated)}
       />
 
+      {/* Template picker bottom sheet modal */}
+      <Modal
+        visible={templatePickerVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setTemplatePickerVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.sheetOverlay}
+          activeOpacity={1}
+          onPress={() => setTemplatePickerVisible(false)}
+        >
+          <View style={styles.sheetCard}>
+            <View style={styles.sheetHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.sheetTitle}>Send WhatsApp Message</Text>
+                <Text style={styles.sheetSubtitle}>Choose a message template</Text>
+              </View>
+              <TouchableOpacity onPress={() => setTemplatePickerVisible(false)}>
+                <Ionicons name="close" size={22} color={colors.ink} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ maxHeight: 340 }}>
+              {templates.map((tpl) => (
+                <TouchableOpacity
+                  key={tpl.id}
+                  style={styles.templateOption}
+                  onPress={() => sendWhatsApp(tpl)}
+                >
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={styles.templateOptionName}>{tpl.name}</Text>
+                      {tpl.is_default && (
+                        <View style={styles.templateDefaultPill}>
+                          <Text style={styles.templateDefaultPillText}>Default</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.templateOptionCat}>{tpl.category_display}</Text>
+                  </View>
+                  <Ionicons name="paper-plane-outline" size={18} color={colors.primary} />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
     </KeyboardAwareScrollView>
   );
 };
@@ -528,6 +605,72 @@ const styles = StyleSheet.create({
   // White text on this green is only 2.0:1, so the WhatsApp button is navy on green.
   waBtn: { backgroundColor: colors.whatsapp },
   waBtnText: { color: colors.ink, fontSize: fontSize.sm, fontWeight: '800' },
+  waBtnWrap: {
+    backgroundColor: colors.whatsapp,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 0,
+    overflow: 'hidden',
+  },
+  waBtnMain: {
+    flex: 1,
+    height: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  waBtnChevron: {
+    width: 32,
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderLeftWidth: 1,
+    borderLeftColor: 'rgba(10,31,68,0.15)',
+  },
+
+  sheetOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(10,31,68,0.6)',
+    justifyContent: 'flex-end',
+  },
+  sheetCard: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: pagePadding,
+    paddingBottom: 32,
+  },
+  sheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+    marginBottom: 8,
+  },
+  sheetTitle: { fontSize: fontSize.md, fontWeight: '800', color: colors.ink },
+  sheetSubtitle: { fontSize: fontSize.xs, color: colors.muted, marginTop: 2 },
+  templateOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.lineSoft,
+  },
+  templateOptionName: { fontSize: fontSize.sm, fontWeight: '700', color: colors.ink },
+  templateOptionCat: { fontSize: 11, color: colors.muted, marginTop: 2 },
+  templateDefaultPill: {
+    backgroundColor: colors.warningBg,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.warningLine,
+  },
+  templateDefaultPillText: { fontSize: 9, fontWeight: '800', color: colors.warningText },
 
   hideBtn: {
     height: 46, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',

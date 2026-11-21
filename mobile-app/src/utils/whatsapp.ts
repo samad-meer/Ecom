@@ -140,6 +140,144 @@ export interface OrderDispatchMessageOptions {
   isPaid?: boolean | null;
   shippingAddress?: string | null;
   mode?: 'dispatch' | 'info';
+  template?: string | null;
+}
+
+export const TEMPLATE_VARIABLES = [
+  { key: '{business_name}', label: 'Business Name', sample: 'Century Sip', desc: 'The brand name of the business' },
+  { key: '{customer_name}', label: 'Customer Name', sample: 'Hiba', desc: 'Customer full name or guest name' },
+  { key: '{order_id}', label: 'Order ID', sample: '9', desc: 'Order number without hash' },
+  { key: '{items_list}', label: 'Items List', sample: '• 2× 19L Refill (PKR 360)', desc: 'Bulleted list of items, quantities & prices' },
+  { key: '{delivery_address}', label: 'Delivery Address', sample: '76, Upper, Umer, Dawood', desc: 'Saved delivery or shipping address' },
+  { key: '{order_total}', label: 'Order Total', sample: 'PKR 360', desc: 'This order total' },
+  { key: '{previous_balance}', label: 'Previous Balance', sample: 'PKR 0', desc: 'Previous account ledger balance' },
+  { key: '{previous_balance_line}', label: 'Balance Line', sample: '• Previous Balance (Due): PKR 0', desc: 'Pre-formatted previous due/advance line' },
+  { key: '{total_payable}', label: 'Total Payable', sample: 'PKR 360', desc: 'Final total amount payable' },
+  { key: '{payment_status}', label: 'Payment Status', sample: 'Unpaid', desc: 'Paid Online or Unpaid' },
+  { key: '{payment_instruction}', label: 'Payment Note', sample: 'Please keep the cash ready at the time of delivery. 💵', desc: 'Cash/payment instructions' },
+  { key: '{rider_name}', label: 'Rider Name', sample: 'Ali Rider', desc: 'Name of the assigned delivery boy' },
+  { key: '{date}', label: 'Order Date', sample: '22 Nov 2026', desc: 'Date order was placed' },
+] as const;
+
+export interface TemplateContext {
+  business_name?: string;
+  customer_name?: string;
+  order_id?: string | number;
+  items_list?: string;
+  delivery_address?: string;
+  order_total?: string;
+  previous_balance?: string;
+  previous_balance_line?: string;
+  total_payable?: string;
+  payment_status?: string;
+  payment_instruction?: string;
+  rider_name?: string;
+  date?: string;
+  [key: string]: string | number | undefined;
+}
+
+export function renderTemplate(template: string, ctx: TemplateContext): string {
+  if (!template) return '';
+  let rendered = template;
+  for (const [k, v] of Object.entries(ctx)) {
+    const val = v !== undefined && v !== null ? String(v) : '';
+    const regex = new RegExp(`\\{\\s*${k}\\s*\\}`, 'gi');
+    rendered = rendered.replace(regex, val);
+  }
+  return rendered.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+export function buildTemplateContextFromOrder(opts: OrderDispatchMessageOptions): TemplateContext {
+  const {
+    businessName = 'Century Sip',
+    customerName,
+    orderId,
+    items = [],
+    orderTotal,
+    previousBalance,
+    isPaid = false,
+    shippingAddress,
+  } = opts;
+
+  const currentTotal = Number(orderTotal || 0);
+  const prev =
+    previousBalance !== null && previousBalance !== undefined && previousBalance !== ''
+      ? Number(previousBalance)
+      : 0;
+
+  const itemsLines: string[] = [];
+  if (items && items.length > 0) {
+    items.forEach((item) => {
+      const qty = item.quantity ?? 1;
+      const name = item.product_details?.name || item.product_name || item.name || 'Item';
+      const unitPrice = Number(item.price || 0);
+      const lineTotal = unitPrice > 0 ? unitPrice * qty : 0;
+      if (lineTotal > 0) {
+        itemsLines.push(`• ${qty}× ${name} (${pkr(lineTotal)})`);
+      } else {
+        itemsLines.push(`• ${qty}× ${name}`);
+      }
+    });
+  }
+
+  let prevBalanceLine = '';
+  let paymentInstruction = '';
+  let totalPayable = 0;
+
+  if (isPaid) {
+    if (prev > 0) {
+      prevBalanceLine = `• Previous Balance (Due): *${pkr(prev)}*`;
+      paymentInstruction = 'Please keep cash ready for your previous dues. 💵';
+      totalPayable = prev;
+    } else {
+      totalPayable = 0;
+    }
+  } else {
+    if (prev > 0) {
+      prevBalanceLine = `• Previous Balance (Due): *${pkr(prev)}*`;
+    } else if (prev < 0) {
+      prevBalanceLine = `• Previous Credit / Advance: *- ${pkr(Math.abs(prev))}*`;
+    }
+    totalPayable = Math.max(0, currentTotal + prev);
+    if (totalPayable > 0) {
+      paymentInstruction = 'Please keep the cash ready at the time of delivery. 💵';
+    } else {
+      paymentInstruction = 'Order covered by advance balance.';
+    }
+  }
+
+  return {
+    business_name: businessName,
+    customer_name: customerName?.trim() || 'Customer',
+    order_id: String(orderId ?? ''),
+    items_list: itemsLines.join('\n') || 'No items',
+    delivery_address: shippingAddress?.trim() || '—',
+    order_total: pkr(currentTotal),
+    previous_balance: pkr(prev),
+    previous_balance_line: prevBalanceLine,
+    total_payable: pkr(totalPayable),
+    payment_status: isPaid ? 'Paid Online ✅' : 'Unpaid',
+    payment_instruction: paymentInstruction,
+    date: new Date().toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: 'numeric' }),
+  };
+}
+
+export function sampleTemplateContext(): TemplateContext {
+  return {
+    business_name: 'Century Sip',
+    customer_name: 'Hiba',
+    order_id: '9',
+    items_list: '• 2× 19L Refill (PKR 360)',
+    delivery_address: '76, Upper, Umer, Dawood',
+    order_total: 'PKR 360',
+    previous_balance: 'PKR 0',
+    previous_balance_line: '',
+    total_payable: 'PKR 360',
+    payment_status: 'Unpaid',
+    payment_instruction: 'Please keep the cash ready at the time of delivery. 💵',
+    rider_name: 'Ali Rider',
+    date: '22 Nov 2026',
+  };
 }
 
 /**
@@ -148,6 +286,9 @@ export interface OrderDispatchMessageOptions {
  * and clear total payable amount.
  */
 export function orderDispatchMessage(opts: OrderDispatchMessageOptions): string {
+  if (opts.template) {
+    return renderTemplate(opts.template, buildTemplateContextFromOrder(opts));
+  }
   const {
     businessName = 'Century Sip',
     customerName,

@@ -18,18 +18,21 @@ import {
   Minus,
   Navigation,
   MessageCircle,
+  Pencil,
+  ChevronDown,
 } from "lucide-react";
-import { canWhatsApp, openWhatsApp } from "@/lib/whatsapp";
+import { canWhatsApp, openWhatsApp, orderDispatchMessage } from "@/lib/whatsapp";
 import { canCall, telHref } from "@/lib/phone";
-import type { AdminOrder, DeliveryStatusOption } from "@/lib/types";
+import type { AdminOrder, DeliveryStatusOption, MessageTemplate } from "@/lib/types";
 import { formatPrice } from "@/lib/format";
 import { cn } from "@/lib/cn";
-import { ordersApi } from "@/lib/api";
+import { ordersApi, messageTemplatesApi } from "@/lib/api";
 import { coordsFrom } from "@/lib/geo";
 import { Button, Chip, Modal, useToast } from "@/components/ui";
 import { PinMap } from "@/components/maps/PinMap";
 import { useAsync } from "@/hooks/useAsync";
 import { OrderStatusBadge } from "./OrderStatusBadge";
+import { EditOrderModal } from "./EditOrderModal";
 
 interface AdminOrderDetailModalProps {
   order: AdminOrder | null;
@@ -286,22 +289,59 @@ function RecordPayment({
 
 export function AdminOrderDetailModal({ order, onClose, onUpdated }: AdminOrderDetailModalProps) {
   const deliveryStatuses = useAsync(() => ordersApi.deliveryStatuses(), []);
+  const templates = useAsync(() => messageTemplatesApi.list(), []);
+  const [isEditing, setIsEditing] = useState(false);
+  const [showTemplateMenu, setShowTemplateMenu] = useState(false);
 
   if (!order) return null;
 
+  const sendWhatsApp = (chosenTemplate?: MessageTemplate) => {
+    if (!order) return;
+    const tpl =
+      chosenTemplate ||
+      templates.data?.find((t) => t.is_default && t.category === "order_info") ||
+      templates.data?.find((t) => t.is_default) ||
+      templates.data?.[0];
+
+    const msg = orderDispatchMessage({
+      customerName: order.customer_name,
+      orderId: order.id,
+      items: order.items,
+      orderTotal: order.total_price,
+      previousBalance: order.customer_balance,
+      isPaid: order.is_paid,
+      shippingAddress: order.shipping_address,
+      mode: "info",
+      template: tpl?.content,
+    });
+    openWhatsApp(order.customer_phone, msg);
+    setShowTemplateMenu(false);
+  };
+
   return (
-    <Modal
-      open={!!order}
-      onClose={onClose}
-      title={`Order #${order.id}`}
-      className="max-w-3xl"
-    >
-      <div className="flex flex-col gap-1 max-h-[80vh] overflow-y-auto pr-1">
-        {/* Status + date */}
-        <div className="mb-3 flex items-center justify-between">
-          <OrderStatusBadge status={order.status} />
-          <span className="text-xs text-mist/50">{fmt(order.created_at)}</span>
-        </div>
+    <>
+      <Modal
+        open={!!order}
+        onClose={onClose}
+        title={`Order #${order.id}`}
+        className="max-w-3xl"
+      >
+        <div className="flex flex-col gap-1 max-h-[80vh] overflow-y-auto pr-1">
+          {/* Status + actions + date */}
+          <div className="mb-3 flex items-center justify-between">
+            <OrderStatusBadge status={order.status} />
+            <div className="flex items-center gap-3">
+              <Button
+                variant="ghost"
+                onClick={() => setIsEditing(true)}
+                className="flex items-center gap-1.5 py-1 px-3 text-xs text-wave hover:text-white"
+              >
+                <Pencil size={13} />
+                Edit Order
+              </Button>
+              <span className="text-xs text-mist/50">{fmt(order.created_at)}</span>
+            </div>
+          </div>
 
         {/* Customer */}
         <Row icon={User} label="Customer" value={
@@ -331,15 +371,53 @@ export function AdminOrderDetailModal({ order, onClose, onUpdated }: AdminOrderD
               </a>
             )}
             {canWhatsApp(order.customer_phone) && (
-              <button
-                onClick={() => openWhatsApp(
-                  order.customer_phone,
-                  `Hello ${order.customer_name}, regarding your order #${order.id}.`,
+              <div className="relative flex flex-1">
+                <button
+                  type="button"
+                  onClick={() => sendWhatsApp()}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-l-xl bg-emerald-500/15 py-2.5 text-sm font-semibold text-emerald-300 transition hover:bg-emerald-500/25"
+                  title="Send with default template"
+                >
+                  <MessageCircle size={15} /> WhatsApp
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowTemplateMenu((v) => !v)}
+                  className="flex items-center justify-center rounded-r-xl border-l border-emerald-500/20 bg-emerald-500/15 px-2.5 text-emerald-300 transition hover:bg-emerald-500/30"
+                  title="Choose message template"
+                >
+                  <ChevronDown size={14} className={cn("transition", showTemplateMenu && "rotate-180")} />
+                </button>
+
+                {/* Dropdown Menu */}
+                {showTemplateMenu && (
+                  <div className="absolute right-0 top-full z-50 mt-1.5 w-64 rounded-xl border border-white/10 bg-[#16222F] p-1.5 shadow-2xl backdrop-blur-xl">
+                    <p className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-mist/40">
+                      Choose Template
+                    </p>
+                    <div className="flex flex-col gap-1 max-h-56 overflow-y-auto">
+                      {(templates.data ?? []).map((t) => (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onClick={() => sendWhatsApp(t)}
+                          className="flex flex-col items-start rounded-lg px-2.5 py-2 text-left text-xs transition hover:bg-white/10 text-mist"
+                        >
+                          <div className="flex items-center gap-1.5 w-full justify-between">
+                            <span className="font-semibold text-white truncate">{t.name}</span>
+                            {t.is_default && (
+                              <span className="rounded bg-emerald-500/20 px-1.5 py-0.2 text-[9px] font-bold text-emerald-300">
+                                Default
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[10px] text-mist/50">{t.category_display}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 )}
-                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-500/15 py-2.5 text-sm font-semibold text-emerald-300 transition hover:bg-emerald-500/25"
-              >
-                <MessageCircle size={15} /> WhatsApp
-              </button>
+              </div>
             )}
           </div>
         )}
@@ -422,5 +500,15 @@ export function AdminOrderDetailModal({ order, onClose, onUpdated }: AdminOrderD
         </div>
       </div>
     </Modal>
+    <EditOrderModal
+      order={order}
+      open={isEditing}
+      onClose={() => setIsEditing(false)}
+      onUpdated={(updated) => {
+        setIsEditing(false);
+        onUpdated?.(updated);
+      }}
+    />
+  </>
   );
 }

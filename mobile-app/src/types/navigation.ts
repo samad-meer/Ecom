@@ -41,6 +41,7 @@ export type RootStackParamList = {
   /** `role` preselects the list filter — e.g. deep-link straight to riders. */
   AdminStaff: { role?: StaffRoleFilter } | undefined;
   AdminSettings: undefined;
+  AdminMessageTemplates: undefined;
   AdminActivity: undefined;
   AdminNotification: undefined;
   AdminPlant: undefined;

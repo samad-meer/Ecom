@@ -1,6 +1,6 @@
 import type { ComponentType } from "react";
 import type { LucideIcon } from "lucide-react";
-import { Tag, Users, GlassWater, Smartphone, Languages, MapPin, Share2, Truck, Landmark } from "lucide-react";
+import { Tag, Users, GlassWater, Smartphone, Languages, MapPin, Share2, Truck, Landmark, MessageSquare, PhoneCall } from "lucide-react";
 import { PricingSettings } from "./components/sections/PricingSettings";
 import { CustomerTypesSettings } from "./components/sections/CustomerTypesSettings";
 import { BottleTypesSettings } from "./components/sections/BottleTypesSettings";
@@ -10,6 +10,8 @@ import { AreasSettings } from "./components/sections/AreasSettings";
 import { SharedLocationSettings } from "./components/sections/SharedLocationSettings";
 import { DeliveryStatusSettings } from "./components/sections/DeliveryStatusSettings";
 import { PaymentAccountsSettings } from "./components/sections/PaymentAccountsSettings";
+import { MessageTemplatesSettings } from "./components/sections/MessageTemplatesSettings";
+import { RiderContactSettings } from "./components/sections/RiderContactSettings";
 
 export interface SettingsSectionEntry {
   id: string;
@@ -39,6 +41,12 @@ export const SETTINGS_SECTIONS: SettingsSectionEntry[] = [
     Component: DeliveryStatusSettings,
   },
   {
+    id: "rider-contact",
+    label: "Rider Contact",
+    icon: PhoneCall,
+    Component: RiderContactSettings,
+  },
+  {
     id: "shared-location",
     label: "Shared Location",
     icon: Share2,
@@ -61,6 +69,12 @@ export const SETTINGS_SECTIONS: SettingsSectionEntry[] = [
     label: "Mobile Profile",
     icon: Smartphone,
     Component: MobileProfileSettings,
+  },
+  {
+    id: "message-templates",
+    label: "Message Templates",
+    icon: MessageSquare,
+    Component: MessageTemplatesSettings,
   },
   {
     id: "language",

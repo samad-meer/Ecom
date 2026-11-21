@@ -4,6 +4,8 @@ import {
   TextInput, ActivityIndicator, Alert, Switch,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { colors, radius, space, fontSize, card, pagePadding } from '../../theme';
 import { ErrorState, StatusPill, friendlyError } from '../../components/ui';
 import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
@@ -11,6 +13,7 @@ import { adminService, PricedType, PlantSettings } from '../../services/adminSer
 import { PaymentAccountsSection } from './PaymentAccountsSection';
 import { LanguageSection } from './LanguageSection';
 import { BusinessNameSection } from './BusinessNameSection';
+import { RootStackParamList } from '../../types/navigation';
 
 /** Soft tint behind each section's icon. */
 const TONES = {
@@ -550,6 +553,31 @@ const mps = StyleSheet.create({
   discardText: { color: colors.ink, fontSize: fontSize.sm, fontWeight: '700' },
 });
 
+// ─── Message Templates Navigation Section ───────────────────────────────────
+
+function MessageTemplatesSection() {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  return (
+    <View style={styles.section}>
+      <SectionHeader icon="chatbubbles" tone="success" title="Message Templates" />
+      <Text style={styles.templateDesc}>
+        Build and customize WhatsApp and SMS message templates for order dispatch, customer notifications, and payment reminders.
+      </Text>
+      <TouchableOpacity
+        style={styles.templateNavBtn}
+        onPress={() => navigation.navigate('AdminMessageTemplates')}
+        activeOpacity={0.85}
+      >
+        <View style={styles.templateNavLeft}>
+          <Ionicons name="logo-whatsapp" size={20} color={colors.white} />
+          <Text style={styles.templateNavText}>Manage Message Templates</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color={colors.white} />
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export const AdminSettingsScreen: React.FC = () => (
@@ -557,6 +585,8 @@ export const AdminSettingsScreen: React.FC = () => (
     <BusinessNameSection />
 
     <PricingSection />
+
+    <MessageTemplatesSection />
 
     <PaymentAccountsSection />
 
@@ -674,4 +704,31 @@ const styles = StyleSheet.create({
     backgroundColor: colors.dangerBg, alignItems: 'center', justifyContent: 'center',
   },
   emptyText: { fontSize: fontSize.sm, color: colors.muted, marginTop: 4, marginBottom: 4 },
+  templateDesc: {
+    fontSize: fontSize.xs,
+    color: colors.muted,
+    lineHeight: 18,
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  templateNavBtn: {
+    marginTop: 12,
+    height: 48,
+    borderRadius: radius.md,
+    backgroundColor: colors.success,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+  },
+  templateNavLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  templateNavText: {
+    color: colors.white,
+    fontWeight: '800',
+    fontSize: fontSize.sm,
+  },
 });

@@ -252,7 +252,59 @@ export interface PaymentAccount {
   sort_order: number;
 }
 
+export type MessageTemplateCategory = 'order_info' | 'order_dispatch' | 'payment_reminder' | 'custom';
+
+export interface MessageTemplate {
+  id: number;
+  name: string;
+  category: MessageTemplateCategory;
+  category_display: string;
+  content: string;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export const adminService = {
+  getMessageTemplates(category?: string): Promise<MessageTemplate[]> {
+    const qs = category ? `?category=${category}` : '';
+    return adminFetch(`/orders/templates/${qs}`);
+  },
+
+  createMessageTemplate(payload: {
+    name: string;
+    category: MessageTemplateCategory;
+    content: string;
+    is_default?: boolean;
+  }): Promise<MessageTemplate> {
+    return adminFetch('/orders/templates/', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  updateMessageTemplate(
+    id: number,
+    payload: Partial<{
+      name: string;
+      category: MessageTemplateCategory;
+      content: string;
+      is_default?: boolean;
+    }>
+  ): Promise<MessageTemplate> {
+    return adminFetch(`/orders/templates/${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  deleteMessageTemplate(id: number): Promise<void> {
+    return adminFetch(`/orders/templates/${id}/`, { method: 'DELETE' });
+  },
+
+  setDefaultMessageTemplate(id: number): Promise<MessageTemplate> {
+    return adminFetch(`/orders/templates/${id}/set-default/`, { method: 'POST' });
+  },
   /**
    * Headline stats. Passing a range scopes every figure to it; passing nothing
    * keeps the all-time totals the dashboard showed before the period filter.

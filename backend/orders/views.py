@@ -9,12 +9,12 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from django.db.models import Q, Sum, Count
-from .models import Order, DeliveryStatus, OrderItem, CustomerVisit
+from .models import Order, DeliveryStatus, OrderItem, CustomerVisit, MessageTemplate, DeliverySettings
 from .serializers import (
     OrderSerializer, DeliveryStatusSerializer, DeliveryBoyOrderSerializer,
     AdminOrderSerializer, AdminOrderUpdateSerializer, AdminOrderCreateSerializer,
     CustomerVisitSerializer, RiderVisitInputSerializer, rider_card_maps,
-    AdminDeliveryStatusSerializer,
+    AdminDeliveryStatusSerializer, MessageTemplateSerializer, DeliverySettingsSerializer,
 )
 from core.timeframes import scope_to_days
 from accounts.models import UserProfile
@@ -431,9 +431,17 @@ class AdminOrderUpdateView(generics.UpdateAPIView):
     permission_classes = [IsStaff]
     lookup_field = 'id'
     queryset = Order.objects.all()
-    http_method_names = ['patch']
+    http_method_names = ['patch', 'put']
 
     def update(self, request, *args, **kwargs):
+        # Discount override requires the dedicated permission
+        if request.data.get('discount_override') not in (None, ''):
+            if not user_can_override_discount(request.user):
+                return Response(
+                    {'detail': 'You do not have permission to override the discount.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
         instance = self.get_object()
         data = dict(request.data)
 
@@ -441,6 +449,8 @@ class AdminOrderUpdateView(generics.UpdateAPIView):
         old_status = instance.status
         old_rider_id = instance.assigned_delivery_boy_id
         old_hidden = instance.is_hidden
+        old_total = instance.total_price
+        old_address = instance.shipping_address
 
         if 'status' in data:
             new_status = data['status']
@@ -482,6 +492,30 @@ class AdminOrderUpdateView(generics.UpdateAPIView):
                     'Order Hidden' if new_hidden else 'Order Unhidden',
                     target_type='order', target_id=instance.id, target_label=label,
                 )
+        if 'items' in data:
+            activity_log(
+                request.user, 'order', 'Order Items Updated',
+                target_type='order', target_id=instance.id, target_label=label,
+                details={'old_total': str(old_total), 'new_total': str(instance.total_price)},
+            )
+        if ('house_number' in data or 'shipping_address' in data or 'area' in data) and instance.shipping_address != old_address:
+            activity_log(
+                request.user, 'order', 'Order Address Updated',
+                target_type='order', target_id=instance.id, target_label=label,
+                details={'address': instance.shipping_address},
+            )
+        auto_discount = getattr(instance, '_auto_discount_amount', None)
+        if auto_discount is not None:
+            activity_log(
+                request.user, 'order', 'Discount Overridden',
+                target_type='order', target_id=instance.id,
+                target_label=label,
+                details={
+                    'customer': instance.user.username if instance.user else (instance.guest_name or 'Guest'),
+                    'auto_discount': str(auto_discount),
+                    'override_discount': str(instance.discount_amount),
+                },
+            )
 
         return Response(AdminOrderSerializer(instance, context={'request': request}).data)
 
@@ -675,3 +709,175 @@ def customer_order_stats(request, user_id):
         'last_order_date': last_order['created_at'] if last_order else None,
         'account_balance': balance,
     })
+
+
+# ── Message templates (WhatsApp / SMS) ────────────────────────────────────────
+
+DEFAULT_MESSAGE_TEMPLATES = [
+    {
+        'name': 'Order Info (Standard)',
+        'category': 'order_info',
+        'is_default': True,
+        'content': (
+            "{business_name}\n\n"
+            "Hello {customer_name},\n"
+            "Regarding your order #{order_id}:\n\n"
+            "📦 Order Items:\n"
+            "{items_list}\n\n"
+            "📍 Delivery Address:\n"
+            "{delivery_address}\n\n"
+            "💰 Payment Summary:\n"
+            "• This Order: {order_total}\n"
+            "{previous_balance_line}\n"
+            "─────────────────\n"
+            "Total Payable: {total_payable}\n"
+            "{payment_instruction}\n\n"
+            "Thank you for choosing us! 💧"
+        ),
+    },
+    {
+        'name': 'Order Dispatch (On The Way)',
+        'category': 'order_dispatch',
+        'is_default': True,
+        'content': (
+            "{business_name}\n\n"
+            "Hello {customer_name},\n"
+            "I am on my way with your order #{order_id}. 🚚\n\n"
+            "📦 Order Items:\n"
+            "{items_list}\n\n"
+            "📍 Delivery Address:\n"
+            "{delivery_address}\n\n"
+            "💰 Payment Summary:\n"
+            "• This Order: {order_total}\n"
+            "{previous_balance_line}\n"
+            "─────────────────\n"
+            "Total Payable: {total_payable}\n"
+            "{payment_instruction}\n\n"
+            "Thank you for choosing us! 💧"
+        ),
+    },
+    {
+        'name': 'Payment Reminder',
+        'category': 'payment_reminder',
+        'is_default': True,
+        'content': (
+            "{business_name}\n\n"
+            "Hello {customer_name},\n"
+            "This is a gentle payment reminder regarding your water delivery account:\n\n"
+            "💰 Outstanding Due: {previous_balance}\n"
+            "Last Order: #{order_id} ({order_total})\n\n"
+            "Please clear your pending balance at your earliest convenience. "
+            "If already paid, please ignore this notice.\n\n"
+            "Thank you for choosing {business_name}! 💧"
+        ),
+    },
+]
+
+
+def ensure_default_templates():
+    if not MessageTemplate.objects.exists():
+        for tpl in DEFAULT_MESSAGE_TEMPLATES:
+            MessageTemplate.objects.create(**tpl)
+
+
+class MessageTemplateListCreateView(generics.ListCreateAPIView):
+    """List message templates or create a new one.
+
+    GET is open to all authenticated users (including delivery boys sending dispatch messages).
+    POST is staff only.
+    """
+    serializer_class = MessageTemplateSerializer
+
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [permissions.IsAuthenticated()]
+        return [IsStaff()]
+
+    def get_queryset(self):
+        ensure_default_templates()
+        qs = MessageTemplate.objects.all()
+        cat = self.request.query_params.get('category')
+        if cat:
+            qs = qs.filter(category=cat)
+        return qs
+
+    def perform_create(self, serializer):
+        tpl = serializer.save()
+        activity_log(
+            self.request.user, 'settings', 'Message Template Created',
+            target_type='message_template', target_id=tpl.id, target_label=tpl.name,
+        )
+
+
+class MessageTemplateDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """Retrieve, update or delete a message template. Staff only."""
+    permission_classes = [IsStaff]
+    serializer_class = MessageTemplateSerializer
+    queryset = MessageTemplate.objects.all()
+
+    def perform_update(self, serializer):
+        tpl = serializer.save()
+        activity_log(
+            self.request.user, 'settings', 'Message Template Updated',
+            target_type='message_template', target_id=tpl.id, target_label=tpl.name,
+        )
+
+    def perform_destroy(self, instance):
+        name = instance.name
+        tid = instance.id
+        instance.delete()
+        activity_log(
+            self.request.user, 'settings', 'Message Template Deleted',
+            target_type='message_template', target_id=tid, target_label=name,
+        )
+
+
+class MessageTemplateSetDefaultView(APIView):
+    """Set a message template as default for its category."""
+    permission_classes = [IsStaff]
+
+    def post(self, request, pk):
+        try:
+            tpl = MessageTemplate.objects.get(pk=pk)
+        except MessageTemplate.DoesNotExist:
+            return Response({'error': 'Template not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        tpl.is_default = True
+        tpl.save()
+        activity_log(
+            request.user, 'settings', 'Message Template Set Default',
+            target_type='message_template', target_id=tpl.id, target_label=tpl.name,
+        )
+        return Response(MessageTemplateSerializer(tpl).data)
+
+
+class DeliverySettingsView(APIView):
+    """
+    Delivery & Rider contact settings.
+    GET: Authenticated users (riders, staff, admin) can read settings.
+    PATCH: Staff/Admin only (IsStaff) can update settings.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        settings = DeliverySettings.load()
+        return Response(DeliverySettingsSerializer(settings).data)
+
+    def patch(self, request):
+        if not (request.user and request.user.is_staff):
+            return Response(
+                {'detail': 'Only staff or admin can change delivery settings.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        settings = DeliverySettings.load()
+        serializer = DeliverySettingsSerializer(settings, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        activity_log(
+            request.user, 'settings', 'Delivery Settings Updated',
+            target_type='delivery_settings', target_id=settings.id,
+            target_label='Delivery Settings',
+            details=serializer.data,
+        )
+        return Response(serializer.data)
+

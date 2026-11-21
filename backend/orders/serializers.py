@@ -1,12 +1,13 @@
 import re
 from collections import defaultdict
 from decimal import Decimal
+from django.db import transaction
 from rest_framework import serializers
 from django.contrib.auth.models import User
 from django.db.models import Max, Sum
 from django.utils import timezone
 from accounts.models import DiscountCategory
-from .models import Order, OrderItem, DeliveryStatus, CustomerVisit
+from .models import Order, OrderItem, DeliveryStatus, CustomerVisit, MessageTemplate, DeliverySettings
 from core.timeframes import on_local_day
 from core.address import normalize_portion
 from accounts.models import CustomerAddress
@@ -221,13 +222,21 @@ class DeliveryBoyOrderSerializer(OrderSerializer):
     customer = serializers.SerializerMethodField()
     today_visits = serializers.SerializerMethodField()
     online_claim = serializers.SerializerMethodField()
+    delivery_settings = serializers.SerializerMethodField()
 
     class Meta(OrderSerializer.Meta):
         fields = OrderSerializer.Meta.fields + [
             'delivery_notes', 'rider_note', 'customer', 'today_visits',
-            'online_claim',
+            'online_claim', 'delivery_settings',
         ]
         read_only_fields = OrderSerializer.Meta.read_only_fields + ['rider_note']
+
+    def get_delivery_settings(self, obj):
+        ds = DeliverySettings.load()
+        return {
+            'rider_can_call': ds.rider_can_call,
+            'rider_can_whatsapp': ds.rider_can_whatsapp,
+        }
 
     def _maps(self, obj):
         maps = self.context.get('rider_card_maps')
@@ -451,7 +460,25 @@ class AdminOrderSerializer(OrderSerializer):
         return None
 
 
+class AdminOrderItemInputSerializer(serializers.Serializer):
+    product_id = serializers.PrimaryKeyRelatedField(queryset=Product.objects.filter(is_active=True))
+    quantity = serializers.IntegerField(min_value=1)
+
+
 class AdminOrderUpdateSerializer(serializers.ModelSerializer):
+    user_id = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.all(),
+        source='user', required=False, allow_null=True
+    )
+    items = AdminOrderItemInputSerializer(many=True, required=False, write_only=True)
+    portion = serializers.CharField(
+        required=False, allow_blank=True, default='', max_length=50,
+    )
+    discount_override = serializers.DecimalField(
+        max_digits=12, decimal_places=2, min_value=Decimal('0'),
+        required=False, allow_null=True, write_only=True,
+    )
+
     class Meta:
         model = Order
         fields = [
@@ -459,11 +486,85 @@ class AdminOrderUpdateSerializer(serializers.ModelSerializer):
             'assigned_delivery_boy', 'delivery_notes', 'rider_note',
             'cash_amount', 'cash_received',
             'delivery_status',          # staff can override anytime — lock only applies to rider mobile app
+            'user_id', 'guest_name', 'guest_phone',
+            'shipping_address', 'house_number', 'portion', 'block', 'area',
+            'shipping_latitude', 'shipping_longitude', 'shipping_label',
+            'payment_method', 'payment_number',
+            'items', 'discount_override',
         ]
+        extra_kwargs = {
+            'shipping_address': {'required': False, 'allow_blank': True},
+        }
 
+    def validate(self, attrs):
+        address_keys = ('house_number', 'portion', 'block', 'area')
+        if any(k in attrs for k in address_keys):
+            current_parts = {
+                'house_number': getattr(self.instance, 'house_number', '') if self.instance else '',
+                'portion': getattr(self.instance, 'portion', '') if self.instance else '',
+                'block': getattr(self.instance, 'block', '') if self.instance else '',
+                'area': getattr(self.instance, 'area', '') if self.instance else '',
+            }
+            parts = {
+                key: (attrs.get(key) if key in attrs else current_parts[key]) or ''
+                for key in address_keys
+            }
+            parts = {k: v.strip() for k, v in parts.items()}
+            parts['portion'] = normalize_portion(parts['portion'])
+            if any(parts.values()):
+                missing = {
+                    key: 'This field is required.'
+                    for key in ('house_number', 'area') if not parts[key]
+                }
+                if missing:
+                    raise serializers.ValidationError(missing)
+                attrs.update(parts)
+                attrs['shipping_address'] = Order(**parts).compose_address()
+        return attrs
+
+    @transaction.atomic
     def update(self, instance, validated_data):
+        items_data = validated_data.pop('items', None)
+        override = validated_data.pop('discount_override', None)
+
+        if items_data is not None:
+            if not items_data:
+                raise serializers.ValidationError({'items': 'An order must have at least one item.'})
+
+            lines = [(item['quantity'], item['product_id'].price) for item in items_data]
+            user_for_discount = validated_data.get('user', instance.user)
+            snapshot = discount_snapshot(user_for_discount, lines)
+            auto_discount = snapshot['discount_amount']
+            if override is not None:
+                snapshot['discount_amount'] = min(override, snapshot['gross_amount'])
+                snapshot['discount_overridden'] = True
+            elif instance.discount_overridden:
+                snapshot['discount_amount'] = min(instance.discount_amount, snapshot['gross_amount'])
+                snapshot['discount_overridden'] = True
+
+            instance.total_price = snapshot['gross_amount'] - snapshot['discount_amount']
+            for k, v in snapshot.items():
+                setattr(instance, k, v)
+
+            # Replace items atomically
+            instance.items.all().delete()
+            for item in items_data:
+                OrderItem.objects.create(
+                    order=instance,
+                    product=item['product_id'],
+                    quantity=item['quantity'],
+                    price=item['product_id'].price,
+                )
+            instance._auto_discount_amount = auto_discount if override is not None else None
+        elif override is not None:
+            gross = instance.gross_amount if instance.gross_amount is not None else instance.total_price
+            instance.discount_amount = min(override, gross)
+            instance.discount_overridden = True
+            instance.total_price = gross - instance.discount_amount
+
         new_cash = validated_data.get('cash_amount')
-        if new_cash is not None and instance.user_id:
+        target_user = validated_data.get('user', instance.user)
+        if new_cash is not None and target_user:
             # Auto-resolve is_paid unless the caller explicitly set it
             if 'is_paid' not in validated_data:
                 validated_data['is_paid'] = new_cash >= instance.total_price
@@ -472,18 +573,11 @@ class AdminOrderUpdateSerializer(serializers.ModelSerializer):
 
         order = super().update(instance, validated_data)
 
-        # The balance is no longer nudged by hand here. ledger.service owns
-        # account_balance and posts a journal entry for the charge and the cash,
-        # so the two can never drift apart.
+        # The balance is kept in sync via ledger.service
         from ledger.service import sync_order
         sync_order(order, actor=self.context.get('request').user
                    if self.context.get('request') else None)
         return order
-
-
-class AdminOrderItemInputSerializer(serializers.Serializer):
-    product_id = serializers.PrimaryKeyRelatedField(queryset=Product.objects.filter(is_active=True))
-    quantity = serializers.IntegerField(min_value=1)
 
 
 class AdminOrderCreateSerializer(serializers.ModelSerializer):
@@ -578,3 +672,36 @@ class AdminOrderCreateSerializer(serializers.ModelSerializer):
         # For the view's mandatory override audit trail.
         order._auto_discount_amount = auto_discount if override is not None else None
         return order
+
+
+class MessageTemplateSerializer(serializers.ModelSerializer):
+    category_display = serializers.CharField(source='get_category_display', read_only=True)
+
+    class Meta:
+        model = MessageTemplate
+        fields = [
+            'id', 'name', 'category', 'category_display',
+            'content', 'is_default', 'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'category_display', 'created_at', 'updated_at']
+
+    def validate_name(self, value):
+        val = value.strip()
+        if not val:
+            raise serializers.ValidationError('Template name is required.')
+        return val
+
+    def validate_content(self, value):
+        val = value.strip()
+        if not val:
+            raise serializers.ValidationError('Template content is required.')
+        return val
+
+
+class DeliverySettingsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DeliverySettings
+        fields = ['id', 'rider_can_call', 'rider_can_whatsapp', 'updated_at']
+        read_only_fields = ['id', 'updated_at']
+
+

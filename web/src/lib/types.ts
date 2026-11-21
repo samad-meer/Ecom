@@ -24,6 +24,7 @@ export interface Product {
   description: string;
   price: string;
   is_active: boolean;
+  is_refill?: boolean;
   image: string | null;
   images: ImageRef[];
   category_details: Category | null;
@@ -81,6 +82,7 @@ export interface Order {
   assigned_delivery_boy?: number | null;
   assigned_delivery_boy_name?: string | null;
   delivery_notes?: string | null;
+  rider_note?: string | null;
   number_of_bottles?: number;
   delivery_status?: string;
   delivery_status_updated_at?: string | null;
@@ -393,9 +395,23 @@ export interface AdminOrderUpdatePayload {
   is_hidden?: boolean;
   assigned_delivery_boy?: number | null;
   delivery_notes?: string;
+  rider_note?: string;
   cash_amount?: string | number;
   cash_received?: boolean;
   delivery_status?: string;
+  user_id?: number | null;
+  guest_name?: string;
+  guest_phone?: string;
+  shipping_address?: string;
+  house_number?: string;
+  portion?: string;
+  block?: string;
+  area?: string;
+  shipping_latitude?: string | number | null;
+  shipping_longitude?: string | number | null;
+  shipping_label?: string;
+  items?: { product_id: number; quantity: number }[];
+  discount_override?: string | number | null;
 }
 
 export interface DeliveryStatusOption {
@@ -861,3 +877,31 @@ export interface AuthTokens {
   access: string;
   refresh: string;
 }
+
+export type MessageTemplateCategory = 'order_info' | 'order_dispatch' | 'payment_reminder' | 'custom';
+
+export interface MessageTemplate {
+  id: number;
+  name: string;
+  category: MessageTemplateCategory;
+  category_display: string;
+  content: string;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateMessageTemplatePayload {
+  name: string;
+  category: MessageTemplateCategory;
+  content: string;
+  is_default?: boolean;
+}
+
+export interface UpdateMessageTemplatePayload {
+  name?: string;
+  category?: MessageTemplateCategory;
+  content?: string;
+  is_default?: boolean;
+}
+

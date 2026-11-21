@@ -17,6 +17,10 @@ from .views import (
     DeliveryBoyListView,
     address_suggestions,
     customer_order_stats,
+    MessageTemplateListCreateView,
+    MessageTemplateDetailView,
+    MessageTemplateSetDefaultView,
+    DeliverySettingsView,
 )
 
 urlpatterns = [
@@ -30,6 +34,12 @@ urlpatterns = [
     path('delivery/stats/', delivery_boy_stats, name='delivery-stats'),
     path('delivery/availability/', update_availability, name='delivery-availability'),
     path('delivery/statuses/', delivery_status_list, name='delivery-status-list'),
+    path('delivery/settings/', DeliverySettingsView.as_view(), name='delivery-settings'),
+
+    # Message templates (WhatsApp / SMS)
+    path('templates/', MessageTemplateListCreateView.as_view(), name='message-templates'),
+    path('templates/<int:pk>/', MessageTemplateDetailView.as_view(), name='message-template-detail'),
+    path('templates/<int:pk>/set-default/', MessageTemplateSetDefaultView.as_view(), name='message-template-set-default'),
 
     # Staff / admin endpoints (must come before <int:id> catch-all)
     path('admin/summary/', AdminOrderSummaryView.as_view(), name='admin-order-summary'),
@@ -39,6 +49,7 @@ urlpatterns = [
     path('admin/delivery-boys/', DeliveryBoyListView.as_view(), name='admin-delivery-boys'),
     path('admin/address-suggestions/', address_suggestions, name='admin-address-suggestions'),
     path('admin/customer-stats/<int:user_id>/', customer_order_stats, name='admin-customer-stats'),
+    path('admin/delivery-settings/', DeliverySettingsView.as_view(), name='admin-delivery-settings'),
     path('admin/', AdminOrderListView.as_view(), name='admin-order-list'),
     path('admin/<int:id>/', AdminOrderUpdateView.as_view(), name='admin-order-update'),
 ]

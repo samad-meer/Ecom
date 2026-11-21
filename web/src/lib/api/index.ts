@@ -1,6 +1,6 @@
 export { apiFetch, ApiError, tokenStore, unwrapList } from "./client";
 export { productsApi, adminProductsApi, categoriesApi, adminCategoriesApi, type ProductQuery, type ProductInput, type CategoryInput, type CategoryQuery } from "./products";
-export { ordersApi } from "./orders";
+export { ordersApi, messageTemplatesApi, deliverySettingsApi, type DeliverySettings } from "./orders";
 export { authApi } from "./auth";
 export { complaintsApi, adminComplaintsApi } from "./support";
 export { plantApi } from "./plant";

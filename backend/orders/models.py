@@ -222,3 +222,65 @@ class OrderItem(models.Model):
 
     def __str__(self):
         return f"{self.quantity} x {self.product.name}"
+
+
+class MessageTemplate(models.Model):
+    """Admin-customizable message templates for WhatsApp/SMS notifications."""
+
+    CATEGORY_CHOICES = [
+        ('order_info', 'Order Info / Confirmation'),
+        ('order_dispatch', 'Order Dispatch / On The Way'),
+        ('payment_reminder', 'Payment Reminder / Dues'),
+        ('custom', 'Custom Message'),
+    ]
+
+    name = models.CharField(max_length=120, help_text="Template label, e.g. Standard Dispatch")
+    category = models.CharField(max_length=30, choices=CATEGORY_CHOICES, default='order_info')
+    content = models.TextField(help_text="Message body with placeholder tags e.g. {customer_name}")
+    is_default = models.BooleanField(default=False, help_text="Whether this is the default template for its category")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-is_default', 'name']
+
+    def __str__(self):
+        return f"{self.name} ({self.get_category_display()})"
+
+    def save(self, *args, **kwargs):
+        # If this template is marked as default, unset is_default on other templates in the same category
+        if self.is_default:
+            MessageTemplate.objects.filter(category=self.category).exclude(pk=self.pk).update(is_default=False)
+        super().save(*args, **kwargs)
+
+
+class DeliverySettings(models.Model):
+    """Singleton holding delivery & rider configuration."""
+
+    rider_can_call = models.BooleanField(
+        default=True,
+        help_text="Allow riders to call customers directly from the delivery screen.",
+    )
+    rider_can_whatsapp = models.BooleanField(
+        default=True,
+        help_text="Allow riders to open WhatsApp to message customers from the delivery screen.",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Delivery Settings'
+        verbose_name_plural = 'Delivery Settings'
+
+    def __str__(self):
+        return f"DeliverySettings(call={self.rider_can_call}, whatsapp={self.rider_can_whatsapp})"
+
+    def save(self, *args, **kwargs):
+        self.pk = 1  # enforce a single row
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def load(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+
