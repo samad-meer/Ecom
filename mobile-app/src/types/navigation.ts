@@ -12,7 +12,12 @@ export type MainTabParamList = {
 
 export type AdminTabParamList = {
   Dashboard: undefined;
-  AdminOrders: { initialStatus?: string; initialPaid?: boolean } | undefined;
+  AdminOrders: {
+    initialStatus?: string;
+    initialPaid?: boolean;
+    initialDateFrom?: string;
+    initialDateTo?: string;
+  } | undefined;
   AdminCustomers: undefined;
   AdminManage: undefined;
   Profile: undefined;

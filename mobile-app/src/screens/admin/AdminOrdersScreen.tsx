@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
   TextInput, RefreshControl,
@@ -12,6 +12,8 @@ import { ErrorState, EmptyState, StatusPill, orderStatusTone, friendlyError } fr
 import { adminService, AdminOrder, DeliveryBoy } from '../../services/adminService';
 import { useRefetchOnFocus } from '../../hooks/useRefetchOnFocus';
 import { RootStackParamList, AdminTabParamList } from '../../types/navigation';
+import { CalendarModal } from '../../components/CalendarModal';
+import { isoDate, parseIsoDate } from '../../utils/dateRange';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -74,8 +76,13 @@ export const AdminOrdersScreen: React.FC = () => {
     route.params?.initialPaid !== undefined ? (route.params.initialPaid ?? null) : null,
   );
   const [showHidden, setShowHidden] = useState(false);
+  const [dateFrom, setDateFrom] = useState<string>(route.params?.initialDateFrom ?? '');
+  const [dateTo, setDateTo] = useState<string>(route.params?.initialDateTo ?? '');
+  const [calendarVisible, setCalendarVisible] = useState(false);
   // A late answer for an old filter must not overwrite the current list.
   const requestId = useRef(0);
+
+  const todayStr = useMemo(() => isoDate(new Date()), []);
 
   // Sync when navigated from dashboard with new params
   useEffect(() => {
@@ -84,6 +91,10 @@ export const AdminOrdersScreen: React.FC = () => {
     }
     if (route.params?.initialPaid !== undefined) {
       setPaidFilter(route.params.initialPaid ?? null);
+    }
+    if (route.params?.initialDateFrom !== undefined || route.params?.initialDateTo !== undefined) {
+      setDateFrom(route.params?.initialDateFrom ?? '');
+      setDateTo(route.params?.initialDateTo ?? '');
     }
   }, [route.params]);
 
@@ -98,6 +109,8 @@ export const AdminOrdersScreen: React.FC = () => {
           search: search || undefined,
           is_paid: paidFilter !== null ? paidFilter : undefined,
           show_hidden: showHidden,
+          date_from: dateFrom || undefined,
+          date_to: dateTo || undefined,
         }),
         adminService.getDeliveryBoys(),
       ]);
@@ -116,7 +129,7 @@ export const AdminOrdersScreen: React.FC = () => {
         setRefreshing(false);
       }
     }
-  }, [statusFilter, search, paidFilter, showHidden]);
+  }, [statusFilter, search, paidFilter, showHidden, dateFrom, dateTo]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -127,7 +140,30 @@ export const AdminOrdersScreen: React.FC = () => {
 
   const onRefresh = () => { setRefreshing(true); load(true); };
 
-  const filtersActive = search.trim().length > 0 || statusFilter !== 'All' || paidFilter !== null || showHidden;
+  const hasDateFilter = Boolean(dateFrom || dateTo);
+  const filtersActive = search.trim().length > 0 || statusFilter !== 'All' || paidFilter !== null || showHidden || hasDateFilter;
+
+  const dateLabel = useMemo(() => {
+    if (!hasDateFilter) return 'All Dates';
+    if (dateFrom && dateTo) {
+      if (dateFrom === dateTo) {
+        if (dateFrom === todayStr) return 'Today';
+        const d = parseIsoDate(dateFrom);
+        return d ? d.toLocaleDateString('en-PK', { day: 'numeric', month: 'short' }) : dateFrom;
+      }
+      const d1 = parseIsoDate(dateFrom);
+      const d2 = parseIsoDate(dateTo);
+      const s1 = d1 ? d1.toLocaleDateString('en-PK', { day: 'numeric', month: 'short' }) : dateFrom;
+      const s2 = d2 ? d2.toLocaleDateString('en-PK', { day: 'numeric', month: 'short' }) : dateTo;
+      return `${s1} – ${s2}`;
+    }
+    if (dateFrom) {
+      const d = parseIsoDate(dateFrom);
+      return `From ${d ? d.toLocaleDateString('en-PK', { day: 'numeric', month: 'short' }) : dateFrom}`;
+    }
+    const d = parseIsoDate(dateTo);
+    return `Until ${d ? d.toLocaleDateString('en-PK', { day: 'numeric', month: 'short' }) : dateTo}`;
+  }, [hasDateFilter, dateFrom, dateTo, todayStr]);
 
   return (
     <View style={styles.container}>
@@ -190,21 +226,56 @@ export const AdminOrdersScreen: React.FC = () => {
         )}
       />
 
-      {/* Paid / Unpaid toggle */}
-      <View style={styles.paidFilterRow}>
+      {/* Paid / Unpaid toggle & Date filter chip */}
+      <View style={styles.filterControlsRow}>
+        <View style={styles.paidChips}>
+          <TouchableOpacity
+            style={[styles.chip, paidFilter === true && styles.chipPaidActive]}
+            onPress={() => setPaidFilter(v => v === true ? null : true)}
+          >
+            <Ionicons name="checkmark-circle" size={16} color={paidFilter === true ? colors.white : colors.success} />
+            <Text style={[styles.chipText, paidFilter === true && styles.chipTextActive]}>Paid</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.chip, paidFilter === false && styles.chipUnpaidActive]}
+            onPress={() => setPaidFilter(v => v === false ? null : false)}
+          >
+            <Ionicons name="alert-circle" size={16} color={paidFilter === false ? colors.white : colors.danger} />
+            <Text style={[styles.chipText, paidFilter === false && styles.chipTextActive]}>Unpaid</Text>
+          </TouchableOpacity>
+        </View>
+
         <TouchableOpacity
-          style={[styles.chip, paidFilter === true && styles.chipPaidActive]}
-          onPress={() => setPaidFilter(v => v === true ? null : true)}
+          style={[styles.dateChip, hasDateFilter && styles.dateChipActive]}
+          onPress={() => setCalendarVisible(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Filter by date"
         >
-          <Ionicons name="checkmark-circle" size={16} color={paidFilter === true ? colors.white : colors.success} />
-          <Text style={[styles.chipText, paidFilter === true && styles.chipTextActive]}>Paid</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.chip, paidFilter === false && styles.chipUnpaidActive]}
-          onPress={() => setPaidFilter(v => v === false ? null : false)}
-        >
-          <Ionicons name="alert-circle" size={16} color={paidFilter === false ? colors.white : colors.danger} />
-          <Text style={[styles.chipText, paidFilter === false && styles.chipTextActive]}>Unpaid</Text>
+          <Ionicons
+            name="calendar"
+            size={15}
+            color={hasDateFilter ? colors.ink : colors.primary}
+          />
+          <Text
+            style={[styles.dateChipText, hasDateFilter && styles.dateChipTextActive]}
+            numberOfLines={1}
+          >
+            {dateLabel}
+          </Text>
+          {hasDateFilter && (
+            <TouchableOpacity
+              onPress={(e) => {
+                e.stopPropagation();
+                setDateFrom('');
+                setDateTo('');
+              }}
+              style={styles.dateClearBtn}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityLabel="Clear date filter"
+            >
+              <Ionicons name="close-circle" size={16} color={colors.ink} />
+            </TouchableOpacity>
+          )}
         </TouchableOpacity>
       </View>
 
@@ -250,6 +321,20 @@ export const AdminOrdersScreen: React.FC = () => {
           />
         </>
       )}
+
+      {/* Responsive Calendar Modal */}
+      <CalendarModal
+        visible={calendarVisible}
+        onClose={() => setCalendarVisible(false)}
+        selectedDate={dateFrom || todayStr}
+        onSelectDate={(date) => {
+          setDateFrom(date);
+          setDateTo(date);
+          setCalendarVisible(false);
+        }}
+        title="Filter Orders by Date"
+        quickPresets={true}
+      />
     </View>
   );
 };
@@ -281,10 +366,20 @@ const styles = StyleSheet.create({
   // clipped the chips (the Paid/Unpaid row lost its top edge).
   chipScroll: { flexGrow: 0, flexShrink: 0 },
   chipList: { paddingHorizontal: pagePadding, gap: 8, alignItems: 'center' },
-  paidFilterRow: {
+  filterControlsRow: {
     flexShrink: 0,
-    flexDirection: 'row', gap: 8,
-    paddingHorizontal: pagePadding, paddingTop: 8, paddingBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: pagePadding,
+    paddingTop: 8,
+    paddingBottom: 12,
+    gap: 8,
+  },
+  paidChips: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   chip: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
@@ -296,6 +391,36 @@ const styles = StyleSheet.create({
   chipUnpaidActive: { backgroundColor: colors.danger, borderColor: colors.danger },
   chipText: { fontSize: fontSize.sm, fontWeight: '700', color: colors.ink },
   chipTextActive: { color: colors.white },
+
+  dateChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    height: 40,
+    paddingHorizontal: 14,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    maxWidth: '52%',
+  },
+  dateChipActive: {
+    backgroundColor: colors.sun,
+    borderColor: colors.sun,
+  },
+  dateChipText: {
+    fontSize: fontSize.xs,
+    fontWeight: '700',
+    color: colors.primary,
+    flexShrink: 1,
+  },
+  dateChipTextActive: {
+    color: colors.ink,
+    fontWeight: '800',
+  },
+  dateClearBtn: {
+    marginLeft: 2,
+  },
 
   orderList: { flex: 1 },
   list: { paddingHorizontal: pagePadding, paddingBottom: 24, flexGrow: 1 },

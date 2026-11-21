@@ -13,7 +13,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { adminService, AdminSummary } from '../../services/adminService';
 import { RootStackParamList } from '../../types/navigation';
-import { RangeKey, RANGES, describeRange, parseIsoDate, rangeToDates } from '../../utils/dateRange';
+import { RangeKey, RANGES, describeRange, parseIsoDate, rangeToDates, isoDate } from '../../utils/dateRange';
 import { CalendarModal } from '../../components/CalendarModal';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -302,10 +302,17 @@ export const AdminDashboardScreen: React.FC = () => {
         <View style={styles.todayCircle} />
         <Text style={styles.todayTitle}>{periodCaption}</Text>
         <View style={styles.todayRow}>
-          <View style={styles.todayStat}>
+          <TouchableOpacity
+            style={styles.todayStat}
+            activeOpacity={0.8}
+            onPress={() => (navigation as any).navigate('AdminTabs', {
+              screen: 'AdminOrders',
+              params: { initialStatus: 'All', initialDateFrom: from || undefined, initialDateTo: to || undefined }
+            })}
+          >
             <Text style={styles.todayValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{summary?.total ?? 0}</Text>
             <Text style={styles.todayLabel}>Orders</Text>
-          </View>
+          </TouchableOpacity>
           <View style={styles.todayDivider} />
           <View style={styles.todayStat}>
             <Text style={styles.todayValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
@@ -319,13 +326,23 @@ export const AdminDashboardScreen: React.FC = () => {
       {/* Today never moves with the filter, so it only earns a line of its own
           once the selected period is something wider. */}
       {range !== 'today' && (
-        <View style={styles.todayStrip}>
+        <TouchableOpacity
+          style={styles.todayStrip}
+          activeOpacity={0.8}
+          onPress={() => {
+            const today = isoDate(new Date());
+            (navigation as any).navigate('AdminTabs', {
+              screen: 'AdminOrders',
+              params: { initialStatus: 'All', initialDateFrom: today, initialDateTo: today }
+            });
+          }}
+        >
           <Ionicons name="today-outline" size={15} color={colors.primary} />
           <Text style={styles.todayStripText}>
             Today: {summary?.today_orders ?? 0} orders · PKR{' '}
             {(summary?.today_revenue ?? 0).toLocaleString()}
           </Text>
-        </View>
+        </TouchableOpacity>
       )}
 
       {/* Order stats grid */}
@@ -334,27 +351,45 @@ export const AdminDashboardScreen: React.FC = () => {
       <View style={styles.statsGrid}>
         <StatCard
           label="Total" value={summary?.total ?? 0} icon="list" color={colors.primary} bg={colors.surface}
-          onPress={() => (navigation as any).navigate('AdminTabs', { screen: 'AdminOrders', params: { initialStatus: 'All' } })}
+          onPress={() => (navigation as any).navigate('AdminTabs', {
+            screen: 'AdminOrders',
+            params: { initialStatus: 'All', initialDateFrom: from || undefined, initialDateTo: to || undefined }
+          })}
         />
         <StatCard
           label="Pending" value={summary?.pending ?? 0} icon="time" color={colors.warning} bg={colors.surface}
-          onPress={() => (navigation as any).navigate('AdminTabs', { screen: 'AdminOrders', params: { initialStatus: 'Pending' } })}
+          onPress={() => (navigation as any).navigate('AdminTabs', {
+            screen: 'AdminOrders',
+            params: { initialStatus: 'Pending', initialDateFrom: from || undefined, initialDateTo: to || undefined }
+          })}
         />
         <StatCard
           label="Processing" value={summary?.processing ?? 0} icon="refresh" color={colors.primaryDark} bg={colors.surface}
-          onPress={() => (navigation as any).navigate('AdminTabs', { screen: 'AdminOrders', params: { initialStatus: 'Processing' } })}
+          onPress={() => (navigation as any).navigate('AdminTabs', {
+            screen: 'AdminOrders',
+            params: { initialStatus: 'Processing', initialDateFrom: from || undefined, initialDateTo: to || undefined }
+          })}
         />
         <StatCard
           label="Shipped" value={summary?.shipped ?? 0} icon="car" color={colors.info} bg={colors.surface}
-          onPress={() => (navigation as any).navigate('AdminTabs', { screen: 'AdminOrders', params: { initialStatus: 'Shipped' } })}
+          onPress={() => (navigation as any).navigate('AdminTabs', {
+            screen: 'AdminOrders',
+            params: { initialStatus: 'Shipped', initialDateFrom: from || undefined, initialDateTo: to || undefined }
+          })}
         />
         <StatCard
           label="Delivered" value={summary?.delivered ?? 0} icon="checkmark-circle" color={colors.success} bg={colors.surface}
-          onPress={() => (navigation as any).navigate('AdminTabs', { screen: 'AdminOrders', params: { initialStatus: 'Delivered' } })}
+          onPress={() => (navigation as any).navigate('AdminTabs', {
+            screen: 'AdminOrders',
+            params: { initialStatus: 'Delivered', initialDateFrom: from || undefined, initialDateTo: to || undefined }
+          })}
         />
         <StatCard
           label="Cancelled" value={summary?.cancelled ?? 0} icon="close-circle" color={colors.danger} bg={colors.surface}
-          onPress={() => (navigation as any).navigate('AdminTabs', { screen: 'AdminOrders', params: { initialStatus: 'Cancelled' } })}
+          onPress={() => (navigation as any).navigate('AdminTabs', {
+            screen: 'AdminOrders',
+            params: { initialStatus: 'Cancelled', initialDateFrom: from || undefined, initialDateTo: to || undefined }
+          })}
         />
       </View>
 
@@ -364,11 +399,17 @@ export const AdminDashboardScreen: React.FC = () => {
       <View style={styles.statsGrid}>
         <StatCard
           label="Paid" value={summary?.paid_count ?? 0} icon="card" color={colors.success} bg={colors.surface}
-          onPress={() => (navigation as any).navigate('AdminTabs', { screen: 'AdminOrders', params: { initialStatus: 'All', initialPaid: true } })}
+          onPress={() => (navigation as any).navigate('AdminTabs', {
+            screen: 'AdminOrders',
+            params: { initialStatus: 'All', initialPaid: true, initialDateFrom: from || undefined, initialDateTo: to || undefined }
+          })}
         />
         <StatCard
           label="Unpaid" value={summary?.unpaid_count ?? 0} icon="alert-circle" color={colors.danger} bg={colors.surface}
-          onPress={() => (navigation as any).navigate('AdminTabs', { screen: 'AdminOrders', params: { initialStatus: 'All', initialPaid: false } })}
+          onPress={() => (navigation as any).navigate('AdminTabs', {
+            screen: 'AdminOrders',
+            params: { initialStatus: 'All', initialPaid: false, initialDateFrom: from || undefined, initialDateTo: to || undefined }
+          })}
         />
       </View>
 
