@@ -123,21 +123,43 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
 
         {/* User card */}
         <div className="border-t border-white/10 p-3">
-          <div className="flex items-center gap-2 rounded-lg bg-white/5 px-3 py-2">
-            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-wave/20 text-xs font-bold text-wave">
-              {initial}
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-xs font-semibold text-mist">
-                {user?.first_name
-                  ? `${user.first_name} ${user.last_name || ""}`.trim()
-                  : user?.username}
-              </p>
-              <p className="text-[10px] text-mist/40">Administrator</p>
-            </div>
+          <div
+            className={cn(
+              "group flex items-center justify-between rounded-lg bg-white/5 transition-all hover:bg-white/10",
+              pathname === "/manage/profile" && "bg-wave/15 ring-1 ring-wave/40"
+            )}
+          >
             <button
+              type="button"
+              onClick={() => navigate("/manage/profile")}
+              className="flex min-w-0 flex-1 items-center gap-2.5 px-3 py-2 text-left"
+              title="View Admin Profile"
+            >
+              <div
+                className={cn(
+                  "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold transition-colors",
+                  pathname === "/manage/profile"
+                    ? "bg-wave text-white"
+                    : "bg-wave/20 text-wave group-hover:bg-wave/30"
+                )}
+              >
+                {initial}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-semibold text-mist transition-colors group-hover:text-white">
+                  {user?.first_name
+                    ? `${user.first_name} ${user.last_name || ""}`.trim()
+                    : user?.username}
+                </p>
+                <p className="text-[10px] text-mist/40 transition-colors group-hover:text-mist/70">
+                  Administrator
+                </p>
+              </div>
+            </button>
+            <button
+              type="button"
               onClick={handleLogout}
-              className="shrink-0 text-mist/40 transition hover:text-rose-300"
+              className="mr-2 shrink-0 rounded p-1 text-mist/40 transition hover:bg-rose-500/10 hover:text-rose-300"
               title="Log out"
             >
               <LogOut size={14} />
