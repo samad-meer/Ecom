@@ -810,6 +810,8 @@ export interface BusinessInfo {
   /** Default name attached when an admin shares a work-place location. Blank
    *  means "<name> — work place". */
   share_location_label: string;
+  /** Message displayed on customer app after placing an order. */
+  order_success_message?: string;
 }
 
 /** A delivery status as staff manage it, colours and all. */

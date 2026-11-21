@@ -211,7 +211,11 @@ class BusinessSettingsSerializer(serializers.ModelSerializer):
     class Meta:
         model = LedgerSettings
         fields = (
+            # The name shown in the app header and printed on receipts. Blank is
+            # refused (the model field is not blank=True), so it can't be wiped.
+            'business_name',
             'share_location_label',
+            'order_success_message',
             'payment_account_title', 'payment_account_number',
             'payment_bank_name', 'payment_qr', 'payment_instructions',
         )

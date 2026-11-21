@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
+import { useBrand, DEFAULT_ORDER_SUCCESS_MESSAGE } from '../context/BrandContext';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'OrderSuccess'>;
 
@@ -24,6 +25,7 @@ export const OrderSuccessScreen: React.FC<Props> = ({ route, navigation }) => {
   // "Cash on Delivery" no matter what was actually chosen. Unknown values fall
   // through to the server's own wording rather than being mislabelled as cash.
   const { orderId, total, paymentMethod } = route.params;
+  const { orderSuccessMessage } = useBrand();
   const paymentLabel = PAYMENT_LABELS[paymentMethod] ?? paymentMethod ?? 'COD';
 
   return (
@@ -35,7 +37,7 @@ export const OrderSuccessScreen: React.FC<Props> = ({ route, navigation }) => {
 
         <Text style={styles.title}>Order Placed!</Text>
         <Text style={styles.subtitle}>
-          Your order has been received and is being processed.
+          {orderSuccessMessage || DEFAULT_ORDER_SUCCESS_MESSAGE}
         </Text>
 
         <View style={styles.card}>

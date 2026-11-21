@@ -88,7 +88,13 @@ export const ledgerApi = {
   },
 
   /** Admin-only; the server 403s anyone else on the same URL. */
-  updateBusiness(patch: Partial<Pick<BusinessInfo, "share_location_label">>) {
+  updateBusiness(
+    patch: Partial<
+      Pick<BusinessInfo, "share_location_label" | "order_success_message"> & {
+        business_name?: string;
+      }
+    >
+  ) {
     return apiFetch<BusinessInfo>("/ledger/business/", {
       method: "PATCH",
       body: patch,

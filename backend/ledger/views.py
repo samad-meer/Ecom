@@ -85,7 +85,14 @@ def business_info(request):
     cfg = LedgerSettings.load()
 
     if request.method == 'PATCH':
-        if not (request.user and request.user.is_authenticated and request.user.is_staff):
+        user = request.user
+        is_admin = bool(
+            user and user.is_authenticated and (
+                user.is_staff or user.is_superuser or
+                getattr(getattr(user, 'profile', None), 'user_type', None) in ('admin', 'staff')
+            )
+        )
+        if not is_admin:
             return Response(
                 {'detail': 'Administrators only.'},
                 status=status.HTTP_403_FORBIDDEN,
@@ -94,7 +101,7 @@ def business_info(request):
         serializer.is_valid(raise_exception=True)
         cfg = serializer.save()
         activity_log(
-            request.user, 'settings', 'Business Settings Updated',
+            request.user, 'settings', f'Business Settings Updated: {cfg.business_name}',
             target_type='settings', target_id=cfg.pk, target_label='Business',
         )
 
@@ -103,6 +110,7 @@ def business_info(request):
         'phone': cfg.business_phone,
         'address': cfg.business_address,
         'share_location_label': cfg.share_location_label,
+        'order_success_message': cfg.order_success_message or 'Your order is under process',
     }
     # Contact details are public (the storefront's "contact us" button needs
     # them signed-out). The bank account is not: it is given out freely to

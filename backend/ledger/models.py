@@ -445,6 +445,11 @@ class LedgerSettings(models.Model):
                   "location. Individual admins can override it on their own "
                   "profile. Blank uses \"<business name> — work place\".",
     )
+    order_success_message = models.CharField(
+        max_length=255, blank=True,
+        default='Your order is under process',
+        help_text="Message displayed to customers on the order confirmation screen.",
+    )
 
     # ── Online payment details ───────────────────────────────────────────────
     # What a rider shows a customer who wants to pay by transfer instead of

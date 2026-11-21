@@ -1,6 +1,6 @@
 import type { ComponentType } from "react";
 import type { LucideIcon } from "lucide-react";
-import { Tag, Users, GlassWater, Smartphone, Languages, MapPin, Share2, Truck, Landmark, MessageSquare, PhoneCall } from "lucide-react";
+import { Tag, Users, GlassWater, Smartphone, Languages, MapPin, Share2, Truck, Landmark, MessageSquare, PhoneCall, CheckCircle2 } from "lucide-react";
 import { PricingSettings } from "./components/sections/PricingSettings";
 import { CustomerTypesSettings } from "./components/sections/CustomerTypesSettings";
 import { BottleTypesSettings } from "./components/sections/BottleTypesSettings";
@@ -12,6 +12,7 @@ import { DeliveryStatusSettings } from "./components/sections/DeliveryStatusSett
 import { PaymentAccountsSettings } from "./components/sections/PaymentAccountsSettings";
 import { MessageTemplatesSettings } from "./components/sections/MessageTemplatesSettings";
 import { RiderContactSettings } from "./components/sections/RiderContactSettings";
+import { OrderConfirmationSettings } from "./components/sections/OrderConfirmationSettings";
 
 export interface SettingsSectionEntry {
   id: string;
@@ -75,6 +76,12 @@ export const SETTINGS_SECTIONS: SettingsSectionEntry[] = [
     label: "Message Templates",
     icon: MessageSquare,
     Component: MessageTemplatesSettings,
+  },
+  {
+    id: "order-confirmation",
+    label: "Order Confirmation",
+    icon: CheckCircle2,
+    Component: OrderConfirmationSettings,
   },
   {
     id: "language",

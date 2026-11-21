@@ -13,6 +13,7 @@ import { adminService, PricedType, PlantSettings } from '../../services/adminSer
 import { PaymentAccountsSection } from './PaymentAccountsSection';
 import { LanguageSection } from './LanguageSection';
 import { BusinessNameSection } from './BusinessNameSection';
+import { OrderConfirmationSection } from './OrderConfirmationSection';
 import { RootStackParamList } from '../../types/navigation';
 
 /** Soft tint behind each section's icon. */
@@ -553,6 +554,188 @@ const mps = StyleSheet.create({
   discardText: { color: colors.ink, fontSize: fontSize.sm, fontWeight: '700' },
 });
 
+// ─── Rider Contact Section ───────────────────────────────────────────────────
+
+function RiderContactSection() {
+  const [canCall, setCanCall] = useState(true);
+  const [canWhatsApp, setCanWhatsApp] = useState(true);
+  const [savedCall, setSavedCall] = useState(true);
+  const [savedWhatsApp, setSavedWhatsApp] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(() => {
+    setLoadError(null);
+    return adminService.getDeliverySettings()
+      .then(s => {
+        setCanCall(s.rider_can_call);
+        setSavedCall(s.rider_can_call);
+        setCanWhatsApp(s.rider_can_whatsapp);
+        setSavedWhatsApp(s.rider_can_whatsapp);
+      })
+      .catch((e: any) => setLoadError(e?.message || 'Could not load rider contact settings.'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const dirty = canCall !== savedCall || canWhatsApp !== savedWhatsApp;
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const updated = await adminService.updateDeliverySettings({
+        rider_can_call: canCall,
+        rider_can_whatsapp: canWhatsApp,
+      });
+      setCanCall(updated.rider_can_call);
+      setSavedCall(updated.rider_can_call);
+      setCanWhatsApp(updated.rider_can_whatsapp);
+      setSavedWhatsApp(updated.rider_can_whatsapp);
+      Alert.alert('Saved', 'Rider customer contact settings updated.');
+    } catch (e: any) {
+      Alert.alert('Error', `Could not save settings: ${friendlyError(e?.message)}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDiscard = () => {
+    setCanCall(savedCall);
+    setCanWhatsApp(savedWhatsApp);
+  };
+
+  return (
+    <View style={styles.section}>
+      <SectionHeader icon="call" tone="primary" title="Rider Customer Contact" />
+      <Text style={styles.sectionDesc}>
+        Choose whether delivery riders can call or WhatsApp customers directly from the delivery screen.
+      </Text>
+
+      {loading ? (
+        <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: 12 }} />
+      ) : loadError ? (
+        <ErrorState
+          title="Could not load settings"
+          message={loadError}
+          onRetry={() => { setLoading(true); load(); }}
+          style={styles.errorState}
+        />
+      ) : (
+        <View style={rcs.container}>
+          {/* Call option */}
+          <View style={rcs.tile}>
+            <View style={[rcs.iconWrap, { backgroundColor: colors.infoBg }]}>
+              <Ionicons name="call" size={20} color={colors.primary} />
+            </View>
+            <View style={rcs.tileInfo}>
+              <Text style={rcs.tileTitle}>Customer Call Option</Text>
+              <Text style={rcs.tileSub}>Show Call button in delivery screen</Text>
+            </View>
+            <Toggle value={canCall} onValueChange={setCanCall} />
+          </View>
+
+          {/* WhatsApp option */}
+          <View style={rcs.tile}>
+            <View style={[rcs.iconWrap, { backgroundColor: colors.successBg }]}>
+              <Ionicons name="logo-whatsapp" size={20} color={colors.success} />
+            </View>
+            <View style={rcs.tileInfo}>
+              <Text style={rcs.tileTitle}>Customer WhatsApp Option</Text>
+              <Text style={rcs.tileSub}>Show WhatsApp button in delivery screen</Text>
+            </View>
+            <Toggle value={canWhatsApp} onValueChange={setCanWhatsApp} />
+          </View>
+
+          {!canCall && !canWhatsApp && (
+            <View style={rcs.warningBox}>
+              <Ionicons name="alert-circle-outline" size={18} color={colors.warningText} />
+              <Text style={rcs.warningText}>
+                With both options turned off, customer contact details are hidden from riders. Riders will need to ask the office for guidance.
+              </Text>
+            </View>
+          )}
+
+          <View style={rcs.actionRow}>
+            <TouchableOpacity
+              style={[rcs.saveBtn, (!dirty || saving) && { opacity: 0.4 }]}
+              onPress={save}
+              disabled={!dirty || saving}
+            >
+              {saving ? (
+                <ActivityIndicator size="small" color={colors.white} />
+              ) : (
+                <Text style={rcs.saveBtnText}>Save Contact Settings</Text>
+              )}
+            </TouchableOpacity>
+            {dirty && (
+              <TouchableOpacity onPress={handleDiscard} style={rcs.discardBtn}>
+                <Text style={rcs.discardText}>Discard</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      )}
+    </View>
+  );
+}
+
+const rcs = StyleSheet.create({
+  container: { gap: space.md },
+  tile: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    padding: space.md,
+    backgroundColor: colors.surfaceTint,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  iconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tileInfo: { flex: 1 },
+  tileTitle: { fontSize: fontSize.sm, fontWeight: '700', color: colors.ink },
+  tileSub: { fontSize: fontSize.xs, color: colors.muted, marginTop: 2 },
+  warningBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: space.sm,
+    padding: space.md,
+    backgroundColor: colors.warningBg,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.warningLine,
+  },
+  warningText: { flex: 1, fontSize: fontSize.xs, color: colors.warningText, lineHeight: 18 },
+  actionRow: { flexDirection: 'row', gap: space.md, marginTop: space.xs },
+  saveBtn: {
+    flex: 1,
+    height: 48,
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  saveBtnText: { color: colors.white, fontWeight: '800', fontSize: fontSize.sm },
+  discardBtn: {
+    height: 48,
+    paddingHorizontal: 18,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderColor: colors.muted,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  discardText: { color: colors.ink, fontSize: fontSize.sm, fontWeight: '700' },
+});
+
 // ─── Message Templates Navigation Section ───────────────────────────────────
 
 function MessageTemplatesSection() {
@@ -584,7 +767,11 @@ export const AdminSettingsScreen: React.FC = () => (
   <KeyboardAwareScrollView style={styles.container} contentContainerStyle={styles.content} extraBottomSpace={24}>
     <BusinessNameSection />
 
+    <OrderConfirmationSection />
+
     <PricingSection />
+
+    <RiderContactSection />
 
     <MessageTemplatesSection />
 
