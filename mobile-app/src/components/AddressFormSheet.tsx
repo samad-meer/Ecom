@@ -1,3 +1,4 @@
+import { colors } from '../theme';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
@@ -12,6 +13,7 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { SheetScrollView } from './KeyboardAwareScrollView';
 import {
   AddressFields,
   AddressParts,
@@ -159,20 +161,17 @@ export const AddressFormSheet: React.FC<Props> = ({
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
+      <View style={styles.flex}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>
             {isEditing ? 'Edit address' : 'Add new address'}
           </Text>
           <TouchableOpacity onPress={onClose} disabled={saving} accessibilityLabel="Close">
-            <Ionicons name="close" size={26} color={saving ? '#ccc' : '#333'} />
+            <Ionicons name="close" size={26} color={saving ? colors.muted : colors.ink} />
           </TouchableOpacity>
         </View>
 
-        <ScrollView
+        <SheetScrollView
           style={styles.flex}
           contentContainerStyle={styles.body}
           keyboardShouldPersistTaps="handled"
@@ -202,7 +201,7 @@ export const AddressFormSheet: React.FC<Props> = ({
               <TextInput
                 style={[styles.input, styles.customLabelInput]}
                 placeholder="Name this place — Farmhouse, Mum's, …"
-                placeholderTextColor="#000"
+                placeholderTextColor={colors.muted}
                 value={customLabel}
                 onChangeText={setCustomLabel}
                 maxLength={50}
@@ -237,9 +236,9 @@ export const AddressFormSheet: React.FC<Props> = ({
                 disabled={locating}
               >
                 {locating ? (
-                  <ActivityIndicator size="small" color="#0A84FF" />
+                  <ActivityIndicator size="small" color={colors.primary} />
                 ) : (
-                  <Ionicons name="locate" size={17} color="#0A84FF" />
+                  <Ionicons name="locate" size={17} color={colors.primary} />
                 )}
                 <Text style={styles.secondaryButtonText}>
                   {locating ? 'Finding you…' : 'Use current location'}
@@ -248,7 +247,7 @@ export const AddressFormSheet: React.FC<Props> = ({
 
               {!!pin && (
                 <TouchableOpacity style={styles.clearPinButton} onPress={() => setPin(null)}>
-                  <Ionicons name="trash-outline" size={16} color="#8a8a8a" />
+                  <Ionicons name="trash-outline" size={16} color={colors.muted} />
                   <Text style={styles.clearPinText}>Clear pin</Text>
                 </TouchableOpacity>
               )}
@@ -278,7 +277,7 @@ export const AddressFormSheet: React.FC<Props> = ({
             <Ionicons
               name={makeDefault ? 'checkbox' : 'square-outline'}
               size={22}
-              color={address?.is_default ? '#9bc7f5' : '#0A84FF'}
+              color={address?.is_default ? '#9bc7f5' : colors.primary}
             />
             <View style={styles.flex}>
               <Text style={styles.defaultLabel}>Set as default address</Text>
@@ -292,7 +291,7 @@ export const AddressFormSheet: React.FC<Props> = ({
 
           {!!saveError && (
             <View style={styles.errorBox}>
-              <Ionicons name="alert-circle" size={18} color="#D93025" />
+              <Ionicons name="alert-circle" size={18} color={colors.danger} />
               <Text style={styles.errorText}>{saveError}</Text>
             </View>
           )}
@@ -310,8 +309,8 @@ export const AddressFormSheet: React.FC<Props> = ({
               </Text>
             )}
           </TouchableOpacity>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </SheetScrollView>
+      </View>
     </Modal>
   );
 };
@@ -325,36 +324,36 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: colors.line,
     backgroundColor: '#fff',
   },
-  headerTitle: { fontSize: 18, fontWeight: '700', color: '#1a1a1a' },
+  headerTitle: { fontSize: 18, fontWeight: '700', color: colors.ink },
   body: { padding: 18, paddingBottom: 48, backgroundColor: '#fff' },
   block: { marginBottom: 22 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
     paddingHorizontal: 14,
     paddingVertical: 8,
-    borderRadius: 16,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#ddd',
-    backgroundColor: '#fafafa',
+    borderColor: colors.line,
+    backgroundColor: colors.surfaceTint,
   },
-  chipActive: { backgroundColor: '#0A84FF', borderColor: '#0A84FF' },
-  chipText: { fontSize: 13, fontWeight: '600', color: '#666' },
+  chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  chipText: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
   chipTextActive: { color: '#fff' },
   input: {
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
+    borderColor: colors.line,
+    borderRadius: 12,
     padding: 12,
     fontSize: 15,
-    color: '#000',
-    backgroundColor: '#f9f9f9',
+    color: colors.ink,
+    backgroundColor: colors.bg,
   },
   customLabelInput: { marginTop: 10 },
-  map: { height: 220, borderRadius: 10, overflow: 'hidden' },
-  pinValue: { fontSize: 13, color: '#555', marginTop: 10, fontVariant: ['tabular-nums'] },
+  map: { height: 220, borderRadius: 14, overflow: 'hidden' },
+  pinValue: { fontSize: 13, color: colors.textSecondary, marginTop: 10, fontVariant: ['tabular-nums'] },
   pinActions: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 },
   secondaryButton: {
     flexDirection: 'row',
@@ -362,47 +361,47 @@ const styles = StyleSheet.create({
     gap: 7,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: 8,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#0A84FF',
-    backgroundColor: '#F2F8FF',
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryTint,
   },
   buttonBusy: { opacity: 0.7 },
-  secondaryButtonText: { fontSize: 13, fontWeight: '700', color: '#0A84FF' },
+  secondaryButtonText: { fontSize: 13, fontWeight: '700', color: colors.primary },
   clearPinButton: { flexDirection: 'row', alignItems: 'center', gap: 5, padding: 8 },
-  clearPinText: { fontSize: 13, color: '#8a8a8a', fontWeight: '600' },
+  clearPinText: { fontSize: 13, color: colors.muted, fontWeight: '600' },
   warningBox: {
     marginTop: 12,
     padding: 12,
-    borderRadius: 8,
-    backgroundColor: '#FFF8E5',
+    borderRadius: 12,
+    backgroundColor: colors.warningBg,
     borderWidth: 1,
-    borderColor: '#FFE2A8',
+    borderColor: colors.warningLine,
     gap: 6,
   },
-  warningText: { fontSize: 13, color: '#8a6100', lineHeight: 18 },
-  warningLink: { fontSize: 13, fontWeight: '700', color: '#0A84FF' },
+  warningText: { fontSize: 13, color: colors.warningText, lineHeight: 18 },
+  warningLink: { fontSize: 13, fontWeight: '700', color: colors.primary },
   defaultRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 22 },
-  defaultLabel: { fontSize: 15, fontWeight: '600', color: '#1a1a1a' },
-  defaultHint: { fontSize: 12, color: '#888', marginTop: 2, lineHeight: 17 },
+  defaultLabel: { fontSize: 15, fontWeight: '600', color: colors.ink },
+  defaultHint: { fontSize: 12, color: colors.muted, marginTop: 2, lineHeight: 17 },
   errorBox: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 8,
     padding: 12,
-    borderRadius: 8,
-    backgroundColor: '#FFF7F7',
+    borderRadius: 12,
+    backgroundColor: colors.dangerBg,
     borderWidth: 1,
-    borderColor: '#F3C2C2',
+    borderColor: colors.dangerLine,
     marginBottom: 16,
   },
-  errorText: { flex: 1, fontSize: 13, color: '#D93025', lineHeight: 18 },
+  errorText: { flex: 1, fontSize: 13, color: colors.danger, lineHeight: 18 },
   primaryButton: {
-    backgroundColor: '#0A84FF',
+    backgroundColor: colors.primary,
     padding: 16,
-    borderRadius: 10,
+    borderRadius: 14,
     alignItems: 'center',
   },
-  primaryButtonDisabled: { backgroundColor: '#a0c4ff' },
+  primaryButtonDisabled: { backgroundColor: colors.primarySoft },
   primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 });

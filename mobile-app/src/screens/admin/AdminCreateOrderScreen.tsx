@@ -1,12 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  TextInput, Alert, ActivityIndicator,
+  TextInput, Alert, ActivityIndicator, Keyboard, Platform,
 } from 'react-native';
 import { LoadingScreen } from '../../components/LoadingScreen';
 import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import { colors, radius, fontSize, shadow, card, pagePadding } from '../../theme';
+import { ErrorState, friendlyError } from '../../components/ui';
 import { adminService, AdminCustomer, DeliveryBoy } from '../../services/adminService';
 import {
   AddressFields, AddressParts, EMPTY_ADDRESS, splitAddress, validateAddress,
@@ -20,6 +22,22 @@ interface CartItem {
   quantity: number;
 }
 
+/** A white card with a short bold title; every group of fields on this form uses one. */
+const Section: React.FC<{
+  title: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  children: React.ReactNode;
+}> = ({ title, icon, children }) => (
+  <View style={styles.section}>
+    <View style={styles.sectionHeader}>
+      <View style={styles.sectionIcon}>
+        <Ionicons name={icon} size={18} color={colors.primary} />
+      </View>
+      <Text style={styles.sectionTitle}>{title}</Text>
+    </View>
+    {children}
+  </View>
+);
 
 export const AdminCreateOrderScreen: React.FC = () => {
   const navigation = useNavigation();
@@ -29,6 +47,7 @@ export const AdminCreateOrderScreen: React.FC = () => {
   const [products, setProducts] = useState<{ id: number; name: string; price: string; is_active: boolean }[]>([]);
   const [deliveryBoys, setDeliveryBoys] = useState<DeliveryBoy[]>([]);
   const [loadingData, setLoadingData] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
   const [guestName, setGuestName] = useState('');
@@ -42,8 +61,11 @@ export const AdminCreateOrderScreen: React.FC = () => {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [saving, setSaving] = useState(false);
   const [customerSearch, setCustomerSearch] = useState('');
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
 
-  useEffect(() => {
+  const loadData = useCallback(() => {
+    setLoadError(null);
+    setLoadingData(true);
     Promise.all([
       adminService.getCustomers(),
       adminService.getProducts(),
@@ -52,9 +74,19 @@ export const AdminCreateOrderScreen: React.FC = () => {
       setCustomers(c);
       setProducts(p.filter(pr => pr.is_active));
       setDeliveryBoys(d);
-    }).catch(() => {
-      Alert.alert('Error', 'Failed to load data.');
+    }).catch((e: any) => {
+      setLoadError(e?.message || 'Could not load customers, products and riders.');
     }).finally(() => setLoadingData(false));
+  }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  // The pinned Create Order bar steps aside while typing, so the keyboard does
+  // not squeeze the form into a thin strip.
+  useEffect(() => {
+    const showSub = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', () => setKeyboardOpen(true));
+    const hideSub = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide', () => setKeyboardOpen(false));
+    return () => { showSub.remove(); hideSub.remove(); };
   }, []);
 
   // Auto-fill address when customer selected. The customer list only carries the
@@ -141,7 +173,7 @@ export const AdminCreateOrderScreen: React.FC = () => {
         [{ text: 'Done', onPress: () => navigation.goBack() }],
       );
     } catch (e: any) {
-      Alert.alert('Error', e?.message || 'Failed to create order.');
+      Alert.alert('Error', e?.message ? friendlyError(e.message) : 'Failed to create order.');
     } finally {
       setSaving(false);
     }
@@ -153,325 +185,375 @@ export const AdminCreateOrderScreen: React.FC = () => {
     );
   }
 
-  const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
+  if (loadError) {
+    return (
+      <View style={styles.container}>
+        <ErrorState title="Could not load the order form" message={loadError} onRetry={loadData} />
+      </View>
+    );
+  }
 
   return (
-    <KeyboardAwareScrollView
-      style={styles.container}
-      contentContainerStyle={styles.scrollContent}
-      extraBottomSpace={32}
-    >
+    <View style={styles.container}>
+      <KeyboardAwareScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        extraBottomSpace={24}
+      >
 
-      {/* Customer mode toggle */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Customer</Text>
-        <View style={styles.modeRow}>
-          {(['existing', 'guest'] as CustomerMode[]).map(m => (
-            <TouchableOpacity
-              key={m}
-              style={[styles.modeBtn, mode === m && styles.modeBtnActive]}
-              onPress={() => setMode(m)}
-            >
-              <Ionicons name={m === 'existing' ? 'person' : 'call'} size={15} color={mode === m ? 'white' : '#555'} />
-              <Text style={[styles.modeBtnText, mode === m && styles.modeBtnTextActive]}>
-                {m === 'existing' ? 'Registered User' : 'Guest / Call-in'}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        {/* Customer mode toggle */}
+        <Section title="Customer" icon="person-outline">
+          <View style={styles.modeRow}>
+            {(['existing', 'guest'] as CustomerMode[]).map(m => (
+              <TouchableOpacity
+                key={m}
+                style={[styles.modeBtn, mode === m && styles.modeBtnActive]}
+                onPress={() => setMode(m)}
+              >
+                <Ionicons name={m === 'existing' ? 'person' : 'call'} size={16} color={mode === m ? colors.white : colors.ink} />
+                <Text style={[styles.modeBtnText, mode === m && styles.modeBtnTextActive]}>
+                  {m === 'existing' ? 'Registered User' : 'Guest / Call-in'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
 
-        {mode === 'existing' ? (
-          <View>
-            <FieldLabel text="Pick a customer" required />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search by name, phone, or address…"
-              value={customerSearch}
-              onChangeText={setCustomerSearch}
-              placeholderTextColor="#000"
-            />
-            <ScrollView style={styles.customerList} nestedScrollEnabled>
-              {filteredCustomers.map(c => (
+          {mode === 'existing' ? (
+            <View>
+              <FieldLabel text="Pick a customer" required />
+              <TextInput
+                style={[styles.input, styles.searchInput]}
+                placeholder="Search by name, phone, or address…"
+                value={customerSearch}
+                onChangeText={setCustomerSearch}
+                placeholderTextColor={colors.muted}
+              />
+              <ScrollView style={styles.customerList} nestedScrollEnabled>
+                {filteredCustomers.map(c => (
+                  <TouchableOpacity
+                    key={c.id}
+                    style={[styles.customerItem, selectedCustomerId === c.id && styles.customerItemSelected]}
+                    onPress={() => setSelectedCustomerId(c.id)}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.customerItemName}>{c.name}</Text>
+                      {!!c.phone && <Text style={styles.customerItemSub}>{c.phone}</Text>}
+                      {!!c.address && <Text style={styles.customerItemSub} numberOfLines={1}>{c.address}</Text>}
+                    </View>
+                    {selectedCustomerId === c.id && (
+                      <Ionicons name="checkmark-circle" size={22} color={colors.primary} />
+                    )}
+                  </TouchableOpacity>
+                ))}
+                {filteredCustomers.length === 0 && (
+                  <Text style={styles.emptyText}>No customers found</Text>
+                )}
+              </ScrollView>
+            </View>
+          ) : (
+            <View style={styles.guestFields}>
+              <View>
+                <FieldLabel text="Customer name" required />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Who is the order for?"
+                  value={guestName}
+                  onChangeText={setGuestName}
+                  placeholderTextColor={colors.muted}
+                />
+              </View>
+              <View>
+                <FieldLabel text="Phone number" />
+                <TextInput
+                  style={styles.input}
+                  placeholder="03xx-xxxxxxx"
+                  value={guestPhone}
+                  onChangeText={setGuestPhone}
+                  keyboardType="phone-pad"
+                  placeholderTextColor={colors.muted}
+                />
+              </View>
+            </View>
+          )}
+        </Section>
+
+        {/* Address — outside the mode branches because a rider needs one either way */}
+        <Section title="Delivery Address" icon="location-outline">
+          <AddressFields
+            value={address}
+            onChange={changeAddress}
+            errors={addressErrors}
+            hint="This is what the rider sees on the delivery list."
+          />
+        </Section>
+
+        {/* Products */}
+        <Section title="Products" icon="cart-outline">
+          <FieldLabel text="Pick at least one" required />
+          {products.length === 0 && (
+            <Text style={styles.emptyText}>No active products to order yet.</Text>
+          )}
+          <View style={styles.productGrid}>
+            {products.map(p => {
+              const inCart = cart.find(c => c.product.id === p.id);
+              return (
                 <TouchableOpacity
-                  key={c.id}
-                  style={[styles.customerItem, selectedCustomerId === c.id && styles.customerItemSelected]}
-                  onPress={() => setSelectedCustomerId(c.id)}
+                  key={p.id}
+                  style={[styles.productCard, inCart && styles.productCardSelected]}
+                  onPress={() => addToCart(p)}
                 >
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.customerItemName}>{c.name}</Text>
-                    {c.phone && <Text style={styles.customerItemSub}>{c.phone}</Text>}
-                    {c.address && <Text style={styles.customerItemSub} numberOfLines={1}>{c.address}</Text>}
+                  <Text style={styles.productName} numberOfLines={2}>{p.name}</Text>
+                  <Text style={styles.productPrice}>PKR {parseFloat(p.price).toLocaleString()}</Text>
+                  {inCart && <Text style={styles.inCartLabel}>×{inCart.quantity} added</Text>}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {cart.length > 0 && (
+            <View style={styles.cart}>
+              <Text style={styles.cartTitle}>Cart</Text>
+              {cart.map(({ product, quantity }) => (
+                <View key={product.id} style={styles.cartRow}>
+                  {/* Name and line price stack, so a long product name keeps
+                      most of the row instead of what the stepper leaves. */}
+                  <View style={styles.cartItemInfo}>
+                    <Text style={styles.cartItemName} numberOfLines={2}>{product.name}</Text>
+                    <Text style={styles.cartItemPrice}>
+                      PKR {(parseFloat(product.price) * quantity).toLocaleString()}
+                    </Text>
                   </View>
-                  {selectedCustomerId === c.id && (
-                    <Ionicons name="checkmark-circle" size={20} color="#007AFF" />
-                  )}
+                  <View style={styles.qtyRow}>
+                    <TouchableOpacity
+                      style={styles.qtyBtn}
+                      onPress={() => changeQty(product.id, -1)}
+                      hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                      accessibilityLabel={`Remove one ${product.name}`}
+                    >
+                      <Ionicons name="remove" size={18} color={colors.ink} />
+                    </TouchableOpacity>
+                    <Text style={styles.qtyText}>{quantity}</Text>
+                    <TouchableOpacity
+                      style={styles.qtyBtn}
+                      onPress={() => changeQty(product.id, 1)}
+                      hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                      accessibilityLabel={`Add one ${product.name}`}
+                    >
+                      <Ionicons name="add" size={18} color={colors.ink} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))}
+              <View style={styles.cartTotal}>
+                <Text style={styles.cartTotalLabel}>Total</Text>
+                <Text style={styles.cartTotalValue}>PKR {total.toLocaleString()}</Text>
+              </View>
+            </View>
+          )}
+        </Section>
+
+        {/* Payment */}
+        <Section title="Payment" icon="cash-outline">
+          <View style={[styles.paymentBtn, styles.paymentBtnActive]}>
+            <Ionicons name="checkmark-circle" size={18} color={colors.white} />
+            <Text style={[styles.paymentBtnText, styles.paymentBtnTextActive]}>
+              Cash on Delivery
+            </Text>
+          </View>
+        </Section>
+
+        {/* Rider */}
+        <Section title="Rider" icon="bicycle-outline">
+          <FieldLabel text="Assign rider" />
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <View style={styles.riderRow}>
+              <TouchableOpacity
+                style={[styles.riderChip, !selectedRiderId && styles.riderChipActive]}
+                onPress={() => setSelectedRiderId(null)}
+              >
+                <Text style={[styles.riderChipText, !selectedRiderId && styles.riderChipTextActive]}>
+                  Assign later
+                </Text>
+              </TouchableOpacity>
+              {deliveryBoys.map(db => (
+                <TouchableOpacity
+                  key={db.id}
+                  style={[styles.riderChip, selectedRiderId === db.id && styles.riderChipActive]}
+                  onPress={() => setSelectedRiderId(db.id)}
+                >
+                  <View style={[styles.riderDot, { backgroundColor: db.is_available ? colors.success : colors.danger }]} />
+                  <Text style={[styles.riderChipText, selectedRiderId === db.id && styles.riderChipTextActive]}>
+                    {db.name}{db.is_available ? '' : ' · Unavailable'}
+                  </Text>
                 </TouchableOpacity>
               ))}
-              {filteredCustomers.length === 0 && (
-                <Text style={styles.emptyText}>No customers found</Text>
-              )}
-            </ScrollView>
-          </View>
-        ) : (
-          <View style={styles.guestFields}>
-            <View>
-              <FieldLabel text="Customer name" required />
-              <TextInput
-                style={styles.input}
-                placeholder="Who is the order for?"
-                value={guestName}
-                onChangeText={setGuestName}
-                placeholderTextColor="#000"
-              />
             </View>
-            <View>
-              <FieldLabel text="Phone number" />
-              <TextInput
-                style={styles.input}
-                placeholder="03xx-xxxxxxx"
-                value={guestPhone}
-                onChangeText={setGuestPhone}
-                keyboardType="phone-pad"
-                placeholderTextColor="#000"
-              />
-            </View>
-          </View>
-        )}
-      </View>
+          </ScrollView>
+        </Section>
 
-      {/* Address — outside the mode branches because a rider needs one either way */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Delivery Address</Text>
-        <AddressFields
-          value={address}
-          onChange={changeAddress}
-          errors={addressErrors}
-          hint="This is what the rider sees on the delivery list."
-        />
-      </View>
-
-      {/* Products */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Products</Text>
-        <FieldLabel text="Pick at least one" required />
-        <View style={styles.productGrid}>
-          {products.map(p => {
-            const inCart = cart.find(c => c.product.id === p.id);
-            return (
-              <TouchableOpacity
-                key={p.id}
-                style={[styles.productCard, inCart && styles.productCardSelected]}
-                onPress={() => addToCart(p)}
-              >
-                <Text style={styles.productName} numberOfLines={2}>{p.name}</Text>
-                <Text style={styles.productPrice}>PKR {parseFloat(p.price).toLocaleString()}</Text>
-                {inCart && <Text style={styles.inCartLabel}>×{inCart.quantity} added</Text>}
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
-        {cart.length > 0 && (
-          <View style={styles.cart}>
-            <Text style={styles.cartTitle}>Cart</Text>
-            {cart.map(({ product, quantity }) => (
-              <View key={product.id} style={styles.cartRow}>
-                <Text style={styles.cartItemName} numberOfLines={1}>{product.name}</Text>
-                <View style={styles.qtyRow}>
-                  <TouchableOpacity style={styles.qtyBtn} onPress={() => changeQty(product.id, -1)}>
-                    <Ionicons name="remove" size={14} color="#333" />
-                  </TouchableOpacity>
-                  <Text style={styles.qtyText}>{quantity}</Text>
-                  <TouchableOpacity style={styles.qtyBtn} onPress={() => changeQty(product.id, 1)}>
-                    <Ionicons name="add" size={14} color="#333" />
-                  </TouchableOpacity>
-                </View>
-                <Text style={styles.cartItemPrice}>
-                  PKR {(parseFloat(product.price) * quantity).toLocaleString()}
-                </Text>
-              </View>
-            ))}
-            <View style={styles.cartTotal}>
-              <Text style={styles.cartTotalLabel}>Total</Text>
-              <Text style={styles.cartTotalValue}>PKR {total.toLocaleString()}</Text>
-            </View>
-          </View>
-        )}
-      </View>
-
-      {/* Payment */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Payment</Text>
-        <View style={[styles.paymentBtn, styles.paymentBtnActive]}>
-          <Text style={[styles.paymentBtnText, styles.paymentBtnTextActive]}>
-            Cash on Delivery
+        {/* Note for the rider. Named for its audience rather than "Delivery
+            notes", which read like something the customer might see — and the API
+            no longer sends it to them, so the label should say so. */}
+        <Section title="Note for the rider" icon="document-text-outline">
+          <FieldLabel text="What should the rider know?" />
+          <TextInput
+            style={[styles.input, styles.textarea]}
+            placeholder="Gate code 1234 · Call on arrival · Leave with the guard"
+            value={deliveryNotes}
+            onChangeText={setDeliveryNotes}
+            multiline
+            placeholderTextColor={colors.muted}
+            maxLength={500}
+          />
+          <Text style={styles.fieldHint}>
+            Shown only to the rider delivering this order. The customer never sees it.
           </Text>
-        </View>
-      </View>
+        </Section>
 
-      {/* Rider */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Rider</Text>
-        <FieldLabel text="Assign rider" />
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          <View style={styles.riderRow}>
-            <TouchableOpacity
-              style={[styles.riderChip, !selectedRiderId && styles.riderChipActive]}
-              onPress={() => setSelectedRiderId(null)}
-            >
-              <Text style={[styles.riderChipText, !selectedRiderId && styles.riderChipTextActive]}>
-                Assign later
-              </Text>
-            </TouchableOpacity>
-            {deliveryBoys.map(db => (
-              <TouchableOpacity
-                key={db.id}
-                style={[styles.riderChip, selectedRiderId === db.id && styles.riderChipActive]}
-                onPress={() => setSelectedRiderId(db.id)}
-              >
-                <Text style={[styles.riderChipText, selectedRiderId === db.id && styles.riderChipTextActive]}>
-                  {db.name} {db.is_available ? '🟢' : '🔴'}
-                </Text>
-              </TouchableOpacity>
-            ))}
+      </KeyboardAwareScrollView>
+
+      {/* Submit, pinned so it is always one tap away on this long form. */}
+      {!keyboardOpen && (
+        <View style={styles.footer}>
+          <View style={styles.footerTotal}>
+            <Text style={styles.footerLabel}>Total</Text>
+            <Text style={styles.footerAmount} numberOfLines={1}>PKR {total.toLocaleString()}</Text>
           </View>
-        </ScrollView>
-      </View>
-
-      {/* Note for the rider. Named for its audience rather than "Delivery
-          notes", which read like something the customer might see — and the API
-          no longer sends it to them, so the label should say so. */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Note for the rider</Text>
-        <FieldLabel text="What should the rider know?" />
-        <TextInput
-          style={[styles.input, { height: 70, textAlignVertical: 'top' }]}
-          placeholder="Gate code 1234 · Call on arrival · Leave with the guard"
-          value={deliveryNotes}
-          onChangeText={setDeliveryNotes}
-          multiline
-          placeholderTextColor="#000"
-          maxLength={500}
-        />
-        <Text style={styles.fieldHint}>
-          Shown only to the rider delivering this order. The customer never sees it.
-        </Text>
-      </View>
-
-      {/* Submit */}
-      <View style={styles.section}>
-        <TouchableOpacity
-          style={[styles.submitBtn, saving && styles.submitBtnDisabled]}
-          onPress={submit}
-          disabled={saving}
-        >
-          {saving ? (
-            <ActivityIndicator size="small" color="white" />
-          ) : (
-            <>
-              <Ionicons name="checkmark-circle" size={20} color="white" />
-              <Text style={styles.submitBtnText}>Create Order</Text>
-            </>
-          )}
-        </TouchableOpacity>
-      </View>
-
-    </KeyboardAwareScrollView>
+          <TouchableOpacity
+            style={[styles.submitBtn, saving && styles.submitBtnDisabled]}
+            onPress={submit}
+            disabled={saving}
+            accessibilityRole="button"
+            accessibilityLabel="Create order"
+          >
+            {saving ? (
+              <ActivityIndicator size="small" color={colors.white} />
+            ) : (
+              <>
+                <Ionicons name="checkmark-circle" size={20} color={colors.white} />
+                <Text style={styles.submitBtnText}>Create Order</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
-  // Room to scroll the last field clear of the keyboard. Replaces the spacer
-  // View that used to sit at the bottom of the scroll.
-  scrollContent: { paddingBottom: 48 },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
-  loadingText: { fontSize: 14, color: '#888' },
-  section: {
-    backgroundColor: 'white', margin: 12, marginBottom: 0,
-    borderRadius: 12, padding: 16,
-    elevation: 1, shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 3,
+  container: { flex: 1, backgroundColor: colors.bg },
+  scroll: { flex: 1 },
+  scrollContent: { paddingHorizontal: pagePadding, paddingTop: 4 },
+
+  section: { ...card, padding: 16, marginBottom: 12 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
+  sectionIcon: {
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: colors.primaryTint, alignItems: 'center', justifyContent: 'center',
   },
-  sectionTitle: { fontSize: 14, fontWeight: '700', color: '#1a1a1a', marginBottom: 12 },
-  modeRow: { flexDirection: 'row', gap: 10, marginBottom: 14 },
+  sectionTitle: { fontSize: fontSize.md, fontWeight: '800', color: colors.ink },
+
+  modeRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
   modeBtn: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 6, paddingVertical: 10, borderRadius: 10,
-    borderWidth: 1.5, borderColor: '#ddd', backgroundColor: 'white',
+    gap: 6, height: 44, paddingHorizontal: 8, borderRadius: radius.pill,
+    borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface,
   },
-  modeBtnActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
-  modeBtnText: { fontSize: 13, color: '#555', fontWeight: '600' },
-  modeBtnTextActive: { color: 'white' },
-  searchInput: {
-    backgroundColor: '#f5f5f5', borderRadius: 8, padding: 10,
-    fontSize: 14, color: '#000', marginBottom: 8,
-  },
-  customerList: { maxHeight: 200 },
-  customerItem: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingVertical: 10, paddingHorizontal: 12, borderRadius: 8,
-    borderWidth: 1, borderColor: '#eee', marginBottom: 6,
-  },
-  customerItemSelected: { borderColor: '#007AFF', backgroundColor: '#007AFF08' },
-  customerItemName: { fontSize: 14, fontWeight: '600', color: '#1a1a1a' },
-  customerItemSub: { fontSize: 12, color: '#888', marginTop: 1 },
-  guestFields: { gap: 10 },
+  modeBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  modeBtnText: { flexShrink: 1, fontSize: fontSize.sm, color: colors.ink, fontWeight: '700' },
+  modeBtnTextActive: { color: colors.white },
+
   input: {
-    borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 8,
-    padding: 11, fontSize: 14, color: '#000', backgroundColor: '#fafafa',
+    height: 48, borderWidth: 1, borderColor: colors.line, borderRadius: radius.md,
+    paddingHorizontal: 14, fontSize: fontSize.sm, color: colors.ink, backgroundColor: colors.surfaceTint,
   },
-  fieldHint: { fontSize: 11.5, color: '#8a929b', marginTop: 6, lineHeight: 16 },
-  productGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  searchInput: { marginBottom: 10 },
+  textarea: { height: 96, paddingTop: 12, textAlignVertical: 'top' },
+  fieldHint: { fontSize: fontSize.xs, color: colors.muted, marginTop: 8, lineHeight: 16 },
+
+  customerList: { maxHeight: 240 },
+  customerItem: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 56,
+    paddingVertical: 10, paddingHorizontal: 12, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, marginBottom: 8,
+  },
+  customerItemSelected: { borderColor: colors.primary, backgroundColor: colors.primaryTint },
+  customerItemName: { fontSize: fontSize.sm, fontWeight: '700', color: colors.ink },
+  customerItemSub: { fontSize: fontSize.xs, color: colors.muted, marginTop: 2 },
+  guestFields: { gap: 14 },
+
+  productGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 8 },
   productCard: {
-    width: '47%', borderRadius: 10, borderWidth: 1.5,
-    borderColor: '#e0e0e0', padding: 10, backgroundColor: 'white',
+    width: '48%', minHeight: 80, borderRadius: radius.md, borderWidth: 1,
+    borderColor: colors.line, padding: 12, backgroundColor: colors.surface,
   },
-  productCardSelected: { borderColor: '#007AFF', backgroundColor: '#007AFF08' },
-  productName: { fontSize: 13, fontWeight: '600', color: '#1a1a1a', marginBottom: 4 },
-  productPrice: { fontSize: 12, color: '#555' },
-  inCartLabel: { fontSize: 11, color: '#007AFF', fontWeight: '700', marginTop: 4 },
+  productCardSelected: { borderColor: colors.primary, borderWidth: 2, backgroundColor: colors.primaryTint },
+  productName: { fontSize: fontSize.sm, fontWeight: '700', color: colors.ink, marginBottom: 4 },
+  productPrice: { fontSize: fontSize.sm, fontWeight: '800', color: colors.textSecondary },
+  inCartLabel: { fontSize: fontSize.xs, color: colors.primaryDark, fontWeight: '800', marginTop: 4 },
+
   cart: {
-    marginTop: 14, borderTopWidth: 1, borderTopColor: '#f0f0f0', paddingTop: 12,
+    marginTop: 16, padding: 12, borderRadius: radius.md,
+    backgroundColor: colors.surfaceTint, borderWidth: 1, borderColor: colors.line,
   },
-  cartTitle: { fontSize: 13, fontWeight: '700', color: '#333', marginBottom: 8 },
-  cartRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 8 },
-  cartItemName: { flex: 1, fontSize: 13, color: '#333' },
-  qtyRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  cartTitle: { fontSize: fontSize.sm, fontWeight: '800', color: colors.ink, marginBottom: 10 },
+  cartRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10, gap: 8 },
+  cartItemInfo: { flex: 1 },
+  cartItemName: { fontSize: fontSize.sm, color: colors.ink, fontWeight: '600' },
+  qtyRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   qtyBtn: {
-    width: 26, height: 26, borderRadius: 6,
-    backgroundColor: '#f0f0f0', alignItems: 'center', justifyContent: 'center',
+    width: 36, height: 36, borderRadius: 12,
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line,
+    alignItems: 'center', justifyContent: 'center',
   },
-  qtyText: { fontSize: 14, fontWeight: '600', color: '#1a1a1a', width: 20, textAlign: 'center' },
-  cartItemPrice: { fontSize: 13, fontWeight: '600', color: '#1a1a1a', width: 80, textAlign: 'right' },
+  qtyText: { fontSize: fontSize.md, fontWeight: '800', color: colors.ink, width: 28, textAlign: 'center' },
+  cartItemPrice: { fontSize: fontSize.sm, fontWeight: '700', color: colors.textSecondary, marginTop: 2 },
   cartTotal: {
-    flexDirection: 'row', justifyContent: 'space-between',
-    borderTopWidth: 1, borderTopColor: '#f0f0f0', paddingTop: 10, marginTop: 4,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 12, marginTop: 2,
   },
-  cartTotalLabel: { fontSize: 14, fontWeight: '700', color: '#333' },
-  cartTotalValue: { fontSize: 14, fontWeight: '700', color: '#007AFF' },
-  paymentRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
+  cartTotalLabel: { fontSize: fontSize.md, fontWeight: '700', color: colors.ink },
+  cartTotalValue: { fontSize: fontSize.lg, fontWeight: '800', color: colors.ink },
+
   paymentBtn: {
-    flex: 1, paddingVertical: 9, borderRadius: 8,
-    borderWidth: 1, borderColor: '#ddd', alignItems: 'center',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    height: 46, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface,
   },
-  paymentBtnActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
-  paymentBtnText: { fontSize: 13, color: '#555', fontWeight: '600' },
-  paymentBtnTextActive: { color: 'white' },
+  paymentBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  paymentBtnText: { fontSize: fontSize.sm, color: colors.ink, fontWeight: '700' },
+  paymentBtnTextActive: { color: colors.white },
+
   riderRow: { flexDirection: 'row', gap: 8, paddingBottom: 4 },
   riderChip: {
-    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
-    borderWidth: 1, borderColor: '#ddd', backgroundColor: 'white',
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    height: 40, paddingHorizontal: 16, borderRadius: radius.pill,
+    borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface,
   },
-  riderChipActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
-  riderChipText: { fontSize: 13, color: '#555', fontWeight: '500' },
-  riderChipTextActive: { color: 'white' },
+  riderChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  riderChipText: { fontSize: fontSize.sm, color: colors.ink, fontWeight: '700' },
+  riderChipTextActive: { color: colors.white },
+  riderDot: { width: 8, height: 8, borderRadius: 4 },
+
+  footer: {
+    flexDirection: 'row', alignItems: 'center', gap: 16,
+    // The stack already keeps the system navigation bar's height clear below
+    // this screen, so no extra bottom inset is added here.
+    paddingHorizontal: pagePadding, paddingTop: 12, paddingBottom: 12,
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl,
+    borderTopWidth: 1, borderColor: colors.line,
+    ...shadow.card, shadowOffset: { width: 0, height: -6 },
+  },
+  footerTotal: { flexShrink: 1 },
+  footerLabel: { fontSize: fontSize.xs, color: colors.muted, fontWeight: '700' },
+  footerAmount: { fontSize: fontSize.lg, fontWeight: '800', color: colors.ink },
   submitBtn: {
-    backgroundColor: '#007AFF', borderRadius: 12,
-    paddingVertical: 15, flexDirection: 'row',
-    alignItems: 'center', justifyContent: 'center', gap: 8,
+    flex: 1, height: 54, borderRadius: radius.md, backgroundColor: colors.primary,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
   },
-  submitBtnDisabled: { backgroundColor: '#ccc' },
-  submitBtnText: { color: 'white', fontSize: 16, fontWeight: '700' },
-  emptyText: { textAlign: 'center', color: '#aaa', paddingVertical: 12, fontSize: 14 },
+  submitBtnDisabled: { opacity: 0.6 },
+  submitBtnText: { color: colors.white, fontSize: fontSize.md, fontWeight: '800' },
+  emptyText: { textAlign: 'center', color: colors.muted, paddingVertical: 12, fontSize: fontSize.sm },
 });

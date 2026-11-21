@@ -30,7 +30,7 @@ export const ComplaintService = {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to fetch complaints');
+        throw new Error(`Failed to fetch complaints (error ${response.status})`);
       }
       return await response.json();
     } catch (error) {

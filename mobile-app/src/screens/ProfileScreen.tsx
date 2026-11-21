@@ -1,8 +1,11 @@
+import { colors, radius, card, pagePadding, shadow, space } from '../theme';
 import React, { useContext, useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   Alert, Modal, ActivityIndicator, Animated, Easing,
+  KeyboardAvoidingView, Platform, ScrollView,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AuthContext } from '../context/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -12,6 +15,7 @@ import { useLanguage } from '../context/LanguageContext';
 import { useReducedMotion } from '../hooks/useReducedMotion';
 import { KeyboardAwareScrollView } from '../components/KeyboardAwareScrollView';
 import { FieldError } from '../components/FormField';
+import { ErrorState, StatusPill, friendlyError } from '../components/ui';
 import { authService } from '../services/authService';
 import { CustomerAddress, Pin, addressService, formatPin } from '../services/addressService';
 import { AddressPinMap } from '../components/AddressPinMap';
@@ -19,10 +23,11 @@ import { API_URL } from '../constants/config';
 import { canWhatsApp, openWhatsApp } from '../utils/whatsapp';
 import { shareLocation, toMapPin } from '../utils/maps';
 import { getCurrentPin, openAppSettings } from '../utils/deviceLocation';
+import { useBrand } from '../context/BrandContext';
 
-const BRAND_BLUE = '#0A84FF';
-const BRAND_DARK = '#0D1B2A';
-const PAGE_BG = '#F4F6F8';
+const BRAND_BLUE = colors.primary;
+const BRAND_DARK = colors.ink;
+const PAGE_BG = colors.bg;
 
 interface BusinessContact {
   name: string;
@@ -68,18 +73,44 @@ const EDITABLE_KEYS = new Set(['username', 'first_name', 'last_name', 'phone_num
 
 // ── Fetch helper ─────────────────────────────────────────────────────────────
 
+// Throws with the reason instead of returning null: "no config" and "the
+// request failed" must not look alike, or a rider whose profile fields did not
+// load would just see an empty screen with no way to tell why.
+//
+// It also gives up after a while. The first load blocks the whole screen behind
+// a spinner, so a request that never answers would leave a rider staring at it
+// forever instead of reaching the error card with its retry button.
+const CONFIG_TIMEOUT_MS = 15000;
+
 async function fetchProfileConfig(token: string): Promise<ProfileConfig | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CONFIG_TIMEOUT_MS);
   try {
     const res = await fetch(`${API_URL}/auth/mobile-profile-config/`, {
       headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      throw new Error(`The server could not send your profile fields (error ${res.status}).`);
+    }
     const data = await res.json();
-    return data.fields ?? null;
-  } catch {
-    return null;
+    if (!data?.fields) throw new Error('The server did not send your profile fields.');
+    return data.fields;
+  } finally {
+    clearTimeout(timer);
   }
 }
+
+/**
+ * A failure reason that is safe to print. A server error page comes back as raw
+ * HTML, and showing a page of markup inside a small card breaks the screen.
+ */
+const readableReason = (raw?: string | null): string => {
+  const text = friendlyError(raw);
+  return /<\/?[a-z][^>]*>/i.test(text) || text.length > 200
+    ? 'The server sent an unexpected reply. Please try again.'
+    : text;
+};
 
 // ── Presentational bits ───────────────────────────────────────────────────────
 
@@ -101,7 +132,7 @@ const IconChip: React.FC<{
   bg: string;
 }> = ({ name, color, bg }) => (
   <View style={[styles.chip, { backgroundColor: bg }]}>
-    <Ionicons name={name} size={17} color={color} />
+    <Ionicons name={name} size={18} color={color} />
   </View>
 );
 
@@ -121,7 +152,7 @@ const MenuRow: React.FC<{
   >
     <IconChip name={icon} color={color} bg={bg} />
     <Text style={styles.menuLabel}>{label}</Text>
-    <Ionicons name="chevron-forward" size={18} color="#c7cdd4" />
+    <Ionicons name="chevron-forward" size={20} color={colors.muted} />
   </TouchableOpacity>
 );
 
@@ -132,11 +163,17 @@ export const ProfileScreen = () => {
   const { language, setLanguage, t, urduEnabled } = useLanguage();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const reducedMotion = useReducedMotion();
+  const insets = useSafeAreaInsets();
+  const { name: brandName } = useBrand();
 
   const [form, setForm] = useState<Record<string, string>>({});
   const [isEditing, setIsEditing] = useState(false);
   const [config, setConfig] = useState<ProfileConfig | null>(null);
   const [configLoading, setConfigLoading] = useState(false);
+  // Why the rider/staff field list could not be loaded, if it could not. Bumping
+  // the nonce re-runs the focus effect below for the retry button.
+  const [configError, setConfigError] = useState<string | null>(null);
+  const [configNonce, setConfigNonce] = useState(0);
 
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [oldPassword, setOldPassword] = useState('');
@@ -154,7 +191,8 @@ export const ProfileScreen = () => {
   const [defaultAddress, setDefaultAddress] = useState<CustomerAddress | null>(null);
   const [addressCount, setAddressCount] = useState(0);
   const [addressLoading, setAddressLoading] = useState(true);
-  const [addressError, setAddressError] = useState(false);
+  // The reason the book could not be read; null means it loaded fine.
+  const [addressError, setAddressError] = useState<string | null>(null);
 
   // The admin's work place pin. Saved the moment it changes rather than behind
   // the Edit/Save cycle — "add my location" should be one tap, not four.
@@ -261,6 +299,12 @@ export const ProfileScreen = () => {
           // Keep the last good config when a refresh fails — blanking it would
           // hide every field the rider is legitimately allowed to see.
           if (next) setConfig(next);
+          setConfigError(null);
+          hasLoadedConfig.current = true;
+        })
+        .catch(e => {
+          if (cancelled) return;
+          setConfigError(e?.message ?? '');
           hasLoadedConfig.current = true;
         })
         .finally(() => {
@@ -270,7 +314,7 @@ export const ProfileScreen = () => {
       return () => {
         cancelled = true;
       };
-    }, [isStaff, token]),
+    }, [isStaff, token, configNonce]),
   );
 
   // The address book is the customer's real address store, so this screen only
@@ -296,9 +340,9 @@ export const ProfileScreen = () => {
           // badge below claims "Default" and must not claim it of a fallback.
           setDefaultAddress(list.find(a => a.is_default) ?? list[0] ?? null);
           setAddressCount(list.length);
-          setAddressError(false);
+          setAddressError(null);
         })
-        .catch(() => !cancelled && setAddressError(true))
+        .catch(e => !cancelled && setAddressError(e?.message ?? ''))
         .finally(() => !cancelled && setAddressLoading(false));
 
       return () => {
@@ -352,7 +396,7 @@ export const ProfileScreen = () => {
       setIsEditing(false);
       Alert.alert('Success', 'Profile updated successfully');
     } catch (e: any) {
-      Alert.alert('Error', e.message);
+      Alert.alert('Error', readableReason(e?.message));
     }
   };
 
@@ -383,11 +427,11 @@ export const ProfileScreen = () => {
     setLabelSaving(true);
     try {
       await updateProfile({ work_place_label: next });
-    } catch {
+    } catch (e: any) {
       // Put back what is actually stored rather than leaving an edit on screen
       // that looks saved but is not.
       setPlaceLabel(user?.work_place_label ?? '');
-      Alert.alert('Not saved', 'Could not save the name. Check your connection and try again.');
+      Alert.alert('Not saved', `Could not save the name. ${readableReason(e?.message)}`);
     } finally {
       setLabelSaving(false);
     }
@@ -406,8 +450,8 @@ export const ProfileScreen = () => {
         customer_longitude: next ? next.longitude.toFixed(6) : null,
       });
       setPin(next);
-    } catch {
-      setPinNotice({ message: 'Could not save the location. Check your connection and try again.' });
+    } catch (e: any) {
+      setPinNotice({ message: `Could not save the location. ${readableReason(e?.message)}` });
     } finally {
       setPinSaving(false);
     }
@@ -471,11 +515,19 @@ export const ProfileScreen = () => {
       try {
         const err = JSON.parse(e.message);
         message = err.detail || err.old_password?.[0] || err.new_password?.[0] || message;
-      } catch { message = e.message; }
+      } catch { message = readableReason(e?.message); }
       Alert.alert('Error', message);
     } finally {
       setPasswordLoading(false);
     }
+  };
+
+  // One way out of the password sheet, shared by the X and the Android back
+  // button, so a half-typed password or an old error never greets the next open.
+  const closePasswordModal = () => {
+    setShowPasswordModal(false);
+    setOldPassword(''); setNewPassword(''); setConfirmPassword('');
+    setPwErrors({});
   };
 
   const confirmLogout = () => {
@@ -527,79 +579,128 @@ export const ProfileScreen = () => {
       showsVerticalScrollIndicator={false}
       extraBottomSpace={32}
     >
-      {/* ── Hero ──────────────────────────────────────────────────────────────
-          A floating dark card rather than a full-bleed banner: the navigator
-          header above is white, and running navy straight into it made a hard
-          seam. Inset with rounded corners, it reads as deliberate. */}
-      <Animated.View style={[styles.hero, riseStyle(heroIn, 10)]}>
-        <Animated.View
-          style={[
-            styles.heroCircle1,
-            {
-              transform: [
-                { translateY: drift.interpolate({ inputRange: [0, 1], outputRange: [0, 14] }) },
-                { translateX: drift.interpolate({ inputRange: [0, 1], outputRange: [0, -10] }) },
-              ],
-            },
-          ]}
-        />
-        <Animated.View
-          style={[
-            styles.heroCircle2,
-            {
-              transform: [
-                { translateY: drift.interpolate({ inputRange: [0, 1], outputRange: [0, -12] }) },
-                { translateX: drift.interpolate({ inputRange: [0, 1], outputRange: [0, 8] }) },
-              ],
-            },
-          ]}
-        />
+      {/* ── Top Header ────────────────────────────────────────────── */}
+      <View style={[styles.topBar, { paddingTop: Math.max(insets.top, 14) }]}>
+        <View style={styles.topBarTextWrap}>
+          <Text style={styles.topBarTitle}>{t('profile', 'My Profile')}</Text>
+          <View style={styles.brandRow}>
+            <Ionicons name="water" size={13} color={colors.primary} />
+            <Text style={styles.brandSubtitle}>{brandName}</Text>
+          </View>
+        </View>
+        <TouchableOpacity
+          style={styles.topLogoutBtn}
+          onPress={confirmLogout}
+          accessibilityLabel={t('logout', 'Logout')}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons name="log-out-outline" size={20} color={colors.danger} />
+        </TouchableOpacity>
+      </View>
 
-        <View style={styles.avatarRing}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{initials}</Text>
+      {/* ── Profile Identity Card ──────────────────────────────────── */}
+      <Animated.View style={[styles.profileCard, riseStyle(heroIn, 10)]}>
+        <View style={styles.profileCardMain}>
+          <View style={styles.avatarWrap}>
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>{initials}</Text>
+            </View>
+            <View style={[styles.avatarBadge, isAdmin && styles.avatarBadgeAdmin]}>
+              <Ionicons
+                name={isAdmin ? 'shield-checkmark' : 'checkmark-circle'}
+                size={12}
+                color={isAdmin ? colors.ink : colors.white}
+              />
+            </View>
+          </View>
+
+          <View style={styles.profileMeta}>
+            <Text style={styles.profileName} numberOfLines={1}>
+              {fullName || user?.username}
+            </Text>
+            <Text style={styles.profileHandle}>
+              @{user?.username}
+            </Text>
+
+            <View style={styles.chipsRow}>
+              <View style={[styles.roleChip, isAdmin && styles.roleChipAdmin]}>
+                <Ionicons
+                  name={isAdmin ? 'shield-checkmark' : 'person'}
+                  size={11}
+                  color={isAdmin ? colors.ink : colors.primaryDark}
+                />
+                <Text style={[styles.roleChipText, isAdmin && styles.roleChipTextAdmin]}>
+                  {roleLabel}
+                </Text>
+              </View>
+
+              <View style={styles.statusChip}>
+                <View style={styles.statusDot} />
+                <Text style={styles.statusText}>Active</Text>
+              </View>
+            </View>
           </View>
         </View>
 
-        <Text style={styles.heroName}>{fullName || user?.username}</Text>
-        {!!fullName && <Text style={styles.heroHandle}>@{user?.username}</Text>}
-        {!!user?.email && <Text style={styles.heroEmail}>{user.email}</Text>}
-
-        <View style={styles.heroBadges}>
-          <View style={styles.roleBadge}>
-            <Ionicons name="shield-checkmark" size={12} color="#60B4FF" />
-            <Text style={styles.roleBadgeText}>{roleLabel}</Text>
+        {/* Info strip */}
+        <View style={styles.profileFooter}>
+          <View style={styles.footerItem}>
+            <Ionicons name="mail-outline" size={14} color={colors.muted} />
+            <Text style={styles.footerItemText} numberOfLines={1}>
+              {user?.email || 'No email on file'}
+            </Text>
           </View>
-          {/* Only for customers, and only when the API actually sent one — a
-              balance chip reading "Rs 0" on an account that has no ledger at
-              all would be inventing information. */}
           {isCustomer && user?.account_balance != null && (
-            <View style={styles.roleBadge}>
-              <Ionicons name="wallet" size={12} color="#60B4FF" />
-              <Text style={styles.roleBadgeText}>Rs {user.account_balance}</Text>
+            <View style={[styles.footerItem, { justifyContent: 'flex-end' }]}>
+              <Ionicons name="wallet-outline" size={14} color={colors.success} />
+              <Text style={[styles.footerItemText, { color: colors.success, fontWeight: '700' }]}>
+                PKR {user.account_balance}
+              </Text>
             </View>
           )}
         </View>
       </Animated.View>
 
       {/* ── Personal information ─────────────────────────────────────────── */}
+      {/* A rider's field list comes from the server. If that request failed and
+          nothing was ever loaded, say so here rather than showing no section. */}
+      {isStaff && !config && configError !== null && (
+        <Animated.View style={[styles.section, riseStyle(infoIn)]}>
+          <View style={styles.sectionHeader}>
+            <IconChip name="person" color={BRAND_BLUE} bg={colors.primaryTint} />
+            <Text style={styles.sectionTitle}>{t('personal_info', 'Personal Information')}</Text>
+          </View>
+          <ErrorState
+            title="Could not load your details"
+            message={readableReason(configError)}
+            style={styles.stateInCard}
+            onRetry={() => {
+              // Back to a first load, so the spinner shows while it retries.
+              hasLoadedConfig.current = false;
+              setConfigError(null);
+              setConfigNonce(n => n + 1);
+            }}
+          />
+        </Animated.View>
+      )}
+
       {visibleFields.length > 0 && (
         <Animated.View style={[styles.section, riseStyle(infoIn)]}>
           <View style={styles.sectionHeader}>
-            <IconChip name="person" color={BRAND_BLUE} bg="#E9F2FF" />
+            <IconChip name="person" color={BRAND_BLUE} bg={colors.primaryTint} />
             <Text style={styles.sectionTitle}>{t('personal_info', 'Personal Information')}</Text>
             {hasAnyEditable && (
               <TouchableOpacity
                 onPress={isEditing ? handleCancelEdit : () => setIsEditing(true)}
-                style={styles.editBtn}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                style={[styles.editBtn, isEditing && styles.editBtnMuted]}
+                hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
                 accessibilityRole="button"
                 accessibilityLabel={isEditing ? 'Cancel editing' : 'Edit profile'}
               >
                 <Ionicons
                   name={isEditing ? 'close' : 'create-outline'}
                   size={17}
-                  color={isEditing ? '#8a929b' : BRAND_BLUE}
+                  color={isEditing ? colors.textSecondary : colors.primaryDark}
                 />
                 <Text style={[styles.editBtnText, isEditing && styles.editBtnTextMuted]}>
                   {isEditing ? t('cancel', 'Cancel') : t('edit', 'Edit')}
@@ -626,7 +727,7 @@ export const ProfileScreen = () => {
                     value={value}
                     onChangeText={(v) => setForm((p) => ({ ...p, [key]: v }))}
                     placeholder={cfg.label}
-                    placeholderTextColor="#000"
+                    placeholderTextColor={colors.muted}
                     multiline={multiline}
                     numberOfLines={multiline ? 2 : 1}
                     keyboardType={keyboard ?? 'default'}
@@ -643,7 +744,7 @@ export const ProfileScreen = () => {
 
           {isEditing && (
             <TouchableOpacity style={styles.saveButton} onPress={handleUpdate} activeOpacity={0.9}>
-              <Ionicons name="checkmark-circle" size={18} color="#fff" />
+              <Ionicons name="checkmark-circle" size={20} color={colors.white} />
               <Text style={styles.saveButtonText}>{t('save_changes', 'Save Changes')}</Text>
             </TouchableOpacity>
           )}
@@ -658,7 +759,7 @@ export const ProfileScreen = () => {
       {isCustomer && (
         <Animated.View style={[styles.section, riseStyle(addressIn)]}>
           <View style={styles.sectionHeader}>
-            <IconChip name="location" color="#00A37A" bg="#E4F7F1" />
+            <IconChip name="location" color={colors.success} bg={colors.successBg} />
             <Text style={styles.sectionTitle}>{t('delivery_address', 'Delivery Address')}</Text>
           </View>
 
@@ -672,7 +773,7 @@ export const ProfileScreen = () => {
             <View style={styles.addressBody}>
               {addressLoading ? (
                 <Text style={styles.addressMuted}>Loading…</Text>
-              ) : addressError ? (
+              ) : addressError !== null ? (
                 <>
                   <Text style={styles.addressTitle}>
                     {t('delivery_addresses', 'Delivery Addresses')}
@@ -680,23 +781,20 @@ export const ProfileScreen = () => {
                   <Text style={styles.addressMuted}>
                     Could not load them just now — tap to open.
                   </Text>
+                  <Text style={styles.addressReason}>{readableReason(addressError)}</Text>
                 </>
               ) : defaultAddress ? (
                 <>
                   <View style={styles.addressTitleRow}>
                     <Text style={styles.addressTitle}>{defaultAddress.display_label}</Text>
-                    {defaultAddress.is_default && (
-                      <View style={styles.defaultBadge}>
-                        <Text style={styles.defaultBadgeText}>Default</Text>
-                      </View>
-                    )}
+                    {defaultAddress.is_default && <StatusPill label="Default" tone="primary" />}
                   </View>
                   <Text style={styles.addressLine}>{defaultAddress.address}</Text>
                   <View style={styles.addressMetaRow}>
                     <Ionicons
                       name={defaultAddress.has_pin ? 'navigate-circle' : 'navigate-circle-outline'}
-                      size={13}
-                      color={defaultAddress.has_pin ? '#00A37A' : '#b6bcc4'}
+                      size={15}
+                      color={defaultAddress.has_pin ? colors.success : colors.muted}
                     />
                     <Text style={styles.addressMeta}>
                       {defaultAddress.has_pin ? 'Map pin set' : 'No map pin'}
@@ -713,7 +811,7 @@ export const ProfileScreen = () => {
                 </>
               )}
             </View>
-            <Ionicons name="chevron-forward" size={18} color="#c7cdd4" />
+            <Ionicons name="chevron-forward" size={20} color={colors.muted} />
           </TouchableOpacity>
         </Animated.View>
       )}
@@ -726,7 +824,7 @@ export const ProfileScreen = () => {
       {isAdmin && (
         <Animated.View style={[styles.section, riseStyle(locationIn)]}>
           <View style={styles.sectionHeader}>
-            <IconChip name="navigate" color="#00A37A" bg="#E4F7F1" />
+            <IconChip name="navigate" color={colors.success} bg={colors.successBg} />
             <Text style={styles.sectionTitle}>Work Place Location</Text>
           </View>
 
@@ -745,7 +843,7 @@ export const ProfileScreen = () => {
               onSubmitEditing={saveLabel}
               returnKeyType="done"
               placeholder={businessDefault}
-              placeholderTextColor="#000"
+              placeholderTextColor={colors.muted}
               maxLength={120}
             />
             <Text style={styles.fieldHint}>
@@ -762,7 +860,7 @@ export const ProfileScreen = () => {
             <Ionicons
               name={pin ? 'location' : 'location-outline'}
               size={15}
-              color={pin ? '#00A37A' : '#b6bcc4'}
+              color={pin ? colors.success : colors.muted}
             />
             <Text style={[styles.pinValue, pin ? styles.pinValueMono : styles.pinValueEmpty]}>
               {pin ? formatPin(pin) : 'No location saved yet.'}
@@ -778,8 +876,8 @@ export const ProfileScreen = () => {
               activeOpacity={0.9}
             >
               {locating
-                ? <ActivityIndicator size="small" color="#fff" />
-                : <Ionicons name="locate" size={16} color="#fff" />}
+                ? <ActivityIndicator size="small" color={colors.white} />
+                : <Ionicons name="locate" size={18} color={colors.white} />}
               <Text style={styles.primaryPillText}>
                 {locating ? 'Finding you…' : 'Use my current location'}
               </Text>
@@ -792,7 +890,7 @@ export const ProfileScreen = () => {
                 disabled={pinSaving}
                 activeOpacity={0.7}
               >
-                <Ionicons name="trash-outline" size={15} color="#8a929b" />
+                <Ionicons name="trash-outline" size={16} color={colors.textSecondary} />
                 <Text style={styles.ghostPillText}>Clear</Text>
               </TouchableOpacity>
             )}
@@ -816,7 +914,7 @@ export const ProfileScreen = () => {
             accessibilityRole="button"
             accessibilityLabel="Share work place location"
           >
-            <Ionicons name="share-social" size={16} color={BRAND_BLUE} />
+            <Ionicons name="share-social" size={18} color={colors.primaryDark} />
             <Text style={styles.shareText}>Share this location</Text>
           </TouchableOpacity>
         </Animated.View>
@@ -828,7 +926,7 @@ export const ProfileScreen = () => {
       {urduEnabled && (
       <Animated.View style={[styles.section, riseStyle(langIn)]}>
         <View style={styles.sectionHeader}>
-          <IconChip name="language" color="#7A5AF8" bg="#EFEBFE" />
+          <IconChip name="language" color={colors.info} bg={colors.infoBg} />
           <Text style={styles.sectionTitle}>{t('language_settings', 'Language Settings')}</Text>
         </View>
         <View style={styles.segment}>
@@ -858,32 +956,34 @@ export const ProfileScreen = () => {
         {canWhatsApp(business?.phone) && (
           <MenuRow
             icon="logo-whatsapp"
-            color="#25D366"
-            bg="#E6F9EE"
+            color={colors.ink}
+            bg={colors.whatsapp}
             label={t('contact_whatsapp', 'Contact us on WhatsApp')}
             onPress={() => openWhatsApp(
               business?.phone,
               `Hello ${business?.name || 'Century Sip'}, I need help with my account.`,
             )}
-            divided
           />
         )}
         {/* No "Delivery Addresses" row here — the card above already opens the
             book, and two entry points to one screen is just clutter. */}
+        {/* A rule goes above every row that has one before it, never above the
+            first row of the card. */}
         <MenuRow
           icon="chatbubbles"
-          color="#F5A524"
-          bg="#FEF3E2"
+          color={colors.warning}
+          bg={colors.warningBg}
           label={t('support_complaints', 'Support & Complaints')}
           onPress={() => navigation.navigate('Complaints')}
-          divided
+          divided={canWhatsApp(business?.phone)}
         />
         <MenuRow
           icon="lock-closed"
-          color="#5B6B7C"
-          bg="#EDF1F5"
+          color={colors.primary}
+          bg={colors.primaryTint}
           label="Change Password"
           onPress={() => setShowPasswordModal(true)}
+          divided
         />
       </Animated.View>
 
@@ -892,65 +992,84 @@ export const ProfileScreen = () => {
           mis-tap. */}
       <Animated.View style={riseStyle(actionsIn)}>
         <TouchableOpacity style={styles.logoutButton} onPress={confirmLogout} activeOpacity={0.7}>
-          <Ionicons name="log-out-outline" size={18} color="#FF3B30" />
+          <Ionicons name="log-out-outline" size={20} color={colors.danger} />
           <Text style={styles.logoutButtonText}>{t('logout', 'Logout')}</Text>
         </TouchableOpacity>
       </Animated.View>
 
-      {/* ── Change Password Modal ────────────────────────────────────────── */}
-      <Modal visible={showPasswordModal} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
+      {/* Scroll room under Logout for the floating WhatsApp button. The scroll
+          view sets its own bottom padding, so padding on the content container
+          would be overwritten; a spacer is not. */}
+      <View style={styles.floatingButtonClearance} />
+
+      {/* ── Change Password Modal ────────────────────────────────────────────
+          The sheet rides above the keyboard (a Modal is its own window, so the
+          screen's keyboard handling does not reach it) and its fields scroll,
+          so on a short phone the third box and the button are still reachable. */}
+      <Modal
+        visible={showPasswordModal}
+        animationType="slide"
+        transparent
+        onRequestClose={closePasswordModal}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <View style={[styles.modalCard, { paddingBottom: Math.max(insets.bottom, 12) + 24 }]}>
             <View style={styles.grabber} />
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Change Password</Text>
               <TouchableOpacity
-                onPress={() => { setShowPasswordModal(false); setOldPassword(''); setNewPassword(''); setConfirmPassword(''); }}
+                onPress={closePasswordModal}
+                style={styles.modalClose}
                 accessibilityRole="button"
                 accessibilityLabel="Close"
               >
-                <Ionicons name="close" size={24} color="#8a929b" />
+                <Ionicons name="close" size={24} color={colors.muted} />
               </TouchableOpacity>
             </View>
-            {[
-              { label: 'Current Password', val: oldPassword, set: setOldPassword },
-              { label: 'New Password', val: newPassword, set: setNewPassword },
-              { label: 'Confirm New Password', val: confirmPassword, set: setConfirmPassword },
-            ].map(({ label, val, set }) => (
-              <View key={label} style={styles.modalField}>
-                <Text style={styles.fieldLabel}>{label}</Text>
-                <TextInput
-                  style={[styles.input, !!pwErrors[label] && styles.inputInvalid]}
-                  value={val}
-                  onChangeText={(v) => {
-                    set(v);
-                    if (pwErrors[label]) {
-                      setPwErrors((e) => {
-                        const next = { ...e };
-                        delete next[label];
-                        return next;
-                      });
-                    }
-                  }}
-                  secureTextEntry
-                  placeholder={label}
-                  placeholderTextColor="#000"
-                />
-                <FieldError message={pwErrors[label]} />
-              </View>
-            ))}
-            <TouchableOpacity
-              style={[styles.saveButton, passwordLoading && styles.disabledButton]}
-              onPress={handleChangePassword}
-              disabled={passwordLoading}
-              activeOpacity={0.9}
-            >
-              {passwordLoading
-                ? <ActivityIndicator color="#fff" />
-                : <Text style={styles.saveButtonText}>Update Password</Text>}
-            </TouchableOpacity>
+            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              {[
+                { label: 'Current Password', val: oldPassword, set: setOldPassword },
+                { label: 'New Password', val: newPassword, set: setNewPassword },
+                { label: 'Confirm New Password', val: confirmPassword, set: setConfirmPassword },
+              ].map(({ label, val, set }) => (
+                <View key={label} style={styles.modalField}>
+                  <Text style={styles.fieldLabel}>{label}</Text>
+                  <TextInput
+                    style={[styles.input, !!pwErrors[label] && styles.inputInvalid]}
+                    value={val}
+                    onChangeText={(v) => {
+                      set(v);
+                      if (pwErrors[label]) {
+                        setPwErrors((e) => {
+                          const next = { ...e };
+                          delete next[label];
+                          return next;
+                        });
+                      }
+                    }}
+                    secureTextEntry
+                    placeholder={label}
+                    placeholderTextColor={colors.muted}
+                  />
+                  <FieldError message={pwErrors[label]} />
+                </View>
+              ))}
+              <TouchableOpacity
+                style={[styles.saveButton, passwordLoading && styles.disabledButton]}
+                onPress={handleChangePassword}
+                disabled={passwordLoading}
+                activeOpacity={0.9}
+              >
+                {passwordLoading
+                  ? <ActivityIndicator color={colors.white} />
+                  : <Text style={styles.saveButtonText}>Update Password</Text>}
+              </TouchableOpacity>
+            </ScrollView>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </KeyboardAwareScrollView>
   );
@@ -958,207 +1077,326 @@ export const ProfileScreen = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: PAGE_BG },
-  // Clearance for the floating WhatsApp button, which parks 96px above the
-  // bottom inset and is 56px tall — it therefore covers the last ~90px of this
-  // viewport. Without this the scroll ends flush and Logout, being the very
-  // last row, sits underneath it with nothing left to scroll.
-  scrollContent: { paddingBottom: 96, paddingHorizontal: 14, paddingTop: 14 },
+  // No bottom padding here: KeyboardAwareScrollView sets its own and would
+  // overwrite it. The clearance for the floating button is the spacer below.
+  scrollContent: { paddingHorizontal: pagePadding, paddingTop: 4 },
+  // The floating WhatsApp button parks 96px above the bottom inset and is 56px
+  // tall — it therefore covers the last ~90px of this viewport. Without this the
+  // scroll ends flush and Logout, being the very last row, sits underneath it
+  // with nothing left to scroll. 64 here plus the scroll view's own 32 = 96.
+  floatingButtonClearance: { height: 64 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: PAGE_BG },
 
-  // ── Hero ──────────────────────────────────────────────────────────────────
-  hero: {
-    backgroundColor: BRAND_DARK,
-    borderRadius: 24,
+  // ── Top Bar ───────────────────────────────────────────────────────────────
+  topBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 26,
-    paddingHorizontal: 20,
-    marginBottom: 14,
-    overflow: 'hidden',
-    shadowColor: BRAND_DARK,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.22,
-    shadowRadius: 16,
-    elevation: 8,
+    paddingBottom: 14,
   },
-  heroCircle1: {
-    position: 'absolute', width: 210, height: 210, borderRadius: 105,
-    backgroundColor: `${BRAND_BLUE}1A`, top: -80, right: -70,
+  topBarTextWrap: { flex: 1 },
+  topBarTitle: {
+    fontSize: 26,
+    fontWeight: '800',
+    color: colors.ink,
+    letterSpacing: -0.5,
   },
-  heroCircle2: {
-    position: 'absolute', width: 150, height: 150, borderRadius: 75,
-    backgroundColor: `${BRAND_BLUE}12`, bottom: -60, left: -50,
+  brandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 2,
   },
-  avatarRing: {
-    width: 92, height: 92, borderRadius: 46,
-    borderWidth: 2, borderColor: `${BRAND_BLUE}55`,
-    alignItems: 'center', justifyContent: 'center',
-    marginBottom: 14,
+  brandSubtitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  topLogoutBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.line,
+    ...shadow.card,
+  },
+
+  // ── Profile Identity Card ──────────────────────────────────────────────────
+  profileCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.xl,
+    padding: 16,
+    marginBottom: space.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+    ...shadow.card,
+  },
+  profileCardMain: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  avatarWrap: {
+    position: 'relative',
   },
   avatar: {
-    width: 72, height: 72, borderRadius: 36,
-    backgroundColor: BRAND_BLUE,
-    alignItems: 'center', justifyContent: 'center',
-    shadowColor: BRAND_BLUE,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.5,
-    shadowRadius: 12,
-    elevation: 10,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadow.card,
   },
-  avatarText: { color: '#fff', fontSize: 26, fontWeight: '800', letterSpacing: 0.5 },
-  heroName: { fontSize: 21, fontWeight: '800', color: '#fff', letterSpacing: -0.3 },
-  heroHandle: { fontSize: 13, color: 'rgba(255,255,255,0.45)', marginTop: 2 },
-  heroEmail: { fontSize: 13, color: 'rgba(255,255,255,0.6)', marginTop: 6 },
-  heroBadges: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14, justifyContent: 'center' },
-  roleBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    backgroundColor: 'rgba(255,255,255,0.09)',
-    borderRadius: 20, paddingHorizontal: 11, paddingVertical: 5,
+  avatarText: {
+    color: colors.white,
+    fontSize: 22,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
-  roleBadgeText: { fontSize: 12, color: 'rgba(255,255,255,0.8)', fontWeight: '600' },
+  avatarBadge: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: colors.primary,
+    borderWidth: 2,
+    borderColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarBadgeAdmin: {
+    backgroundColor: colors.sun,
+  },
+  profileMeta: {
+    flex: 1,
+    minWidth: 0,
+  },
+  profileName: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: colors.ink,
+    letterSpacing: -0.3,
+  },
+  profileHandle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.muted,
+    marginTop: 1,
+  },
+  chipsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
+  },
+  roleChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radius.pill,
+    backgroundColor: colors.primaryTint,
+  },
+  roleChipAdmin: {
+    backgroundColor: colors.sun,
+  },
+  roleChipText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: colors.primaryDark,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  roleChipTextAdmin: {
+    color: colors.ink,
+  },
+  statusChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radius.pill,
+    backgroundColor: colors.successBg,
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.success,
+  },
+  statusText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.success,
+  },
+  profileFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.lineSoft,
+    gap: 12,
+  },
+  footerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+    minWidth: 0,
+  },
+  footerItemText: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    fontWeight: '500',
+  },
 
   // ── Sections ──────────────────────────────────────────────────────────────
   section: {
-    backgroundColor: '#fff',
-    borderRadius: 18,
-    padding: 18,
-    marginBottom: 14,
-    shadowColor: '#0D1B2A',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
+    ...card,
+    padding: 16,
+    marginBottom: 12,
   },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 },
-  sectionTitle: { flex: 1, fontSize: 15, fontWeight: '700', color: '#1a2530' },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8 },
+  sectionTitle: { flex: 1, fontSize: 16, fontWeight: '800', color: colors.ink },
   chip: {
-    width: 32, height: 32, borderRadius: 10,
+    width: 36, height: 36, borderRadius: radius.sm,
     alignItems: 'center', justifyContent: 'center',
   },
-  editBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  editBtnText: { fontSize: 13, fontWeight: '700', color: BRAND_BLUE },
-  editBtnTextMuted: { color: '#8a929b' },
+  editBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    height: 36, paddingHorizontal: 14, borderRadius: radius.pill,
+    backgroundColor: colors.primaryTint,
+  },
+  editBtnMuted: { backgroundColor: colors.lineSoft },
+  editBtnText: { fontSize: 14, fontWeight: '800', color: colors.primaryDark },
+  editBtnTextMuted: { color: colors.textSecondary },
+  // An ErrorState sitting inside a section card needs less air than a full page.
+  stateInCard: { paddingVertical: 12, paddingHorizontal: 0 },
 
   // ── Fields ────────────────────────────────────────────────────────────────
-  divided: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#e9edf1' },
+  divided: { borderTopWidth: 1, borderTopColor: colors.lineSoft },
   fieldRow: { paddingVertical: 12 },
-  fieldLabel: { fontSize: 12, color: '#8a929b', fontWeight: '600', marginBottom: 5 },
-  fieldValue: { fontSize: 15, color: '#1a2530', lineHeight: 21 },
-  fieldValueEmpty: { color: '#c2c8ce' },
+  fieldLabel: { fontSize: 12, color: colors.muted, fontWeight: '700', marginBottom: 4 },
+  fieldValue: { fontSize: 16, color: colors.ink, lineHeight: 22 },
+  fieldValueEmpty: { color: colors.muted },
   input: {
-    borderWidth: 1.5, borderColor: '#e4e9ee', borderRadius: 12,
-    paddingHorizontal: 12, paddingVertical: 11,
-    fontSize: 15, color: '#000', backgroundColor: '#fafbfc',
+    minHeight: 48,
+    borderWidth: 1, borderColor: colors.line, borderRadius: radius.md,
+    paddingHorizontal: 14, paddingVertical: 12,
+    fontSize: 16, color: colors.ink, backgroundColor: colors.surfaceTint,
   },
-  inputInvalid: { borderColor: '#D93025', backgroundColor: '#FFF7F7' },
-  multilineInput: { minHeight: 68, textAlignVertical: 'top' },
+  inputInvalid: { borderColor: colors.danger, backgroundColor: colors.dangerBg },
+  multilineInput: { minHeight: 72, textAlignVertical: 'top' },
   // ── Work place location ───────────────────────────────────────────────────
-  labelField: { marginTop: 12 },
+  labelField: { marginTop: 8 },
   labelHeadRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  fieldHint: { fontSize: 11.5, color: '#8a929b', marginTop: 6, lineHeight: 16 },
-  map: { height: 190, borderRadius: 14, overflow: 'hidden', marginTop: 14 },
-  pinRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 12 },
-  pinValue: { flex: 1, fontSize: 13, color: '#1a2530' },
+  fieldHint: { fontSize: 12, color: colors.muted, marginTop: 6, lineHeight: 16 },
+  map: { height: 190, borderRadius: radius.md, overflow: 'hidden', marginTop: 14 },
+  pinRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
+  pinValue: { flex: 1, fontSize: 14, color: colors.ink },
   // Coordinates only — tabular figures stop the digits jittering as they update.
   pinValueMono: { fontVariant: ['tabular-nums'] },
-  pinValueEmpty: { color: '#8a929b' },
+  pinValueEmpty: { color: colors.muted },
   pinActions: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
   primaryPill: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    backgroundColor: BRAND_BLUE, borderRadius: 12, paddingVertical: 13,
-    shadowColor: BRAND_BLUE,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.28,
-    shadowRadius: 8,
-    elevation: 4,
+    backgroundColor: BRAND_BLUE, borderRadius: radius.md, height: 48,
   },
   pillBusy: { opacity: 0.65 },
-  primaryPillText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  primaryPillText: { color: colors.white, fontSize: 14, fontWeight: '800' },
   ghostPill: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    borderRadius: 12, paddingVertical: 13, paddingHorizontal: 14,
-    borderWidth: 1, borderColor: '#e4e9ee', backgroundColor: '#fafbfc',
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    borderRadius: radius.md, height: 48, paddingHorizontal: 16,
+    borderWidth: 1.5, borderColor: colors.muted, backgroundColor: colors.surface,
   },
-  ghostPillText: { fontSize: 13, fontWeight: '600', color: '#8a929b' },
+  ghostPillText: { fontSize: 14, fontWeight: '700', color: colors.ink },
   noticeBox: {
-    marginTop: 12, padding: 12, borderRadius: 12, gap: 6,
-    backgroundColor: '#FFF8E5', borderWidth: 1, borderColor: '#FFE2A8',
+    marginTop: 12, padding: 12, borderRadius: radius.md, gap: 6,
+    backgroundColor: colors.warningBg, borderWidth: 1, borderColor: colors.warningLine,
   },
-  noticeText: { fontSize: 13, color: '#8a6100', lineHeight: 18 },
-  noticeLink: { fontSize: 13, fontWeight: '700', color: BRAND_BLUE },
+  noticeText: { fontSize: 14, color: colors.warningText, lineHeight: 20 },
+  noticeLink: { fontSize: 14, fontWeight: '800', color: colors.primaryDark, paddingVertical: 10 },
   shareWide: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
-    marginTop: 12, backgroundColor: '#E9F2FF', borderRadius: 12, paddingVertical: 12,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    marginTop: 12, backgroundColor: colors.primaryTint, borderRadius: radius.md, height: 48,
   },
-  shareText: { fontSize: 13.5, fontWeight: '700', color: BRAND_BLUE },
+  shareText: { fontSize: 14, fontWeight: '800', color: colors.primaryDark },
 
   saveButton: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    backgroundColor: BRAND_BLUE, paddingVertical: 14, borderRadius: 14,
+    backgroundColor: BRAND_BLUE, height: 52, borderRadius: radius.md,
     marginTop: 16,
-    shadowColor: BRAND_BLUE,
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.3,
-    shadowRadius: 9,
-    elevation: 5,
   },
-  saveButtonText: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  disabledButton: { backgroundColor: '#a0c4ff', shadowOpacity: 0 },
+  saveButtonText: { color: colors.white, fontSize: 16, fontWeight: '800' },
+  disabledButton: { backgroundColor: colors.primarySoft },
 
   // ── Address card ──────────────────────────────────────────────────────────
   addressCard: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: '#fafbfc', borderRadius: 14,
-    borderWidth: 1, borderColor: '#eef2f5',
-    padding: 14, marginTop: 8,
+    backgroundColor: colors.surfaceTint, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.line,
+    padding: 14, marginTop: 4, minHeight: 64,
   },
   addressBody: { flex: 1 },
-  addressTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  addressTitle: { fontSize: 15, fontWeight: '700', color: '#1a2530' },
-  addressLine: { fontSize: 13.5, color: '#5b6b7c', marginTop: 4, lineHeight: 19 },
-  addressMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 7 },
-  addressMeta: { fontSize: 12, color: '#8a929b' },
-  addressMuted: { fontSize: 13, color: '#8a929b', marginTop: 3, lineHeight: 18 },
-  defaultBadge: { backgroundColor: '#E9F2FF', borderRadius: 9, paddingHorizontal: 7, paddingVertical: 2 },
-  defaultBadgeText: { fontSize: 10.5, fontWeight: '800', color: BRAND_BLUE, letterSpacing: 0.2 },
+  addressTitleRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
+  addressTitle: { fontSize: 16, fontWeight: '800', color: colors.ink },
+  addressLine: { fontSize: 14, color: colors.textSecondary, marginTop: 4, lineHeight: 20 },
+  addressMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
+  addressMeta: { fontSize: 12, color: colors.muted },
+  addressMuted: { fontSize: 14, color: colors.muted, marginTop: 3, lineHeight: 20 },
+  addressReason: { fontSize: 12, color: colors.danger, marginTop: 4, lineHeight: 16 },
 
   // ── Language segment ──────────────────────────────────────────────────────
   segment: {
-    flexDirection: 'row', marginTop: 10,
-    backgroundColor: '#f0f3f6', borderRadius: 12, padding: 4,
+    flexDirection: 'row', marginTop: 4, gap: 8,
   },
-  segmentItem: { flex: 1, paddingVertical: 9, alignItems: 'center', borderRadius: 9 },
-  segmentItemActive: {
-    backgroundColor: '#fff',
-    shadowColor: '#0D1B2A', shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1, shadowRadius: 3, elevation: 2,
+  segmentItem: {
+    flex: 1, height: 44, alignItems: 'center', justifyContent: 'center',
+    borderRadius: radius.pill, backgroundColor: colors.surface,
+    borderWidth: 1, borderColor: colors.line,
   },
-  segmentText: { fontSize: 14, color: '#5b6b7c', fontWeight: '600' },
-  segmentTextActive: { color: BRAND_BLUE, fontWeight: '800' },
+  segmentItemActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  segmentText: { fontSize: 14, color: colors.ink, fontWeight: '700' },
+  segmentTextActive: { color: colors.white, fontWeight: '800' },
 
   // ── Menu ──────────────────────────────────────────────────────────────────
-  menuRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14 },
-  menuLabel: { flex: 1, fontSize: 15, color: '#1a2530', fontWeight: '500' },
+  menuRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 56, paddingVertical: 10 },
+  menuLabel: { flex: 1, fontSize: 16, color: colors.ink, fontWeight: '600' },
 
   // ── Logout ────────────────────────────────────────────────────────────────
   logoutButton: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    backgroundColor: '#fff', borderRadius: 16, paddingVertical: 15,
-    borderWidth: 1, borderColor: '#ffd9d7',
+    backgroundColor: colors.surface, borderRadius: radius.md, height: 52,
+    borderWidth: 1.5, borderColor: colors.dangerLine,
   },
-  logoutButtonText: { color: '#FF3B30', fontSize: 15, fontWeight: '700' },
+  logoutButtonText: { color: colors.danger, fontSize: 16, fontWeight: '800' },
 
   // ── Modal ─────────────────────────────────────────────────────────────────
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(13,27,42,0.5)', justifyContent: 'flex-end' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(10,31,68,0.5)', justifyContent: 'flex-end' },
   modalCard: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    paddingHorizontal: 22, paddingTop: 10, paddingBottom: 36,
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl,
+    paddingHorizontal: 20, paddingTop: 10, paddingBottom: 36,
+    // Never taller than the screen: the fields inside scroll instead.
+    maxHeight: '92%',
   },
   grabber: {
     alignSelf: 'center', width: 40, height: 4, borderRadius: 2,
-    backgroundColor: '#e4e9ee', marginBottom: 16,
+    backgroundColor: colors.line, marginBottom: 16,
   },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 },
-  modalTitle: { fontSize: 19, fontWeight: '800', color: '#1a2530' },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  modalTitle: { fontSize: 20, fontWeight: '800', color: colors.ink },
+  modalClose: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', marginRight: -8 },
   modalField: { marginBottom: 14 },
 });

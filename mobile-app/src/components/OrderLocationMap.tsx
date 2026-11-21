@@ -1,3 +1,4 @@
+import { colors } from '../theme';
 import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, StyleProp, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -49,7 +50,7 @@ export const OrderLocationMap: React.FC<Props> = ({
   if (!pin) {
     return (
       <View style={[styles.noPin, style]}>
-        <Ionicons name="location-outline" size={16} color="#999" />
+        <Ionicons name="location-outline" size={16} color={colors.muted} />
         <Text style={styles.noPinText}>No map pin saved with this order</Text>
       </View>
     );
@@ -73,7 +74,7 @@ export const OrderLocationMap: React.FC<Props> = ({
                 longitude: pin.longitude,
                 title: pinTitle,
                 description: formatCoordinates(pin),
-                color: '#FF3B30',
+                color: colors.danger,
               }]}
             />
           </View>
@@ -84,7 +85,7 @@ export const OrderLocationMap: React.FC<Props> = ({
         </TouchableOpacity>
       ) : (
         <View style={styles.noKey}>
-          <Ionicons name="map-outline" size={18} color="#999" />
+          <Ionicons name="map-outline" size={18} color={colors.muted} />
           <Text style={styles.noKeyText}>
             Map preview needs GOOGLE_MAPS_API_KEY in mobile-app/.env. The pin below still opens
             in your maps app.
@@ -93,7 +94,7 @@ export const OrderLocationMap: React.FC<Props> = ({
       )}
 
       <View style={styles.coordRow}>
-        <Ionicons name="navigate-circle-outline" size={14} color="#888" />
+        <Ionicons name="navigate-circle-outline" size={14} color={colors.muted} />
         <Text style={styles.coordText} selectable>{formatCoordinates(pin)}</Text>
       </View>
 
@@ -111,7 +112,7 @@ export const OrderLocationMap: React.FC<Props> = ({
           style={[styles.btn, styles.btnGhost, !isRider && styles.btnGrow]}
           onPress={() => void openInMaps(pin)}
         >
-          <Ionicons name="map" size={16} color="#007AFF" />
+          <Ionicons name="map" size={16} color={colors.primary} />
           <Text style={styles.btnGhostText}>Open in Maps</Text>
         </TouchableOpacity>
       </View>
@@ -122,36 +123,36 @@ export const OrderLocationMap: React.FC<Props> = ({
 const styles = StyleSheet.create({
   wrap: { gap: 10 },
 
-  mapClip: { borderRadius: 12, overflow: 'hidden', backgroundColor: '#e9eef3' },
+  mapClip: { borderRadius: 16, overflow: 'hidden', backgroundColor: '#e9eef3' },
   map: { height: 170, width: '100%' },
   mapHint: {
     position: 'absolute', right: 8, bottom: 8,
     flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 16,
     paddingHorizontal: 8, paddingVertical: 4,
   },
-  mapHintText: { color: '#fff', fontSize: 11, fontWeight: '600' },
+  mapHintText: { color: '#fff', fontSize: 12, fontWeight: '600' },
 
   noKey: {
     flexDirection: 'row', alignItems: 'flex-start', gap: 8,
-    backgroundColor: '#f5f5f5', borderRadius: 10, padding: 12,
+    backgroundColor: colors.bg, borderRadius: 14, padding: 12,
   },
-  noKeyText: { flex: 1, fontSize: 12, color: '#888', lineHeight: 17 },
+  noKeyText: { flex: 1, fontSize: 12, color: colors.muted, lineHeight: 17 },
 
   noPin: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  noPinText: { fontSize: 13, color: '#999', fontStyle: 'italic' },
+  noPinText: { fontSize: 13, color: colors.muted, fontStyle: 'italic' },
 
   coordRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  coordText: { fontSize: 12.5, color: '#888', fontVariant: ['tabular-nums'] },
+  coordText: { fontSize: 12.5, color: colors.muted, fontVariant: ['tabular-nums'] },
 
   actions: { flexDirection: 'row', gap: 10 },
   btn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 7, paddingVertical: 12, paddingHorizontal: 16, borderRadius: 10,
+    gap: 7, paddingVertical: 12, paddingHorizontal: 16, borderRadius: 14,
   },
   btnGrow: { flex: 1 },
-  btnPrimary: { backgroundColor: '#007AFF' },
+  btnPrimary: { backgroundColor: colors.primary },
   btnPrimaryText: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  btnGhost: { borderWidth: 1, borderColor: '#007AFF60', backgroundColor: '#007AFF10' },
-  btnGhostText: { color: '#007AFF', fontSize: 14, fontWeight: '600' },
+  btnGhost: { borderWidth: 1, borderColor: colors.primary + '60', backgroundColor: colors.primary + '10' },
+  btnGhostText: { color: colors.primary, fontSize: 14, fontWeight: '600' },
 });

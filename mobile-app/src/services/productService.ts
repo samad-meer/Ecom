@@ -1,6 +1,17 @@
 import { API_URL } from '../constants/config';
 import { Product, Category } from '../types/product';
 
+/** The shared host sometimes answers a read with a 500 that works a second later. */
+const fetchWithRetry = async (url: string, init?: RequestInit): Promise<Response> => {
+  let res = await fetch(url, init);
+  for (const wait of [600, 1500]) {
+    if (res.status < 500) break;
+    await new Promise((resolve) => setTimeout(resolve, wait));
+    res = await fetch(url, init);
+  }
+  return res;
+};
+
 export const ProductService = {
   getAllProducts: async (categoryId?: number): Promise<Product[]> => {
     try {
@@ -11,10 +22,10 @@ export const ProductService = {
       console.log(`Fetching products from ${url}`);
       
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      const timeoutId = setTimeout(() => controller.abort(), 20000);
 
       try {
-        const response = await fetch(url, {
+        const response = await fetchWithRetry(url, {
           signal: controller.signal
         });
         clearTimeout(timeoutId);
@@ -41,7 +52,7 @@ export const ProductService = {
   // hidden ones too. Being explicit makes this deterministic for every caller.
   getCategories: async (): Promise<Category[]> => {
     try {
-      const response = await fetch(`${API_URL}/categories/?active=true`);
+      const response = await fetchWithRetry(`${API_URL}/categories/?active=true`);
       if (!response.ok) {
         throw new Error('Failed to fetch categories');
       }
@@ -54,7 +65,7 @@ export const ProductService = {
 
   getProductById: async (id: number): Promise<Product> => {
     try {
-      const response = await fetch(`${API_URL}/products/${id}/`);
+      const response = await fetchWithRetry(`${API_URL}/products/${id}/`);
       if (!response.ok) {
         throw new Error('Network response was not ok');
       }

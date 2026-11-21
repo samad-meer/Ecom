@@ -1,3 +1,4 @@
+import { colors } from '../theme';
 import React, { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Linking } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
@@ -33,31 +34,31 @@ const LOOKS: Record<TrackingState, Look | null> = {
   // on top of the delivery list was just noise.
   active: null,
   foreground_only: {
-    color: '#FF9500',
+    color: colors.warning,
     icon: 'navigate-circle-outline',
     title: 'Sharing only while the app is open',
     action: 'Fix',
   },
   needs_permission: {
-    color: '#FF3B30',
+    color: colors.danger,
     icon: 'location-outline',
     title: 'Location sharing is OFF',
     action: 'Allow',
   },
   services_off: {
-    color: '#FF3B30',
+    color: colors.danger,
     icon: 'warning-outline',
     title: 'Phone location is switched off',
     action: 'Retry',
   },
   disabled_by_admin: {
-    color: '#8E8E93',
+    color: colors.muted,
     icon: 'eye-off-outline',
     title: 'Location sharing is OFF',
   },
-  unsupported: { color: '#8E8E93', icon: 'phone-portrait-outline', title: 'Location sharing is OFF' },
-  starting: { color: '#007AFF', icon: 'sync-outline', title: 'Starting location sharing…' },
-  off: { color: '#8E8E93', icon: 'location-outline', title: 'Location sharing is OFF' },
+  unsupported: { color: colors.muted, icon: 'phone-portrait-outline', title: 'Location sharing is OFF' },
+  starting: { color: colors.primary, icon: 'sync-outline', title: 'Starting location sharing…' },
+  off: { color: colors.muted, icon: 'location-outline', title: 'Location sharing is OFF' },
 };
 
 export const TrackingStatusBanner: React.FC = () => {
@@ -116,16 +117,16 @@ export const TrackingStatusBanner: React.FC = () => {
 const styles = StyleSheet.create({
   banner: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
-    backgroundColor: 'white', borderRadius: 12, borderLeftWidth: 3,
+    backgroundColor: 'white', borderRadius: 16, borderLeftWidth: 3,
     marginHorizontal: 16, marginTop: 12, padding: 12,
     elevation: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05, shadowRadius: 3,
   },
-  iconWrap: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  iconWrap: { width: 34, height: 34, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   text: { flex: 1 },
   title: { fontSize: 13, fontWeight: '700' },
-  detail: { fontSize: 11, color: '#888', marginTop: 2, lineHeight: 15 },
-  queued: { fontSize: 11, color: '#FF9500', marginTop: 4, lineHeight: 15 },
-  actionBtn: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8 },
+  detail: { fontSize: 12, color: colors.muted, marginTop: 2, lineHeight: 15 },
+  queued: { fontSize: 12, color: colors.warning, marginTop: 4, lineHeight: 15 },
+  actionBtn: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 12 },
   actionText: { color: 'white', fontSize: 12, fontWeight: '700' },
 });

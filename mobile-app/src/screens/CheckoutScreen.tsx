@@ -1,3 +1,4 @@
+import { colors, radius, shadow } from '../theme';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
@@ -10,6 +11,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RootStackParamList } from '../types/navigation';
 import { useCart } from '../context/CartContext';
 import { createOrder } from '../services/orderService';
@@ -42,6 +44,7 @@ const LABEL_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
 export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
   const { items, getCartTotal, clearCart } = useCart();
   const { t } = useLanguage();
+  const insets = useSafeAreaInsets();
 
   // Cash-only business: the method is fixed, kept as a constant so the
   // existing option renderer and the success screen keep working unchanged.
@@ -212,7 +215,7 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
       <View style={[styles.radio, { borderColor: color }]}>
         <View style={[styles.radioInner, { backgroundColor: color }]} />
       </View>
-      <Text style={[styles.paymentLabel, { color, fontWeight: 'bold' }]}>{label}</Text>
+      <Text style={[styles.paymentLabel, { fontWeight: '700' }]}>{label}</Text>
     </View>
   );
 
@@ -220,7 +223,7 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
     if (loadingAddresses) {
       return (
         <View style={styles.stateBox}>
-          <ActivityIndicator color="#0A84FF" />
+          <ActivityIndicator color={colors.primary} />
           <Text style={styles.stateText}>Loading your saved addresses…</Text>
         </View>
       );
@@ -229,7 +232,7 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
     if (addressError) {
       return (
         <View style={styles.errorBox}>
-          <Ionicons name="alert-circle" size={18} color="#D93025" />
+          <Ionicons name="alert-circle" size={18} color={colors.danger} />
           <View style={styles.flex}>
             <Text style={styles.errorText}>{addressError}</Text>
             <TouchableOpacity onPress={loadAddresses}>
@@ -243,12 +246,12 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
     if (!selected) {
       return (
         <View style={styles.stateBox}>
-          <Ionicons name="location-outline" size={30} color="#c8c8c8" />
+          <Ionicons name="location-outline" size={30} color={colors.muted} />
           <Text style={styles.stateText}>
             You have no saved addresses yet. Add one to place this order.
           </Text>
           <TouchableOpacity style={styles.primaryOutlineButton} onPress={() => setShowForm(true)}>
-            <Ionicons name="add" size={17} color="#0A84FF" />
+            <Ionicons name="add" size={17} color={colors.primary} />
             <Text style={styles.primaryOutlineText}>Add delivery address</Text>
           </TouchableOpacity>
         </View>
@@ -259,7 +262,7 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
       <>
         <View style={styles.selectedCard}>
           <View style={styles.selectedIcon}>
-            <Ionicons name={LABEL_ICONS[selected.label] ?? 'location'} size={20} color="#0A84FF" />
+            <Ionicons name={LABEL_ICONS[selected.label] ?? 'location'} size={20} color={colors.primary} />
           </View>
           <View style={styles.flex}>
             <View style={styles.selectedTitleRow}>
@@ -283,11 +286,11 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
 
         <View style={styles.addressActions}>
           <TouchableOpacity style={styles.secondaryButton} onPress={() => setShowPicker(true)}>
-            <Ionicons name="swap-horizontal" size={16} color="#0A84FF" />
+            <Ionicons name="swap-horizontal" size={16} color={colors.primary} />
             <Text style={styles.secondaryButtonText}>Change address</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.secondaryButton} onPress={() => setShowForm(true)}>
-            <Ionicons name="add" size={16} color="#0A84FF" />
+            <Ionicons name="add" size={16} color={colors.primary} />
             <Text style={styles.secondaryButtonText}>Add new address</Text>
           </TouchableOpacity>
         </View>
@@ -335,7 +338,7 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
 
           {pinMoved && (
             <View style={styles.noticeBox}>
-              <Ionicons name="information-circle" size={17} color="#8a6100" />
+              <Ionicons name="information-circle" size={17} color={colors.warningText} />
               <Text style={styles.noticeText}>
                 Pin moved. It is saved to “{selected.display_label}” when you place the order, so
                 this order — and the next one — go to the new spot.
@@ -350,9 +353,9 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
               disabled={locating}
             >
               {locating ? (
-                <ActivityIndicator size="small" color="#0A84FF" />
+                <ActivityIndicator size="small" color={colors.primary} />
               ) : (
-                <Ionicons name="locate" size={16} color="#0A84FF" />
+                <Ionicons name="locate" size={16} color={colors.primary} />
               )}
               <Text style={styles.secondaryButtonText}>
                 {locating ? 'Finding you…' : 'Use Current Location'}
@@ -361,7 +364,7 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
 
             {pinMoved && (
               <TouchableOpacity style={styles.resetButton} onPress={() => setPin(savedPin)}>
-                <Ionicons name="refresh" size={15} color="#8a8a8a" />
+                <Ionicons name="refresh" size={15} color={colors.muted} />
                 <Text style={styles.resetText}>Reset to saved</Text>
               </TouchableOpacity>
             )}
@@ -369,7 +372,7 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
 
           {!!locationError && (
             <View style={styles.noticeBox}>
-              <Ionicons name="warning" size={17} color="#8a6100" />
+              <Ionicons name="warning" size={17} color={colors.warningText} />
               <View style={styles.flex}>
                 <Text style={styles.noticeText}>{locationError.message}</Text>
                 {locationError.canOpenSettings && (
@@ -388,21 +391,21 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
         <Text style={styles.sectionTitle}>{t('payment_method', 'Payment Method')}</Text>
 
         {/* Cash only — nothing to choose */}
-        {renderPaymentOption('COD', t('cod_label', 'Cash on Delivery'), '#2ecc71')}
+        {renderPaymentOption('COD', t('cod_label', 'Cash on Delivery'), colors.primary)}
         <Text style={styles.helperText}>
           {t('cod_only_note', 'Pay the rider in cash when your order arrives.')}
         </Text>
       </View>
 
       <TouchableOpacity
-        style={[styles.placeOrderButton, (placing || !selected) && styles.disabledButton]}
+        style={[styles.placeOrderButton, !selected && styles.disabledButton, placing && styles.buttonBusy]}
         onPress={handlePlaceOrder}
         disabled={placing || !selected}
       >
         {placing ? (
-          <ActivityIndicator color="#fff" />
+          <ActivityIndicator color={colors.white} />
         ) : (
-          <Text style={styles.placeOrderText}>
+          <Text style={[styles.placeOrderText, !selected && styles.placeOrderTextDisabled]}>
             {t('place_order', 'Place Order')}
           </Text>
         )}
@@ -418,11 +421,16 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
         onRequestClose={() => setShowPicker(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
+          {/* A Modal is its own window: the stack's bottom inset does not reach it. */}
+          <View style={[styles.modalCard, { paddingBottom: 24 + insets.bottom }]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Choose an address</Text>
-              <TouchableOpacity onPress={() => setShowPicker(false)}>
-                <Ionicons name="close" size={24} color="#333" />
+              <TouchableOpacity
+                onPress={() => setShowPicker(false)}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                accessibilityLabel="Close"
+              >
+                <Ionicons name="close" size={24} color={colors.ink} />
               </TouchableOpacity>
             </View>
 
@@ -438,7 +446,7 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
                     <Ionicons
                       name={LABEL_ICONS[address.label] ?? 'location'}
                       size={19}
-                      color={active ? '#0A84FF' : '#888'}
+                      color={active ? colors.primary : colors.muted}
                     />
                     <View style={styles.flex}>
                       <View style={styles.selectedTitleRow}>
@@ -454,11 +462,11 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
                       <Text style={styles.pickerAddress}>{address.address}</Text>
                       {address.has_pin && (
                         <Text style={styles.pickerPin}>
-                          <Ionicons name="location" size={11} color="#8a8a8a" /> pin saved
+                          <Ionicons name="location" size={11} color={colors.muted} /> pin saved
                         </Text>
                       )}
                     </View>
-                    {active && <Ionicons name="checkmark-circle" size={20} color="#0A84FF" />}
+                    {active && <Ionicons name="checkmark-circle" size={20} color={colors.primary} />}
                   </TouchableOpacity>
                 );
               })}
@@ -471,7 +479,7 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
                 setShowForm(true);
               }}
             >
-              <Ionicons name="add-circle-outline" size={20} color="#0A84FF" />
+              <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
               <Text style={styles.pickerAddText}>Add new address</Text>
             </TouchableOpacity>
           </View>
@@ -493,30 +501,28 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: colors.bg,
     padding: 16,
   },
   flex: { flex: 1 },
   section: {
-    backgroundColor: '#fff',
-    padding: 16,
-    borderRadius: 8,
+    backgroundColor: colors.surface,
+    padding: 18,
+    borderRadius: radius.xl - 4,
     marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    borderWidth: 1,
+    borderColor: colors.line,
+    ...shadow.card,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 12,
-    color: '#333',
+    color: colors.ink,
   },
   sectionHint: {
     fontSize: 12,
-    color: '#888',
+    color: colors.muted,
     marginTop: -6,
     marginBottom: 12,
     lineHeight: 17,
@@ -528,13 +534,13 @@ const styles = StyleSheet.create({
   },
   itemText: {
     fontSize: 14,
-    color: '#555',
+    color: colors.textSecondary,
     flex: 1,
     marginRight: 8,
   },
   itemPrice: {
     fontSize: 14,
-    color: '#333',
+    color: colors.ink,
     fontWeight: '600',
   },
   totalRow: {
@@ -543,88 +549,88 @@ const styles = StyleSheet.create({
     marginTop: 12,
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: '#eee',
+    borderTopColor: colors.line,
   },
   totalLabel: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#333',
+    color: colors.ink,
   },
   totalAmount: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#2ecc71',
+    fontSize: 22,
+    fontWeight: '800',
+    color: colors.ink,
   },
 
   // Address states
   stateBox: { alignItems: 'center', gap: 10, paddingVertical: 18 },
-  stateText: { fontSize: 13, color: '#888', textAlign: 'center', lineHeight: 19 },
+  stateText: { fontSize: 13, color: colors.muted, textAlign: 'center', lineHeight: 19 },
   errorBox: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 8,
     padding: 12,
-    borderRadius: 8,
-    backgroundColor: '#FFF7F7',
+    borderRadius: 12,
+    backgroundColor: colors.dangerBg,
     borderWidth: 1,
-    borderColor: '#F3C2C2',
+    borderColor: colors.dangerLine,
   },
-  errorText: { fontSize: 13, color: '#D93025', lineHeight: 18 },
-  errorLink: { fontSize: 13, fontWeight: '700', color: '#0A84FF', marginTop: 6 },
+  errorText: { fontSize: 13, color: colors.danger, lineHeight: 18 },
+  errorLink: { fontSize: 13, fontWeight: '700', color: colors.primaryDark, marginTop: 6 },
 
   // Selected address card
   selectedCard: {
     flexDirection: 'row',
     gap: 12,
     padding: 12,
-    borderRadius: 10,
+    borderRadius: 14,
     borderWidth: 1.5,
-    borderColor: '#0A84FF',
-    backgroundColor: '#F2F8FF',
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryTint,
   },
   selectedIcon: {
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: '#E1EFFF',
+    backgroundColor: colors.white,
     alignItems: 'center',
     justifyContent: 'center',
   },
   selectedTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  selectedLabel: { fontSize: 15, fontWeight: '700', color: '#1a1a1a' },
+  selectedLabel: { fontSize: 15, fontWeight: '700', color: colors.ink, flexShrink: 1 },
   defaultBadge: {
-    backgroundColor: '#0A84FF',
-    borderRadius: 4,
+    backgroundColor: colors.primary,
+    borderRadius: 6,
     paddingHorizontal: 6,
     paddingVertical: 2,
   },
-  defaultBadgeText: { fontSize: 9, fontWeight: '800', color: '#fff', letterSpacing: 0.3 },
-  selectedAddress: { fontSize: 13, color: '#444', lineHeight: 19, marginTop: 3 },
+  defaultBadgeText: { fontSize: 12, fontWeight: '800', color: colors.white, letterSpacing: 0.3 },
+  selectedAddress: { fontSize: 13, color: colors.textSecondary, lineHeight: 19, marginTop: 3 },
   coordinates: {
     fontSize: 12,
-    color: '#6b7280',
+    color: colors.muted,
     marginTop: 5,
     fontVariant: ['tabular-nums'],
   },
-  addressActions: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  addressActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 12 },
 
   // Map
-  map: { height: 220, borderRadius: 10, overflow: 'hidden' },
-  pinValue: { fontSize: 13, color: '#555', marginTop: 10, fontVariant: ['tabular-nums'] },
-  pinActions: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 },
+  map: { height: 220, borderRadius: 14, overflow: 'hidden' },
+  pinValue: { fontSize: 13, color: colors.textSecondary, marginTop: 10, fontVariant: ['tabular-nums'] },
+  pinActions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginTop: 12 },
   noticeBox: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 8,
     marginTop: 12,
     padding: 12,
-    borderRadius: 8,
-    backgroundColor: '#FFF8E5',
+    borderRadius: 12,
+    backgroundColor: colors.warningBg,
     borderWidth: 1,
-    borderColor: '#FFE2A8',
+    borderColor: colors.warningLine,
   },
-  noticeText: { flex: 1, fontSize: 12, color: '#8a6100', lineHeight: 18 },
-  noticeLink: { fontSize: 13, fontWeight: '700', color: '#0A84FF', marginTop: 6 },
+  noticeText: { flex: 1, fontSize: 12, color: colors.warningText, lineHeight: 18 },
+  noticeLink: { fontSize: 13, fontWeight: '700', color: colors.primaryDark, marginTop: 6 },
 
   // Buttons
   secondaryButton: {
@@ -632,35 +638,35 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 8,
+    paddingVertical: 12,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#0A84FF',
-    backgroundColor: '#F2F8FF',
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryTint,
   },
   buttonBusy: { opacity: 0.7 },
-  secondaryButtonText: { fontSize: 13, fontWeight: '700', color: '#0A84FF' },
+  secondaryButtonText: { fontSize: 13, fontWeight: '700', color: colors.primaryDark },
   primaryOutlineButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     paddingHorizontal: 16,
     paddingVertical: 11,
-    borderRadius: 8,
+    borderRadius: 12,
     borderWidth: 1.5,
-    borderColor: '#0A84FF',
-    backgroundColor: '#F2F8FF',
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryTint,
   },
-  primaryOutlineText: { fontSize: 14, fontWeight: '700', color: '#0A84FF' },
-  resetButton: { flexDirection: 'row', alignItems: 'center', gap: 5, padding: 8 },
-  resetText: { fontSize: 13, color: '#8a8a8a', fontWeight: '600' },
+  primaryOutlineText: { fontSize: 14, fontWeight: '700', color: colors.primaryDark },
+  resetButton: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 8, paddingVertical: 12 },
+  resetText: { fontSize: 13, color: colors.muted, fontWeight: '600' },
 
   // Picker modal
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalCard: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
     padding: 24,
     paddingBottom: 34,
     maxHeight: '80%',
@@ -671,24 +677,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 16,
   },
-  modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#333' },
+  modalTitle: { fontSize: 20, fontWeight: 'bold', color: colors.ink },
   pickerList: { flexGrow: 0 },
   pickerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
     padding: 12,
-    borderRadius: 10,
+    borderRadius: 14,
     borderWidth: 1.5,
-    borderColor: '#e6e8eb',
-    backgroundColor: '#fafafa',
+    borderColor: colors.line,
+    backgroundColor: colors.surfaceTint,
     marginBottom: 10,
   },
-  pickerRowActive: { borderColor: '#0A84FF', backgroundColor: '#F2F8FF' },
-  pickerLabel: { fontSize: 14, fontWeight: '700', color: '#444' },
-  pickerLabelActive: { color: '#0A84FF' },
-  pickerAddress: { fontSize: 12, color: '#666', lineHeight: 17, marginTop: 2 },
-  pickerPin: { fontSize: 11, color: '#8a8a8a', marginTop: 4 },
+  pickerRowActive: { borderColor: colors.primary, backgroundColor: colors.primaryTint },
+  pickerLabel: { fontSize: 14, fontWeight: '700', color: colors.textSecondary },
+  pickerLabelActive: { color: colors.primaryDark },
+  pickerAddress: { fontSize: 12, color: colors.textSecondary, lineHeight: 17, marginTop: 2 },
+  pickerPin: { fontSize: 12, color: colors.muted, marginTop: 4 },
   pickerAddRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -696,29 +702,29 @@ const styles = StyleSheet.create({
     paddingTop: 14,
     marginTop: 4,
     borderTopWidth: 1,
-    borderTopColor: '#eee',
+    borderTopColor: colors.line,
   },
-  pickerAddText: { fontSize: 15, fontWeight: '700', color: '#0A84FF' },
+  pickerAddText: { fontSize: 15, fontWeight: '700', color: colors.primary },
 
   // Payment
   paymentOption: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 16,
-    borderWidth: 1.5,
-    borderRadius: 8,
+    borderWidth: 2,
+    borderRadius: radius.lg,
     marginBottom: 10,
-    backgroundColor: '#fafafa',
+    backgroundColor: colors.surfaceTint,
   },
   selectedPaymentOption: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.primaryTint,
   },
   radio: {
     width: 20,
     height: 20,
-    borderRadius: 10,
+    borderRadius: 14,
     borderWidth: 2,
-    borderColor: '#aaa',
+    borderColor: colors.line,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
@@ -730,28 +736,34 @@ const styles = StyleSheet.create({
   },
   paymentLabel: {
     fontSize: 16,
-    color: '#333',
+    color: colors.ink,
   },
   helperText: {
     fontSize: 12,
-    color: '#888',
+    color: colors.muted,
     marginTop: 6,
     lineHeight: 17,
   },
   placeOrderButton: {
-    backgroundColor: '#007AFF',
-    padding: 16,
-    borderRadius: 8,
+    backgroundColor: colors.primary,
+    height: 56,
+    borderRadius: radius.md + 2,
     alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 30,
+    ...shadow.card,
   },
+  // White on this pale blue would be unreadable, so the label darkens with it.
   disabledButton: {
-    backgroundColor: '#a0c4ff',
+    backgroundColor: colors.line,
+  },
+  placeOrderTextDisabled: {
+    color: colors.muted,
   },
   placeOrderText: {
-    color: '#fff',
+    color: colors.white,
     fontSize: 18,
-    fontWeight: 'bold',
+    fontWeight: '800',
   },
   spacer: {
     height: 40,

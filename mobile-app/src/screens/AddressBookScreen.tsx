@@ -1,3 +1,4 @@
+import { colors, radius, card, pagePadding } from '../theme';
 import React, { useCallback, useState } from 'react';
 import {
   View,
@@ -12,6 +13,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { AddressFormSheet } from '../components/AddressFormSheet';
+import { ErrorState, EmptyState, StatusPill, friendlyError } from '../components/ui';
 import { CustomerAddress, addressService, formatPin, pinOf } from '../services/addressService';
 
 /**
@@ -75,7 +77,7 @@ export const AddressBookScreen: React.FC = () => {
       // guessing which one lost it.
       await load('refresh');
     } catch (error: any) {
-      Alert.alert('Could not set default', error?.message || 'Try again in a moment.');
+      Alert.alert('Could not set default', friendlyError(error?.message));
     } finally {
       setBusyId(null);
     }
@@ -97,7 +99,7 @@ export const AddressBookScreen: React.FC = () => {
               await addressService.remove(address.id);
               setAddresses(prev => prev.filter(a => a.id !== address.id));
             } catch (error: any) {
-              Alert.alert('Could not delete', error?.message || 'Try again in a moment.');
+              Alert.alert('Could not delete', friendlyError(error?.message));
             } finally {
               setBusyId(null);
             }
@@ -128,7 +130,7 @@ export const AddressBookScreen: React.FC = () => {
   if (loading) {
     return (
       <View style={styles.centre}>
-        <ActivityIndicator size="large" color="#0A84FF" />
+        <ActivityIndicator size="large" color={colors.primary} />
         <Text style={styles.centreText}>Loading your addresses…</Text>
       </View>
     );
@@ -139,30 +141,43 @@ export const AddressBookScreen: React.FC = () => {
       <ScrollView
         contentContainerStyle={styles.list}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={() => load('refresh')} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => load('refresh')}
+            colors={[colors.primary]}
+            tintColor={colors.primary}
+          />
         }
       >
-        {!!loadError && (
+        {/* A failed refresh keeps the cards below and says why they may be old. */}
+        {!!loadError && addresses.length > 0 && (
           <View style={styles.errorBox}>
-            <Ionicons name="alert-circle" size={18} color="#D93025" />
+            <Ionicons name="cloud-offline-outline" size={18} color={colors.danger} />
             <View style={styles.flex}>
-              <Text style={styles.errorText}>{loadError}</Text>
-              <TouchableOpacity onPress={() => load('refresh')}>
+              <Text style={styles.errorText}>{friendlyError(loadError)}</Text>
+              <TouchableOpacity onPress={() => load('refresh')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                 <Text style={styles.errorLink}>Try again</Text>
               </TouchableOpacity>
             </View>
           </View>
         )}
 
+        {/* Nothing to show and the cause is a failed request: do not claim the
+            customer has no addresses. */}
+        {!!loadError && addresses.length === 0 && (
+          <ErrorState
+            title="Could not load your addresses"
+            message={loadError}
+            onRetry={() => load()}
+          />
+        )}
+
         {addresses.length === 0 && !loadError && (
-          <View style={styles.empty}>
-            <Ionicons name="location-outline" size={44} color="#c8c8c8" />
-            <Text style={styles.emptyTitle}>No saved addresses</Text>
-            <Text style={styles.emptyBody}>
-              Add the places you want water delivered to. The first one you save becomes your
-              default, and checkout picks it automatically.
-            </Text>
-          </View>
+          <EmptyState
+            icon="location-outline"
+            title="No saved addresses"
+            text="Add the places you want water delivered to. The first one you save becomes your default, and checkout picks it automatically."
+          />
         )}
 
         {addresses.map(address => {
@@ -174,52 +189,55 @@ export const AddressBookScreen: React.FC = () => {
                 <View style={styles.iconWrap}>
                   <Ionicons
                     name={LABEL_ICONS[address.label] ?? 'location'}
-                    size={19}
-                    color="#0A84FF"
+                    size={20}
+                    color={colors.primary}
                   />
                 </View>
                 <View style={styles.flex}>
                   <View style={styles.titleRow}>
                     <Text style={styles.cardTitle}>{address.display_label}</Text>
-                    {address.is_default && (
-                      <View style={styles.defaultBadge}>
-                        <Text style={styles.defaultBadgeText}>Default</Text>
-                      </View>
-                    )}
+                    {address.is_default && <StatusPill label="Default" tone="primary" />}
                   </View>
                   <Text style={styles.cardAddress}>{address.address}</Text>
-                  <Text style={styles.cardPin}>
-                    {pin ? `Pin: ${formatPin(pin)}` : 'No map pin saved'}
-                  </Text>
+                  <View style={styles.pinRow}>
+                    <Ionicons
+                      name={pin ? 'navigate-circle' : 'navigate-circle-outline'}
+                      size={15}
+                      color={pin ? colors.success : colors.muted}
+                    />
+                    <Text style={styles.cardPin}>
+                      {pin ? `Pin: ${formatPin(pin)}` : 'No map pin saved'}
+                    </Text>
+                  </View>
                 </View>
-                {busy && <ActivityIndicator size="small" color="#0A84FF" />}
+                {busy && <ActivityIndicator size="small" color={colors.primary} />}
               </View>
 
               <View style={styles.cardActions}>
                 {!address.is_default && (
                   <TouchableOpacity
-                    style={styles.action}
+                    style={[styles.action, busy && styles.actionBusy]}
                     onPress={() => handleSetDefault(address)}
                     disabled={busy}
                   >
-                    <Ionicons name="star-outline" size={16} color="#0A84FF" />
+                    <Ionicons name="star-outline" size={16} color={colors.primary} />
                     <Text style={styles.actionText}>Set default</Text>
                   </TouchableOpacity>
                 )}
                 <TouchableOpacity
-                  style={styles.action}
+                  style={[styles.action, busy && styles.actionBusy]}
                   onPress={() => openEdit(address)}
                   disabled={busy}
                 >
-                  <Ionicons name="create-outline" size={16} color="#0A84FF" />
+                  <Ionicons name="create-outline" size={16} color={colors.primary} />
                   <Text style={styles.actionText}>Edit</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={styles.action}
+                  style={[styles.action, styles.actionDanger, busy && styles.actionBusy]}
                   onPress={() => handleDelete(address)}
                   disabled={busy}
                 >
-                  <Ionicons name="trash-outline" size={16} color="#D93025" />
+                  <Ionicons name="trash-outline" size={16} color={colors.danger} />
                   <Text style={[styles.actionText, styles.actionTextDanger]}>Delete</Text>
                 </TouchableOpacity>
               </View>
@@ -229,7 +247,7 @@ export const AddressBookScreen: React.FC = () => {
       </ScrollView>
 
       <TouchableOpacity style={styles.addButton} onPress={openNew}>
-        <Ionicons name="add" size={20} color="#fff" />
+        <Ionicons name="add" size={22} color={colors.white} />
         <Text style={styles.addButtonText}>Add new address</Text>
       </TouchableOpacity>
 
@@ -247,95 +265,82 @@ export const AddressBookScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  container: { flex: 1, backgroundColor: colors.bg },
   flex: { flex: 1 },
-  centre: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
-  centreText: { fontSize: 13, color: '#888' },
-  list: { padding: 16, paddingBottom: 24 },
+  centre: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, backgroundColor: colors.bg },
+  centreText: { fontSize: 14, color: colors.muted },
+  list: { paddingHorizontal: pagePadding, paddingTop: pagePadding, paddingBottom: 24, flexGrow: 1 },
 
   errorBox: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 8,
+    gap: 10,
     padding: 12,
-    borderRadius: 8,
-    backgroundColor: '#FFF7F7',
+    borderRadius: radius.md,
+    backgroundColor: colors.dangerBg,
     borderWidth: 1,
-    borderColor: '#F3C2C2',
-    marginBottom: 14,
+    borderColor: colors.dangerLine,
+    marginBottom: 12,
   },
-  errorText: { fontSize: 13, color: '#D93025', lineHeight: 18 },
-  errorLink: { fontSize: 13, fontWeight: '700', color: '#0A84FF', marginTop: 6 },
-
-  empty: { alignItems: 'center', gap: 10, paddingVertical: 60, paddingHorizontal: 24 },
-  emptyTitle: { fontSize: 16, fontWeight: '700', color: '#777' },
-  emptyBody: { fontSize: 13, color: '#9a9a9a', textAlign: 'center', lineHeight: 19 },
+  errorText: { fontSize: 14, color: colors.danger, lineHeight: 20 },
+  errorLink: { fontSize: 14, fontWeight: '800', color: colors.primaryDark, marginTop: 6 },
 
   card: {
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    padding: 14,
+    ...card,
+    padding: 16,
     marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#eceff2',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 3,
-    elevation: 1,
   },
-  cardDefault: { borderColor: '#0A84FF', borderWidth: 1.5 },
+  cardDefault: { borderColor: colors.primary, borderWidth: 1.5 },
   cardHead: { flexDirection: 'row', gap: 12, alignItems: 'flex-start' },
   iconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#E9F3FF',
+    width: 44,
+    height: 44,
+    borderRadius: radius.md,
+    backgroundColor: colors.primaryTint,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  cardTitle: { fontSize: 15, fontWeight: '700', color: '#1a1a1a' },
-  defaultBadge: {
-    backgroundColor: '#0A84FF',
-    borderRadius: 4,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-  },
-  defaultBadgeText: { fontSize: 9, fontWeight: '800', color: '#fff', letterSpacing: 0.3 },
-  cardAddress: { fontSize: 13, color: '#444', lineHeight: 19, marginTop: 3 },
-  cardPin: { fontSize: 12, color: '#8a8a8a', marginTop: 5, fontVariant: ['tabular-nums'] },
+  titleRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
+  cardTitle: { fontSize: 16, fontWeight: '800', color: colors.ink },
+  cardAddress: { fontSize: 14, color: colors.textSecondary, lineHeight: 20, marginTop: 4 },
+  pinRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
+  cardPin: { fontSize: 12, color: colors.muted, fontVariant: ['tabular-nums'], flexShrink: 1 },
   cardActions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 6,
-    marginTop: 12,
-    paddingTop: 10,
+    gap: 8,
+    marginTop: 14,
+    paddingTop: 14,
     borderTopWidth: 1,
-    borderTopColor: '#f0f2f4',
+    borderTopColor: colors.lineSoft,
   },
   action: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 7,
-    backgroundColor: '#F5F8FC',
+    justifyContent: 'center',
+    gap: 6,
+    height: 40,
+    paddingHorizontal: 14,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.surfaceTint,
   },
-  actionText: { fontSize: 12, fontWeight: '700', color: '#0A84FF' },
-  actionTextDanger: { color: '#D93025' },
+  actionDanger: { backgroundColor: colors.dangerBg, borderColor: colors.dangerLine },
+  actionBusy: { opacity: 0.55 },
+  actionText: { fontSize: 14, fontWeight: '800', color: colors.primaryDark },
+  actionTextDanger: { color: colors.danger },
 
   addButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: '#0A84FF',
-    margin: 16,
-    marginTop: 0,
-    padding: 15,
-    borderRadius: 10,
+    backgroundColor: colors.primary,
+    marginHorizontal: pagePadding,
+    marginBottom: pagePadding,
+    height: 54,
+    borderRadius: radius.md,
   },
-  addButtonText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  addButtonText: { color: colors.white, fontSize: 16, fontWeight: '800' },
 });

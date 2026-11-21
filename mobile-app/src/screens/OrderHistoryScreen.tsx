@@ -1,8 +1,10 @@
+import { colors, radius, card, pagePadding } from '../theme';
 import React, { useEffect, useState, useContext } from 'react';
-import { View, Text, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator, RefreshControl, ScrollView } from 'react-native';
+import { View, Text, FlatList, StyleSheet, TouchableOpacity, RefreshControl, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LoadingScreen } from '../components/LoadingScreen';
 import { TrackingStatusBanner } from '../components/TrackingStatusBanner';
+import { ErrorState, EmptyState, StatusPill, orderStatusTone, friendlyError } from '../components/ui';
 import { toMapPin } from '../utils/maps';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { MainTabParamList } from '../types/navigation';
@@ -10,7 +12,7 @@ import { getOrders, getDeliveryOrders, getDeliveryStatuses, Order, DeliveryStatu
 import { useLanguage } from '../context/LanguageContext';
 import { AuthContext } from '../context/AuthContext';
 import { useFocusEffect } from '@react-navigation/native';
-import { canWhatsApp, openWhatsApp } from '../utils/whatsapp';
+import { canWhatsApp, openWhatsApp, orderDispatchMessage } from '../utils/whatsapp';
 import { callNumber, canCall } from '../utils/phone';
 
 type Props = BottomTabScreenProps<MainTabParamList, 'Orders'>;
@@ -18,12 +20,22 @@ type Props = BottomTabScreenProps<MainTabParamList, 'Orders'>;
 const STATUS_FILTERS = ['All', 'Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled'] as const;
 type StatusFilter = typeof STATUS_FILTERS[number];
 
+/** "1,200" rather than "1200.00"; a value that is not a number is shown as sent. */
+const money = (value: string | number | null | undefined) => {
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n)) return String(value ?? '');
+  return n.toLocaleString('en-PK', { maximumFractionDigits: 2 });
+};
+
 export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
   const { t } = useLanguage();
   const { user } = useContext(AuthContext);
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // The reason the last load failed. Kept apart from `orders` so a failed
+  // refresh leaves the previous list on screen instead of blanking it.
+  const [error, setError] = useState<string | null>(null);
   const [deliveryStatuses, setDeliveryStatuses] = useState<DeliveryStatus[]>([]);
   const [selectedFilter, setSelectedFilter] = useState<StatusFilter>('All');
   const isDeliveryBoy = user?.user_type === 'delivery_boy';
@@ -32,8 +44,10 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
     try {
       const data = isDeliveryBoy ? await getDeliveryOrders() : await getOrders();
       setOrders(data);
-    } catch (error) {
-      console.error('Error fetching orders:', error);
+      setError(null);
+    } catch (e: any) {
+      console.error('Error fetching orders:', e);
+      setError(e?.message || 'Could not load your orders.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -68,23 +82,12 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
     fetchOrders();
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'Pending': return '#f39c12';
-      case 'Processing': return '#3498db';
-      case 'Shipped': return '#9b59b6';
-      case 'Delivered': return '#2ecc71';
-      case 'Cancelled': return '#e74c3c';
-      default: return '#95a5a6';
-    }
-  };
-
   const getDeliveryStatusColor = (deliveryStatusName: string) => {
     const status = deliveryStatuses.find(s => s.name === deliveryStatusName);
     if (status) {
       return { bg: status.background_color, text: status.color, border: status.border_color };
     }
-    return { bg: '#f0f8ff', text: '#007AFF', border: '#007AFF' };
+    return { bg: colors.primaryTint, text: colors.primary, border: colors.primary };
   };
 
   const filteredOrders = selectedFilter === 'All'
@@ -100,29 +103,24 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
         style={styles.filterBar}
         contentContainerStyle={styles.filterBarContent}
       >
-        {STATUS_FILTERS.map(filter => (
-          <TouchableOpacity
-            key={filter}
-            style={[
-              styles.filterChip,
-              selectedFilter === filter && styles.filterChipActive,
-              selectedFilter === filter && filter !== 'All' && { backgroundColor: getStatusColor(filter), borderColor: getStatusColor(filter) },
-            ]}
-            onPress={() => setSelectedFilter(filter)}
-          >
-            <Text
-              style={[
-                styles.filterChipText,
-                selectedFilter === filter && styles.filterChipTextActive,
-              ]}
+        {STATUS_FILTERS.map(filter => {
+          const active = selectedFilter === filter;
+          const count = filter !== 'All' ? orders.filter(o => o.status === filter).length : 0;
+          return (
+            <TouchableOpacity
+              key={filter}
+              style={[styles.filterChip, active && styles.filterChipActive]}
+              onPress={() => setSelectedFilter(filter)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
             >
-              {filter}
-              {filter !== 'All' && orders.filter(o => o.status === filter).length > 0
-                ? ` (${orders.filter(o => o.status === filter).length})`
-                : ''}
-            </Text>
-          </TouchableOpacity>
-        ))}
+              <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>
+                {filter}
+                {count > 0 ? ` (${count})` : ''}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </ScrollView>
     );
   };
@@ -160,7 +158,7 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
         <View
           style={[
             styles.riderSpine,
-            { backgroundColor: isDelivered ? '#34C759' : statusColor?.border || '#0A84FF' },
+            { backgroundColor: isDelivered ? colors.success : statusColor?.border || colors.primary },
           ]}
         />
 
@@ -174,32 +172,29 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
           {/* 1 — Address. The whole job starts with getting to the right gate.
               Padded clear of the banner so long addresses never run under it. */}
           <View style={styles.riderAddressRow}>
-            <Ionicons name="location" size={17} color="#0A84FF" style={{ marginTop: 2 }} />
+            <Ionicons name="location" size={18} color={colors.primary} style={{ marginTop: 2 }} />
             <Text style={styles.riderAddress} numberOfLines={3}>
               {item.shipping_address || t('no_address', 'No address on this order')}
             </Text>
           </View>
 
           {/* Whether an exact pin exists changes how a rider plans the stop. */}
-          <View style={styles.riderChipRow}>
-            {!!pin && (
-              <View style={styles.pinnedBadge}>
-                <Ionicons name="location" size={11} color="#34C759" />
-                <Text style={styles.pinnedText}>Pinned</Text>
-              </View>
-            )}
-            {!!item.delivery_status && statusColor && (
-              <View style={[
-                styles.riderStatusChip,
-                { backgroundColor: statusColor.bg, borderColor: statusColor.border },
-              ]}>
-                <View style={[styles.riderStatusDot, { backgroundColor: statusColor.border }]} />
-                <Text style={[styles.riderStatusText, { color: statusColor.text }]}>
-                  {item.delivery_status}
-                </Text>
-              </View>
-            )}
-          </View>
+          {(!!pin || (!!item.delivery_status && !!statusColor)) && (
+            <View style={styles.riderChipRow}>
+              {!!pin && <StatusPill label="Pinned" tone="success" icon="location" />}
+              {!!item.delivery_status && statusColor && (
+                <View style={[
+                  styles.riderStatusChip,
+                  { backgroundColor: statusColor.bg, borderColor: statusColor.border },
+                ]}>
+                  <View style={[styles.riderStatusDot, { backgroundColor: statusColor.border }]} />
+                  <Text style={[styles.riderStatusText, { color: statusColor.text }]}>
+                    {item.delivery_status}
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
 
           {/* Contact. A rider standing at a locked gate needs the number in one
               tap, without opening the order. Which app is not ours to decide —
@@ -207,7 +202,7 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
               the SIM is always offered too. */}
           {(canCall(customerPhone) || canWhatsApp(customerPhone)) && (
             <View style={styles.riderContactRow}>
-              <Ionicons name="call-outline" size={13} color="#8a929b" />
+              <Ionicons name="call-outline" size={16} color={colors.muted} />
               <Text style={styles.riderPhone}>{customerPhone}</Text>
               {canCall(customerPhone) && (
                 <TouchableOpacity
@@ -215,9 +210,9 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
                   onPress={() => callNumber(customerPhone)}
                   accessibilityRole="button"
                   accessibilityLabel={`Call ${customerName}`}
-                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                  hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
                 >
-                  <Ionicons name="call" size={14} color="#fff" />
+                  <Ionicons name="call" size={18} color={colors.white} />
                 </TouchableOpacity>
               )}
               {canWhatsApp(customerPhone) && (
@@ -225,13 +220,21 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
                   style={[styles.riderContactBtn, styles.riderWaBtn]}
                   onPress={() => openWhatsApp(
                     customerPhone,
-                    `Hello ${customerName}, I am on my way with your order #${item.id}.`,
+                    orderDispatchMessage({
+                      customerName,
+                      orderId: item.id,
+                      items: item.items,
+                      orderTotal: item.total_price,
+                      previousBalance: (item as any).customer?.account_balance,
+                      isPaid: (item as any).is_paid,
+                      shippingAddress: item.shipping_address,
+                    }),
                   )}
                   accessibilityRole="button"
                   accessibilityLabel={`WhatsApp ${customerName}`}
-                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                  hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
                 >
-                  <Ionicons name="logo-whatsapp" size={14} color="#fff" />
+                  <Ionicons name="logo-whatsapp" size={18} color={colors.ink} />
                 </TouchableOpacity>
               )}
             </View>
@@ -240,7 +243,7 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
           {/* 3 — What the office told the rider about this drop. */}
           {!!item.delivery_notes && (
             <View style={styles.riderNoteBox}>
-              <Ionicons name="chatbubble-ellipses" size={13} color="#8a6100" />
+              <Ionicons name="chatbubble-ellipses" size={16} color={colors.warningText} />
               <Text style={styles.riderNoteText}>{item.delivery_notes}</Text>
             </View>
           )}
@@ -272,7 +275,7 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
               answer here (an unpaid drop) and must not look like "not yet". */}
           <View style={styles.riderFooterRow}>
             <View style={styles.riderDateWrap}>
-              <Ionicons name="calendar-outline" size={12} color="#8a929b" />
+              <Ionicons name="calendar-outline" size={14} color={colors.muted} />
               <Text style={styles.riderDate}>
                 {new Date(item.created_at).toLocaleDateString()}
               </Text>
@@ -288,7 +291,7 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
           {/* A submitted delivery is final — nothing left to manage. */}
           {isSubmitted ? (
             <View style={styles.riderDoneRow}>
-              <Ionicons name="checkmark-circle" size={15} color="#34C759" />
+              <Ionicons name="checkmark-circle" size={18} color={colors.success} />
               <Text style={styles.riderDoneText}>
                 {isDelivered ? 'Delivered — no further changes' : 'Submitted — no further changes'}
               </Text>
@@ -299,7 +302,7 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
               onPress={() => (navigation as any).navigate('DeliveryOrderDetail', { order: item })}
               activeOpacity={0.85}
             >
-              <Ionicons name="navigate" size={16} color="#fff" />
+              <Ionicons name="navigate" size={18} color={colors.white} />
               <Text style={styles.updateButtonText}>{t('manage_delivery', 'Manage Delivery')}</Text>
             </TouchableOpacity>
           ) : null}
@@ -311,32 +314,31 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
   const renderCustomerOrder = ({ item }: { item: Order }) => (
     <View style={styles.orderCard}>
       <View style={styles.orderHeader}>
-        <Text style={styles.orderId}>{t('order_number', 'Order #')}{item.id}</Text>
-        <Text style={[styles.orderStatus, { color: getStatusColor(item.status) }]}>
-          {t(`status_${item.status.toLowerCase()}`, item.status)}
-        </Text>
+        <View style={styles.orderHeaderText}>
+          <Text style={styles.orderId}>{t('order_number', 'Order #')}{item.id}</Text>
+          <Text style={styles.orderDate}>{new Date(item.created_at).toLocaleDateString()}</Text>
+        </View>
+        <StatusPill
+          label={t(`status_${item.status.toLowerCase()}`, item.status)}
+          tone={orderStatusTone(item.status)}
+        />
       </View>
 
-      <Text style={styles.orderDate}>{new Date(item.created_at).toLocaleDateString()}</Text>
-
-      <View style={styles.divider} />
-
-      {item.items.map((product) => (
-        <View key={product.id} style={styles.productRow}>
-          <Text style={styles.productText}>
-            {product.quantity} x {product.product_details?.name || t('unknown_product', 'Unknown Product')}
-          </Text>
-          <Text style={styles.productPrice}>PKR {product.price}</Text>
-        </View>
-      ))}
-
-      <View style={styles.divider} />
+      <View style={styles.productsBox}>
+        {item.items.map((product) => (
+          <View key={product.id} style={styles.productRow}>
+            <Text style={styles.productText} numberOfLines={2}>
+              {product.quantity} x {product.product_details?.name || t('unknown_product', 'Unknown Product')}
+            </Text>
+            <Text style={styles.productPrice}>PKR {product.price}</Text>
+          </View>
+        ))}
+      </View>
 
       <View style={styles.totalRow}>
         <Text style={styles.totalLabel}>{t('total_amount', 'Total Amount')}</Text>
-        <Text style={styles.totalAmount}>PKR {item.total_price}</Text>
+        <Text style={styles.totalAmount}>PKR {money(item.total_price)}</Text>
       </View>
-
     </View>
   );
 
@@ -348,29 +350,65 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
   }
 
   const showEmpty = filteredOrders.length === 0;
+  // Nothing to show and the reason is a failed request, not an empty history:
+  // "no orders" here would read as the customer having never ordered.
+  const failedWithNothing = !!error && orders.length === 0;
+
+  const refreshControl = (
+    <RefreshControl
+      refreshing={refreshing}
+      onRefresh={onRefresh}
+      colors={[colors.primary]}
+      tintColor={colors.primary}
+      title="Pull to refresh"
+      titleColor={colors.textSecondary}
+    />
+  );
 
   return (
     <View style={styles.container}>
-      {renderFilterChips()}
+      {!failedWithNothing && renderFilterChips()}
 
       {/* Riders are tracked in the background, so they get told so on the very
           screen they work from — not buried in a settings page. */}
       {isDeliveryBoy && <TrackingStatusBanner />}
 
-      {showEmpty ? (
-        <ScrollView
-          contentContainerStyle={styles.emptyContainer}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#007AFF']} tintColor="#007AFF" />
-          }
-        >
-          <Text style={styles.emptyText}>
-            {orders.length === 0
-              ? isDeliveryBoy
-                ? t('no_delivery_orders', 'No delivery orders assigned')
-                : t('no_orders', 'No orders found')
-              : `No ${selectedFilter.toLowerCase()} orders`}
-          </Text>
+      {/* A refresh that failed keeps the list below; this says why it may be old. */}
+      {!!error && orders.length > 0 && (
+        <View style={styles.errorBanner}>
+          <Ionicons name="cloud-offline-outline" size={18} color={colors.danger} />
+          <View style={styles.errorBannerBody}>
+            <Text style={styles.errorBannerText}>{friendlyError(error)}</Text>
+            <TouchableOpacity style={styles.errorBannerBtn} onPress={onRefresh} accessibilityLabel="Try again">
+              <Text style={styles.errorBannerLink}>Try again</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {failedWithNothing ? (
+        <ScrollView contentContainerStyle={styles.emptyContainer} refreshControl={refreshControl}>
+          <ErrorState title="Could not load your orders" message={error} onRetry={onRefresh} />
+        </ScrollView>
+      ) : showEmpty ? (
+        <ScrollView contentContainerStyle={styles.emptyContainer} refreshControl={refreshControl}>
+          <EmptyState
+            icon={isDeliveryBoy ? 'bicycle-outline' : 'receipt-outline'}
+            title={
+              orders.length === 0
+                ? isDeliveryBoy
+                  ? t('no_delivery_orders', 'No delivery orders assigned')
+                  : t('no_orders', 'No orders found')
+                : `No ${selectedFilter.toLowerCase()} orders`
+            }
+            text={
+              orders.length === 0
+                ? isDeliveryBoy
+                  ? 'New deliveries from the office will show up here. Pull down to check again.'
+                  : 'Your orders will appear here once you place one.'
+                : 'Try another filter to see your other orders.'
+            }
+          />
           {!isDeliveryBoy && orders.length === 0 && (
             <TouchableOpacity style={styles.shopNowButton} onPress={() => navigation.navigate('Home')}>
               <Text style={styles.shopNowText}>{t('start_shopping', 'Start Shopping')}</Text>
@@ -388,16 +426,7 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
           renderItem={renderOrder}
           keyExtractor={(item) => item.id.toString()}
           contentContainerStyle={styles.listContent}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              colors={['#007AFF']}
-              tintColor="#007AFF"
-              title="Pull to refresh"
-              titleColor="#666"
-            />
-          }
+          refreshControl={refreshControl}
         />
       )}
     </View>
@@ -407,307 +436,275 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: colors.bg,
   },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+
+  // Filters sit straight on the page, not on a white band.
   filterBar: {
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
     flexGrow: 0,
   },
   filterBarContent: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: pagePadding,
+    paddingVertical: 12,
     gap: 8,
   },
   filterChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 20,
-    borderWidth: 1.5,
-    borderColor: '#ddd',
-    backgroundColor: '#f9f9f9',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    height: 40,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.surface,
   },
   filterChipActive: {
-    backgroundColor: '#007AFF',
-    borderColor: '#007AFF',
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
   filterChipText: {
-    fontSize: 13,
-    color: '#555',
-    fontWeight: '500',
-  },
-  filterChipTextActive: {
-    color: '#fff',
+    fontSize: 14,
+    color: colors.ink,
     fontWeight: '700',
   },
-  listContent: {
-    padding: 16,
+  filterChipTextActive: {
+    color: colors.white,
   },
+  listContent: {
+    paddingHorizontal: pagePadding,
+    paddingTop: 4,
+    // The floating WhatsApp button sits over the lower right of this screen for
+    // customers and riders. Without this clearance the last card, and a rider's
+    // "Manage Delivery" button on it, can end up underneath with nothing left
+    // to scroll.
+    paddingBottom: 96,
+  },
+
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginHorizontal: pagePadding,
+    marginBottom: 8,
+    padding: 12,
+    borderRadius: radius.md,
+    backgroundColor: colors.dangerBg,
+    borderWidth: 1,
+    borderColor: colors.dangerLine,
+  },
+  errorBannerBody: { flex: 1, gap: 4 },
+  errorBannerText: { fontSize: 14, color: colors.danger, lineHeight: 20 },
+  // 40px tall so the link is easy to hit; text alone would be about 20.
+  errorBannerBtn: { minHeight: 40, justifyContent: 'center', alignSelf: 'flex-start' },
+  errorBannerLink: { fontSize: 14, fontWeight: '800', color: colors.primaryDark },
+
+  // ── Customer card ─────────────────────────────────────────────────────────
   orderCard: {
-    backgroundColor: 'white',
-    borderRadius: 8,
+    ...card,
     padding: 16,
-    marginBottom: 16,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 1.41,
+    marginBottom: 12,
   },
   orderHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
+    alignItems: 'flex-start',
+    gap: 12,
+    marginBottom: 12,
   },
+  orderHeaderText: { flex: 1 },
   orderId: {
     fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  orderStatus: {
-    fontSize: 14,
-    fontWeight: 'bold',
+    fontWeight: '800',
+    color: colors.ink,
   },
   orderDate: {
     fontSize: 12,
-    color: '#888',
-    marginBottom: 12,
+    color: colors.muted,
+    marginTop: 2,
   },
-  divider: {
-    height: 1,
-    backgroundColor: '#eee',
-    marginVertical: 8,
+  productsBox: {
+    backgroundColor: colors.surfaceTint,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 6,
   },
   productRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 4,
+    alignItems: 'flex-start',
+    gap: 12,
   },
   productText: {
     fontSize: 14,
-    color: '#666',
+    color: colors.textSecondary,
     flex: 1,
   },
   productPrice: {
     fontSize: 14,
-    color: '#333',
+    fontWeight: '600',
+    color: colors.ink,
   },
   totalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 8,
-    paddingTop: 8,
+    alignItems: 'center',
+    marginTop: 14,
   },
   totalLabel: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.textSecondary,
   },
   totalAmount: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#2ecc71',
+    fontSize: 20,
+    fontWeight: '800',
+    color: colors.ink,
   },
+
+  // ── Empty and error states ────────────────────────────────────────────────
   emptyContainer: {
     flexGrow: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
   },
-  emptyText: {
-    fontSize: 18,
-    color: '#666',
-    marginBottom: 20,
-  },
   shopNowButton: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
+    backgroundColor: colors.primary,
+    height: 48,
+    paddingHorizontal: 24,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
   },
   shopNowText: {
-    color: 'white',
-    fontWeight: 'bold',
+    color: colors.white,
+    fontWeight: '800',
     fontSize: 16,
   },
   clearFilterButton: {
     marginTop: 12,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#007AFF',
+    height: 46,
+    paddingHorizontal: 22,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   clearFilterText: {
-    color: '#007AFF',
-    fontWeight: '600',
+    color: colors.primary,
+    fontWeight: '800',
     fontSize: 14,
   },
+
   // ── Rider card ────────────────────────────────────────────────────────────
   riderCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    marginBottom: 14,
+    ...card,
+    marginBottom: 12,
     // Clips the spine and the banner to the rounded corners.
     overflow: 'hidden',
-    shadowColor: '#0D1B2A',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.09,
-    shadowRadius: 10,
-    elevation: 3,
   },
-  riderSpine: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 4 },
+  riderSpine: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 5 },
   // Welded to the top-right corner: square where it meets the card edges,
   // rounded only on the inward corner, so it reads as a banner rather than a
   // floating pill.
   riderBanner: {
     position: 'absolute', top: 0, right: 0, zIndex: 1,
     flexDirection: 'row', alignItems: 'baseline',
-    backgroundColor: '#0D1B2A',
-    paddingLeft: 12, paddingRight: 14, paddingTop: 7, paddingBottom: 8,
-    borderBottomLeftRadius: 14,
+    backgroundColor: colors.ink,
+    paddingLeft: 14, paddingRight: 18, paddingTop: 8, paddingBottom: 9,
+    borderBottomLeftRadius: 20,
   },
-  riderBannerHash: { color: 'rgba(255,255,255,0.45)', fontSize: 12, fontWeight: '700' },
+  riderBannerHash: { color: 'rgba(255,255,255,0.8)', fontSize: 12, fontWeight: '700' },
   riderBannerId: {
-    color: '#fff', fontSize: 15, fontWeight: '800',
+    color: colors.white, fontSize: 16, fontWeight: '800',
     letterSpacing: 0.3, fontVariant: ['tabular-nums'],
   },
-  riderBody: { paddingLeft: 18, paddingRight: 14, paddingTop: 14, paddingBottom: 14 },
+  riderBody: { paddingLeft: 20, paddingRight: 16, paddingTop: 16, paddingBottom: 16 },
 
   riderAddressRow: {
     flexDirection: 'row', alignItems: 'flex-start', gap: 8,
     // Clear of the banner so a long address never runs under it.
-    paddingRight: 62,
+    paddingRight: 84,
   },
-  riderAddress: { flex: 1, fontSize: 15.5, fontWeight: '700', color: '#1a2530', lineHeight: 22 },
-  riderChipRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
+  riderAddress: { flex: 1, fontSize: 16, fontWeight: '700', color: colors.ink, lineHeight: 22 },
+  riderChipRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginTop: 10 },
   riderStatusChip: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
-    marginTop: 8, paddingVertical: 5, paddingHorizontal: 10,
-    borderRadius: 6, borderWidth: 1,
+    paddingVertical: 4, paddingHorizontal: 10,
+    borderRadius: radius.pill, borderWidth: 1,
   },
   riderStatusDot: { width: 6, height: 6, borderRadius: 3 },
-  riderStatusText: { fontSize: 11.5, fontWeight: '700' },
+  riderStatusText: { fontSize: 12, fontWeight: '800' },
 
-  riderContactRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 12 },
+  riderContactRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
   riderPhone: {
-    flex: 1, fontSize: 13.5, color: '#374857',
-    fontWeight: '600', letterSpacing: 0.3, fontVariant: ['tabular-nums'],
+    flex: 1, fontSize: 14, color: colors.textSecondary,
+    fontWeight: '700', letterSpacing: 0.3, fontVariant: ['tabular-nums'],
   },
   riderContactBtn: {
-    width: 32, height: 32, borderRadius: 9,
+    width: 40, height: 40, borderRadius: radius.md,
     alignItems: 'center', justifyContent: 'center',
   },
-  riderCallBtn: { backgroundColor: '#0A84FF' },
-  riderWaBtn: { backgroundColor: '#25D366' },
+  riderCallBtn: { backgroundColor: colors.primary },
+  riderWaBtn: { backgroundColor: colors.whatsapp },
 
   riderNoteBox: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: 7,
-    marginTop: 12, padding: 10, borderRadius: 10,
-    backgroundColor: '#FFF8E5', borderWidth: 1, borderColor: '#FFE2A8',
+    flexDirection: 'row', alignItems: 'flex-start', gap: 8,
+    marginTop: 12, padding: 12, borderRadius: radius.md,
+    backgroundColor: colors.warningBg, borderWidth: 1, borderColor: colors.warningLine,
   },
-  riderNoteText: { flex: 1, fontSize: 13, color: '#8a6100', lineHeight: 18 },
+  riderNoteText: { flex: 1, fontSize: 14, color: colors.warningText, lineHeight: 20 },
 
   riderItemsBox: {
-    marginTop: 12, borderRadius: 12, padding: 10,
-    backgroundColor: '#f7f9fb', borderWidth: 1, borderColor: '#eef2f5',
+    marginTop: 12, borderRadius: radius.md, paddingHorizontal: 12, paddingVertical: 10,
+    backgroundColor: colors.surfaceTint, borderWidth: 1, borderColor: colors.line,
   },
-  riderItemRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 4 },
+  riderItemRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 },
   riderQtyPill: {
-    minWidth: 24, height: 22, borderRadius: 6, paddingHorizontal: 5,
-    backgroundColor: '#e4ebf2', alignItems: 'center', justifyContent: 'center',
+    minWidth: 28, height: 24, borderRadius: radius.sm, paddingHorizontal: 6,
+    backgroundColor: colors.primaryTint, alignItems: 'center', justifyContent: 'center',
   },
-  riderQtyText: { fontSize: 12, fontWeight: '800', color: '#4a5a6a' },
-  riderItemName: { flex: 1, fontSize: 13.5, color: '#374857' },
-  riderItemPrice: { fontSize: 13, fontWeight: '600', color: '#5b6b7c' },
+  riderQtyText: { fontSize: 12, fontWeight: '800', color: colors.primaryDark },
+  riderItemName: { flex: 1, fontSize: 14, color: colors.textSecondary },
+  riderItemPrice: { fontSize: 14, fontWeight: '600', color: colors.textSecondary },
   riderTotalRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    marginTop: 6, paddingTop: 8,
-    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#dde5ec',
+    marginTop: 8, paddingTop: 10,
+    borderTopWidth: 1, borderTopColor: colors.line,
   },
-  riderTotalLabel: { fontSize: 12, color: '#8a929b', fontWeight: '600' },
-  riderTotalValue: { fontSize: 15, fontWeight: '800', color: '#1a2530' },
+  riderTotalLabel: { fontSize: 14, color: colors.textSecondary, fontWeight: '700' },
+  riderTotalValue: { fontSize: 20, fontWeight: '800', color: colors.ink },
 
   riderFooterRow: {
     flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'space-between', gap: 8, marginTop: 12,
+    justifyContent: 'space-between', gap: 8, marginTop: 14,
   },
   riderDateWrap: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  riderDate: { fontSize: 12, color: '#8a929b', fontWeight: '600' },
-  riderReceivedWrap: { flexDirection: 'row', alignItems: 'baseline', gap: 7 },
-  riderReceivedLabel: { fontSize: 12, color: '#8a929b', fontWeight: '600' },
-  riderReceivedValue: { fontSize: 16, fontWeight: '800', color: '#c2c8ce' },
-  riderReceivedPaid: { color: '#34C759' },
+  riderDate: { fontSize: 12, color: colors.muted, fontWeight: '600' },
+  riderReceivedWrap: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
+  riderReceivedLabel: { fontSize: 12, color: colors.muted, fontWeight: '600' },
+  riderReceivedValue: { fontSize: 16, fontWeight: '800', color: colors.muted },
+  riderReceivedPaid: { color: colors.success },
 
   riderDoneRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-    marginTop: 12, paddingVertical: 11, borderRadius: 10,
-    backgroundColor: '#34C75912',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    marginTop: 14, minHeight: 46, paddingHorizontal: 12, borderRadius: radius.md,
+    backgroundColor: colors.successBg,
   },
-  riderDoneText: { fontSize: 13, fontWeight: '700', color: '#2a9d4e' },
+  riderDoneText: { fontSize: 14, fontWeight: '800', color: colors.success },
   riderManageBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
-    backgroundColor: '#007AFF', paddingVertical: 12, borderRadius: 11, marginTop: 12,
-    shadowColor: '#007AFF', shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.28, shadowRadius: 8, elevation: 4,
-  },
-
-  updateButton: {
-    backgroundColor: '#007AFF',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    marginTop: 12,
-    alignItems: 'center',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: colors.primary, height: 50, borderRadius: radius.md, marginTop: 14,
   },
   updateButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 14,
-  },
-  badgeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  pinnedBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    marginTop: 8,
-    paddingVertical: 5,
-    paddingHorizontal: 9,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#34C75950',
-    backgroundColor: '#34C75915',
-  },
-  pinnedText: {
-    color: '#34C759',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  deliveryStatusBadge: {
-    backgroundColor: '#f0f8ff',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 6,
-    alignSelf: 'flex-start',
-    marginTop: 8,
-    borderWidth: 1,
-    borderColor: '#007AFF',
-  },
-  deliveryStatusText: {
-    color: '#007AFF',
-    fontSize: 12,
-    fontWeight: '600',
+    color: colors.white,
+    fontWeight: '800',
+    fontSize: 16,
   },
 });

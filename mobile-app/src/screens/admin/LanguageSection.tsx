@@ -3,6 +3,8 @@ import {
   ActivityIndicator, StyleSheet, Switch, Text, TouchableOpacity, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { colors, radius, space, fontSize, card, pagePadding } from '../../theme';
+import { ErrorState, friendlyError } from '../../components/ui';
 import { API_URL } from '../../constants/config';
 import { getAuthToken } from '../../services/authService';
 import { useDialog } from '../../components/AppDialog';
@@ -33,23 +35,28 @@ export function LanguageSection() {
   const { notify } = useDialog();
   const [access, setAccess] = useState<Access | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
+    setError(null);
     try {
       const token = await getAuthToken();
       const res = await fetch(`${API_URL}/localization/language-access/`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (res.ok) setAccess(await res.json());
-    } catch {
-      // Silent: the section stays blank and the screen's refresh retries.
+      if (!res.ok) throw new Error(`The server could not return the language settings (error ${res.status}).`);
+      setAccess(await res.json());
+    } catch (e: any) {
+      setError(e?.message || 'Could not load the language settings.');
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  const retry = () => { setLoading(true); load(); };
 
   const patch = async (body: Partial<Access>) => {
     if (!access) return;
@@ -67,13 +74,13 @@ export function LanguageSection() {
         },
         body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error('save failed');
+      if (!res.ok) throw new Error(`The server refused the change (error ${res.status}).`);
       setAccess(await res.json());
-    } catch {
+    } catch (e: any) {
       setAccess(previous);
       void notify({
         title: 'Could not save',
-        message: 'The language setting was not changed. Please try again.',
+        message: `The language setting was not changed. ${friendlyError(e?.message)}`,
         tone: 'destructive',
       });
     } finally {
@@ -93,15 +100,32 @@ export function LanguageSection() {
     <View style={styles.section}>
       <View style={styles.sectionHeader}>
         <View style={styles.sectionIcon}>
-          <Ionicons name="language" size={18} color="#7A5AF8" />
+          <Ionicons name="language" size={20} color={colors.primary} />
         </View>
         <Text style={styles.sectionTitle}>Language</Text>
       </View>
 
-      {loading || !access ? (
-        <ActivityIndicator size="small" color="#007AFF" style={{ marginVertical: 14 }} />
+      {loading ? (
+        <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: 14 }} />
+      ) : !access ? (
+        <ErrorState
+          title="Could not load the language settings"
+          message={error}
+          onRetry={retry}
+          style={styles.errorState}
+        />
       ) : (
         <>
+          {!!error && (
+            <View style={styles.errorNote}>
+              <Ionicons name="cloud-offline-outline" size={20} color={colors.danger} />
+              <Text style={styles.errorNoteText}>{friendlyError(error)}</Text>
+              <TouchableOpacity onPress={retry} accessibilityLabel="Try again">
+                <Text style={styles.errorNoteRetry}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           <View style={styles.masterRow}>
             <View style={{ flex: 1 }}>
               <Text style={styles.masterLabel}>Urdu (اردو)</Text>
@@ -115,8 +139,8 @@ export function LanguageSection() {
               value={access.urdu_enabled}
               onValueChange={(v) => patch({ urdu_enabled: v })}
               disabled={saving}
-              trackColor={{ false: '#e0e0e0', true: '#34C75940' }}
-              thumbColor={access.urdu_enabled ? '#34C759' : '#ccc'}
+              trackColor={{ false: colors.line, true: colors.primarySoft }}
+              thumbColor={access.urdu_enabled ? colors.primary : colors.disabled}
             />
           </View>
 
@@ -130,7 +154,7 @@ export function LanguageSection() {
               return (
                 <TouchableOpacity
                   key={value}
-                  style={styles.typeRow}
+                  style={[styles.typeRow, on && styles.typeRowOn]}
                   onPress={() => toggleType(value)}
                   disabled={saving}
                   accessibilityRole="checkbox"
@@ -138,11 +162,11 @@ export function LanguageSection() {
                 >
                   <Ionicons
                     name={on ? 'checkbox' : 'square-outline'}
-                    size={20}
-                    color={on ? '#007AFF' : '#c7cdd4'}
+                    size={24}
+                    color={on ? colors.primary : colors.muted}
                   />
                   <Text style={styles.typeLabel}>{label}</Text>
-                  <Text style={styles.typeState}>
+                  <Text style={[styles.typeState, on && styles.typeStateOn]}>
                     {on ? 'Can switch' : 'English only'}
                   </Text>
                 </TouchableOpacity>
@@ -157,34 +181,47 @@ export function LanguageSection() {
 
 const styles = StyleSheet.create({
   section: {
-    backgroundColor: 'white', borderRadius: 14, padding: 16,
-    marginHorizontal: 16, marginBottom: 14,
+    ...card,
+    padding: space.lg,
+    marginHorizontal: pagePadding,
+    marginBottom: space.lg,
   },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   sectionIcon: {
-    width: 34, height: 34, borderRadius: 10, backgroundColor: '#7A5AF818',
+    width: 40, height: 40, borderRadius: 20, backgroundColor: colors.primaryTint,
     alignItems: 'center', justifyContent: 'center',
   },
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#1a2530' },
+  sectionTitle: { flex: 1, fontSize: fontSize.md, fontWeight: '800', color: colors.ink },
+  errorState: { paddingVertical: space.sm },
+  errorNote: {
+    flexDirection: 'row', alignItems: 'center', gap: space.sm, marginTop: space.md, padding: space.md,
+    backgroundColor: colors.dangerBg, borderRadius: radius.md, borderWidth: 1, borderColor: colors.dangerLine,
+  },
+  errorNoteText: { flex: 1, fontSize: fontSize.sm, color: colors.danger, lineHeight: 19 },
+  errorNoteRetry: { fontSize: fontSize.sm, fontWeight: '800', color: colors.danger, paddingHorizontal: space.sm, paddingVertical: space.sm },
 
   masterRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    marginTop: 14, paddingVertical: 12, paddingHorizontal: 14,
-    backgroundColor: '#f7f9fc', borderRadius: 11,
-    borderWidth: 1, borderColor: '#e4e9ee',
+    flexDirection: 'row', alignItems: 'center', gap: space.md,
+    marginTop: space.lg, padding: space.md,
+    backgroundColor: colors.surfaceTint, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.line,
   },
-  masterLabel: { fontSize: 15, fontWeight: '700', color: '#1a2530' },
-  masterSub: { fontSize: 12, color: '#8a929b', marginTop: 3, lineHeight: 17 },
+  masterLabel: { fontSize: fontSize.md, fontWeight: '800', color: colors.ink },
+  masterSub: { fontSize: fontSize.sm, color: colors.muted, marginTop: 3, lineHeight: 19 },
 
   groupCaption: {
-    fontSize: 11, fontWeight: '700', color: '#8a929b',
-    letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 18, marginBottom: 4,
+    fontSize: fontSize.xs, fontWeight: '800', color: colors.muted,
+    letterSpacing: 0.6, textTransform: 'uppercase', marginTop: space.xl, marginBottom: space.sm,
   },
   disabledGroup: { opacity: 0.4 },
   typeRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: '#f2f4f7',
+    flexDirection: 'row', alignItems: 'center', gap: space.md,
+    minHeight: 52, paddingHorizontal: space.md, marginBottom: space.sm,
+    backgroundColor: colors.surfaceTint, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.line,
   },
-  typeLabel: { flex: 1, fontSize: 14.5, color: '#1a2530', fontWeight: '600' },
-  typeState: { fontSize: 12, color: '#8a929b' },
+  typeRowOn: { backgroundColor: colors.primaryTint, borderColor: colors.primarySoft },
+  typeLabel: { flex: 1, fontSize: fontSize.md, color: colors.ink, fontWeight: '700' },
+  typeState: { fontSize: fontSize.xs, fontWeight: '700', color: colors.muted },
+  typeStateOn: { color: colors.primaryDark },
 });

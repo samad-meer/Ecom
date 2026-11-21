@@ -1,3 +1,4 @@
+import { colors } from '../theme';
 import React, { useCallback, useContext, useEffect, useState, useSyncExternalStore } from 'react';
 import {
   ActivityIndicator, AppState, Linking, StyleSheet, Text, TouchableOpacity, View,
@@ -165,7 +166,7 @@ export const RiderLocationGate: React.FC<{ children: React.ReactNode }> = ({ chi
   if (!checked || status.state === 'starting') {
     return (
       <SafeAreaView style={styles.container}>
-        <ActivityIndicator size="large" color="#007AFF" />
+        <ActivityIndicator size="large" color={colors.primary} />
         <Text style={styles.starting}>
           {checked ? 'Starting location sharing…' : 'Checking location sharing…'}
         </Text>
@@ -178,7 +179,7 @@ export const RiderLocationGate: React.FC<{ children: React.ReactNode }> = ({ chi
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.iconWrap}>
-        <Ionicons name={copy.icon} size={38} color="#FF3B30" />
+        <Ionicons name={copy.icon} size={38} color={colors.danger} />
       </View>
 
       <Text style={styles.title}>{copy.title}</Text>
@@ -213,22 +214,22 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', padding: 28, gap: 4,
   },
   iconWrap: {
-    width: 78, height: 78, borderRadius: 39, backgroundColor: '#FF3B3014',
+    width: 78, height: 78, borderRadius: 39, backgroundColor: colors.danger + '14',
     alignItems: 'center', justifyContent: 'center', marginBottom: 18,
   },
-  title: { fontSize: 20, fontWeight: '700', color: '#1a2530', textAlign: 'center' },
+  title: { fontSize: 20, fontWeight: '700', color: colors.ink, textAlign: 'center' },
   body: {
-    fontSize: 14.5, color: '#5b6672', textAlign: 'center',
+    fontSize: 14.5, color: colors.textSecondary, textAlign: 'center',
     lineHeight: 21, marginTop: 10,
   },
-  detail: { fontSize: 12.5, color: '#8a929b', textAlign: 'center', marginTop: 10, lineHeight: 18 },
-  starting: { fontSize: 14.5, color: '#5b6672', marginTop: 14 },
+  detail: { fontSize: 12.5, color: colors.muted, textAlign: 'center', marginTop: 10, lineHeight: 18 },
+  starting: { fontSize: 14.5, color: colors.textSecondary, marginTop: 14 },
   primary: {
-    marginTop: 26, backgroundColor: '#007AFF', borderRadius: 12,
+    marginTop: 26, backgroundColor: colors.primary, borderRadius: 16,
     paddingVertical: 15, paddingHorizontal: 34, minWidth: 220, alignItems: 'center',
   },
-  primaryDisabled: { backgroundColor: '#a0c4ff' },
+  primaryDisabled: { backgroundColor: colors.primarySoft },
   primaryText: { color: '#fff', fontSize: 15.5, fontWeight: '700' },
   signOut: { marginTop: 18, padding: 10 },
-  signOutText: { fontSize: 14, fontWeight: '600', color: '#8a929b' },
+  signOutText: { fontSize: 14, fontWeight: '600', color: colors.muted },
 });

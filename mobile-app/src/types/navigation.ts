@@ -42,6 +42,8 @@ export type RootStackParamList = {
   AdminShop: undefined;
   /** Opens straight to a customer's statement when a customer is supplied. */
   AdminLedger: { customerId?: number; customerName?: string } | undefined;
+  /** Rider Online taps waiting for the office to match against the bank. */
+  AdminPaymentClaims: undefined;
   /** `riderId` is the Django user id — selects one rider instead of fitting all. */
   AdminRiderMap: { riderId?: number } | undefined;
 };

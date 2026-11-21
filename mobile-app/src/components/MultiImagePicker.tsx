@@ -1,3 +1,4 @@
+import { colors } from '../theme';
 import React from 'react';
 import { View, Text, TouchableOpacity, Image, StyleSheet, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -87,7 +88,7 @@ export function MultiImagePicker({
 
         {canAddMore && (
           <TouchableOpacity style={styles.addBtn} onPress={pick}>
-            <Ionicons name="image-outline" size={22} color="#999" />
+            <Ionicons name="image-outline" size={22} color={colors.muted} />
             <Text style={styles.addText}>Add</Text>
           </TouchableOpacity>
         )}
@@ -100,19 +101,19 @@ export function MultiImagePicker({
 }
 
 const styles = StyleSheet.create({
-  label: { fontSize: 13, fontWeight: '600', color: '#333', marginBottom: 6, marginTop: 4 },
-  hint: { fontSize: 11, fontWeight: '400', color: '#999' },
+  label: { fontSize: 13, fontWeight: '600', color: colors.ink, marginBottom: 6, marginTop: 4 },
+  hint: { fontSize: 12, fontWeight: '400', color: colors.muted },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   thumbWrap: { position: 'relative' },
-  thumb: { width: 76, height: 76, borderRadius: 10, backgroundColor: '#f0f0f0' },
+  thumb: { width: 76, height: 76, borderRadius: 14, backgroundColor: colors.lineSoft },
   removeBtn: {
     position: 'absolute', top: -6, right: -6, width: 22, height: 22, borderRadius: 11,
     backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center',
   },
   addBtn: {
-    width: 76, height: 76, borderRadius: 10, borderWidth: 1, borderColor: '#ddd',
-    borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center', backgroundColor: '#fafafa',
+    width: 76, height: 76, borderRadius: 14, borderWidth: 1, borderColor: colors.line,
+    borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surfaceTint,
   },
-  addText: { fontSize: 10, color: '#999', marginTop: 2 },
-  replaceHint: { fontSize: 11, color: '#999', marginTop: 4 },
+  addText: { fontSize: 12, color: colors.muted, marginTop: 2 },
+  replaceHint: { fontSize: 12, color: colors.muted, marginTop: 4 },
 });

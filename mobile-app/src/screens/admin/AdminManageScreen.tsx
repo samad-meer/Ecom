@@ -3,29 +3,50 @@ import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-nati
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
+import { colors, space, fontSize, card, pagePadding } from '../../theme';
 import { RootStackParamList } from '../../types/navigation';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
+/** Soft tint behind each icon so the tiles are told apart at a glance. */
+const TONES = {
+  primary: { fg: colors.primary, bg: colors.primaryTint },
+  info: { fg: colors.info, bg: colors.infoBg },
+  success: { fg: colors.success, bg: colors.successBg },
+  mint: { fg: colors.mintText, bg: colors.mint },
+  warning: { fg: colors.warningText, bg: colors.warningBg },
+  sun: { fg: colors.ink, bg: colors.sun },
+  neutral: { fg: colors.textSecondary, bg: colors.lineSoft },
+} as const;
+
+type ToneKey = keyof typeof TONES;
+
 interface MenuItemProps {
   icon: keyof typeof Ionicons.glyphMap;
-  color: string;
+  tone: ToneKey;
   label: string;
   description: string;
   onPress: () => void;
 }
 
-function MenuItem({ icon, color, label, description, onPress }: MenuItemProps) {
+function MenuItem({ icon, tone, label, description, onPress }: MenuItemProps) {
+  const t = TONES[tone];
   return (
-    <TouchableOpacity style={styles.item} onPress={onPress} activeOpacity={0.7}>
-      <View style={[styles.iconWrap, { backgroundColor: color + '18' }]}>
-        <Ionicons name={icon} size={22} color={color} />
+    <TouchableOpacity
+      style={styles.item}
+      onPress={onPress}
+      activeOpacity={0.8}
+      accessibilityRole="button"
+      accessibilityLabel={`${label}. ${description}`}
+    >
+      <View style={[styles.iconWrap, { backgroundColor: t.bg }]}>
+        <Ionicons name={icon} size={24} color={t.fg} />
       </View>
       <View style={styles.itemText}>
         <Text style={styles.itemLabel}>{label}</Text>
         <Text style={styles.itemDesc}>{description}</Text>
       </View>
-      <Ionicons name="chevron-forward" size={18} color="#ccc" />
+      <Ionicons name="chevron-forward" size={20} color={colors.muted} />
     </TouchableOpacity>
   );
 }
@@ -38,135 +59,114 @@ export const AdminManageScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <SectionHeader title="PEOPLE" />
-      <View style={styles.card}>
-        <MenuItem
-          icon="people"
-          color="#5856D6"
-          label="Staff Management"
-          description="View, add, and update staff & riders"
-          onPress={() => navigation.navigate('AdminStaff', { role: 'all' })}
-        />
-        <MenuItem
-          icon="bicycle"
-          color="#32ADE6"
-          label="Riders"
-          description="Delivery riders — profiles and password resets"
-          onPress={() => navigation.navigate('AdminStaff', { role: 'riders' })}
-        />
-      </View>
+      <MenuItem
+        icon="people"
+        tone="primary"
+        label="Staff Management"
+        description="View, add, and update staff & riders"
+        onPress={() => navigation.navigate('AdminStaff', { role: 'all' })}
+      />
+      <MenuItem
+        icon="bicycle"
+        tone="info"
+        label="Riders"
+        description="Delivery riders — profiles and password resets"
+        onPress={() => navigation.navigate('AdminStaff', { role: 'riders' })}
+      />
 
       <SectionHeader title="MONEY" />
-      <View style={styles.card}>
-        <MenuItem
-          icon="wallet"
-          color="#FF3B30"
-          label="Customer Ledger"
-          description="Balances, statements, payments & receipts"
-          onPress={() => navigation.navigate('AdminLedger')}
-        />
-      </View>
+      <MenuItem
+        icon="wallet"
+        tone="success"
+        label="Customer Ledger"
+        description="Balances, statements, payments & receipts"
+        onPress={() => navigation.navigate('AdminLedger')}
+      />
 
       <SectionHeader title="OPERATIONS" />
-      <View style={styles.card}>
-        <MenuItem
-          icon="water"
-          color="#32ADE6"
-          label="Plant / Deliveries"
-          description="Ledger, daily records, and analytics"
-          onPress={() => navigation.navigate('AdminPlant')}
-        />
-        <MenuItem
-          icon="bag"
-          color="#30D158"
-          label="Shop Management"
-          description="Add, edit, and manage products"
-          onPress={() => navigation.navigate('AdminShop')}
-        />
-      </View>
+      <MenuItem
+        icon="water"
+        tone="mint"
+        label="Plant / Deliveries"
+        description="Ledger, daily records, and analytics"
+        onPress={() => navigation.navigate('AdminPlant')}
+      />
+      <MenuItem
+        icon="bag"
+        tone="warning"
+        label="Shop Management"
+        description="Add, edit, and manage products"
+        onPress={() => navigation.navigate('AdminShop')}
+      />
 
       <SectionHeader title="CONFIGURATION" />
-      <View style={styles.card}>
-        <MenuItem
-          icon="settings"
-          color="#FF9500"
-          label="Settings"
-          description="Pricing, bottle types, customer types"
-          onPress={() => navigation.navigate('AdminSettings')}
-        />
-      </View>
+      <MenuItem
+        icon="settings"
+        tone="sun"
+        label="Settings"
+        description="Pricing, bottle types, customer types"
+        onPress={() => navigation.navigate('AdminSettings')}
+      />
 
       <SectionHeader title="COMMUNICATIONS" />
-      <View style={styles.card}>
-        <MenuItem
-          icon="notifications"
-          color="#007AFF"
-          label="Push Notifications"
-          description="Send alerts to customers or delivery staff"
-          onPress={() => navigation.navigate('AdminNotification')}
-        />
-      </View>
+      <MenuItem
+        icon="notifications"
+        tone="primary"
+        label="Push Notifications"
+        description="Send alerts to customers or delivery staff"
+        onPress={() => navigation.navigate('AdminNotification')}
+      />
 
       <SectionHeader title="MONITORING" />
-      <View style={styles.card}>
-        <MenuItem
-          icon="map"
-          color="#AF52DE"
-          label="Live Rider Map"
-          description="Where every rider is right now, and today's routes"
-          onPress={() => navigation.navigate('AdminRiderMap')}
-        />
-        <MenuItem
-          icon="pulse"
-          color="#FF2D55"
-          label="Activity Log"
-          description="Track every important action in the system"
-          onPress={() => navigation.navigate('AdminActivity')}
-        />
-      </View>
+      <MenuItem
+        icon="map"
+        tone="info"
+        label="Live Rider Map"
+        description="Where every rider is right now, and today's routes"
+        onPress={() => navigation.navigate('AdminRiderMap')}
+      />
+      <MenuItem
+        icon="pulse"
+        tone="neutral"
+        label="Activity Log"
+        description="Track every important action in the system"
+        onPress={() => navigation.navigate('AdminActivity')}
+      />
     </ScrollView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  container: { flex: 1, backgroundColor: colors.bg },
+  content: { paddingHorizontal: pagePadding, paddingTop: space.xs, paddingBottom: space.xxl },
   sectionHeader: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#999',
+    fontSize: fontSize.xs,
+    fontWeight: '800',
+    color: colors.muted,
     letterSpacing: 0.8,
-    marginTop: 24,
-    marginBottom: 8,
-    marginHorizontal: 16,
-  },
-  card: {
-    backgroundColor: 'white',
-    borderRadius: 14,
-    marginHorizontal: 16,
-    overflow: 'hidden',
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
+    marginTop: space.xl,
+    marginBottom: space.sm,
+    marginLeft: space.xs,
   },
   item: {
+    ...card,
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
+    padding: space.lg,
     gap: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f5f5f5',
+    minHeight: 84,
+    marginBottom: space.md,
   },
   iconWrap: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  itemText: { flex: 1 },
-  itemLabel: { fontSize: 15, fontWeight: '600', color: '#1a1a1a' },
-  itemDesc: { fontSize: 12, color: '#888', marginTop: 2 },
+  itemText: { flex: 1, gap: 2 },
+  itemLabel: { fontSize: fontSize.md, fontWeight: '800', color: colors.ink },
+  itemDesc: { fontSize: fontSize.sm, color: colors.muted, lineHeight: 19 },
 });

@@ -1,3 +1,4 @@
+import { colors, radius, card, pagePadding } from '../theme';
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -29,7 +30,7 @@ export const OrderSuccessScreen: React.FC<Props> = ({ route, navigation }) => {
     <SafeAreaView style={styles.container} edges={['left', 'right']}>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.iconContainer}>
-          <Ionicons name="checkmark-circle" size={88} color="#2ecc71" />
+          <Ionicons name="checkmark-circle" size={80} color={colors.success} />
         </View>
 
         <Text style={styles.title}>Order Placed!</Text>
@@ -65,6 +66,7 @@ export const OrderSuccessScreen: React.FC<Props> = ({ route, navigation }) => {
             })
           }
         >
+          <Ionicons name="receipt-outline" size={20} color={colors.white} />
           <Text style={styles.primaryButtonText}>View My Orders</Text>
         </TouchableOpacity>
 
@@ -87,103 +89,103 @@ export const OrderSuccessScreen: React.FC<Props> = ({ route, navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: colors.bg,
   },
   content: {
     flexGrow: 1,
     alignItems: 'center',
-    padding: 24,
-    paddingTop: 48,
+    justifyContent: 'center',
+    padding: pagePadding + 4,
+    paddingBottom: 24,
   },
   iconContainer: {
-    marginBottom: 16,
+    width: 128,
+    height: 128,
+    borderRadius: 64,
+    backgroundColor: colors.mint,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
   },
   title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#333',
+    fontSize: 24,
+    fontWeight: '800',
+    color: colors.ink,
     marginBottom: 8,
   },
   subtitle: {
-    fontSize: 15,
-    color: '#666',
+    fontSize: 16,
+    color: colors.textSecondary,
     textAlign: 'center',
-    marginBottom: 32,
-    lineHeight: 22,
+    marginBottom: 28,
+    lineHeight: 24,
   },
   card: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 20,
+    ...card,
+    paddingHorizontal: 20,
+    paddingVertical: 8,
     width: '100%',
     marginBottom: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    elevation: 3,
   },
   row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: 14,
   },
   label: {
-    fontSize: 15,
-    color: '#666',
+    fontSize: 14,
+    color: colors.textSecondary,
     // The label is short and fixed; the value is the side that must give way.
     flexShrink: 0,
     marginRight: 12,
   },
   value: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#333',
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.ink,
     // Without these the row could not shrink either column, so a long value
     // simply ran past the edge of the card and was clipped mid-word.
     flexShrink: 1,
     textAlign: 'right',
   },
   totalValue: {
-    color: '#2ecc71',
-    fontSize: 17,
+    color: colors.ink,
+    fontSize: 24,
   },
   divider: {
     height: 1,
-    backgroundColor: '#f0f0f0',
-  },
-  paymentNote: {
-    marginTop: 12,
-    fontSize: 13,
-    color: '#888',
-    textAlign: 'center',
-    lineHeight: 20,
+    backgroundColor: colors.lineSoft,
   },
   primaryButton: {
-    backgroundColor: '#007AFF',
-    paddingVertical: 16,
-    borderRadius: 12,
+    flexDirection: 'row',
+    gap: 8,
+    backgroundColor: colors.primary,
+    height: 54,
+    borderRadius: radius.md,
     width: '100%',
     alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 12,
   },
   primaryButtonText: {
-    color: '#fff',
+    color: colors.white,
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '800',
   },
   secondaryButton: {
-    paddingVertical: 16,
-    borderRadius: 12,
+    height: 54,
+    borderRadius: radius.md,
     width: '100%',
     alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1.5,
-    borderColor: '#007AFF',
+    borderColor: colors.primary,
+    backgroundColor: colors.surface,
   },
   secondaryButtonText: {
-    color: '#007AFF',
+    color: colors.primary,
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '800',
   },
 });

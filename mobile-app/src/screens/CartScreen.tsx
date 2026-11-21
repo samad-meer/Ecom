@@ -1,11 +1,14 @@
+import { colors, radius, shadow } from '../theme';
 import React from 'react';
 import { View, Text, FlatList, StyleSheet, Image, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import { useCart } from '../context/CartContext';
 import { CartItem } from '../types/cart';
 import { useLanguage } from '../context/LanguageContext';
+import { EmptyState } from '../components/ui';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Cart'>;
 
@@ -26,7 +29,7 @@ export const CartScreen: React.FC<Props> = ({ navigation }) => {
         <Image source={{ uri: item.image }} style={styles.itemImage} />
       ) : (
         <View style={[styles.itemImage, styles.placeholder]}>
-          <Text style={styles.placeholderText}>{t('no_img', 'No Img')}</Text>
+          <Ionicons name="water" size={26} color={colors.primary} />
         </View>
       )}
 
@@ -36,26 +39,30 @@ export const CartScreen: React.FC<Props> = ({ navigation }) => {
 
         <View style={styles.quantityContainer}>
           <TouchableOpacity
-            style={styles.quantityButton}
+            style={[styles.quantityButton, styles.quantityButtonOutline]}
             onPress={() => updateQuantity(item.id, item.quantity - 1)}
+            accessibilityLabel={`Remove one ${item.name}`}
+            hitSlop={8}
           >
-            <Text style={styles.quantityButtonText}>−</Text>
+            <Ionicons name="remove" size={18} color={colors.primary} />
           </TouchableOpacity>
 
           <Text style={styles.quantityText}>{item.quantity}</Text>
 
           <TouchableOpacity
-            style={styles.quantityButton}
+            style={[styles.quantityButton, styles.quantityButtonFilled]}
             onPress={() => updateQuantity(item.id, item.quantity + 1)}
+            accessibilityLabel={`Add one more ${item.name}`}
+            hitSlop={8}
           >
-            <Text style={styles.quantityButtonText}>+</Text>
+            <Ionicons name="add" size={18} color={colors.white} />
           </TouchableOpacity>
         </View>
       </View>
 
       <View style={styles.itemRightCol}>
-        <TouchableOpacity style={styles.removeButton} onPress={() => removeFromCart(item.id)}>
-          <Text style={styles.removeButtonText}>✕</Text>
+        <TouchableOpacity style={styles.removeButton} onPress={() => removeFromCart(item.id)} accessibilityLabel={`Remove ${item.name} from cart`} hitSlop={10}>
+          <Ionicons name="trash-outline" size={20} color={colors.danger} />
         </TouchableOpacity>
         <Text style={styles.itemSubtotal}>
           PKR {(parseFloat(item.price) * item.quantity).toFixed(2)}
@@ -67,7 +74,14 @@ export const CartScreen: React.FC<Props> = ({ navigation }) => {
   if (items.length === 0) {
     return (
       <View style={styles.emptyContainer}>
-        <Text style={styles.emptyText}>{t('your_cart_empty', 'Your cart is empty')}</Text>
+        <EmptyState icon="cart-outline" title={t('your_cart_empty', 'Your cart is empty')} />
+        <TouchableOpacity
+          style={styles.browseButton}
+          onPress={() => navigation.navigate('MainTabs')}
+          accessibilityRole="button"
+        >
+          <Text style={styles.browseButtonText}>Browse products</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -120,7 +134,7 @@ export const CartScreen: React.FC<Props> = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: colors.bg,
   },
   listContent: {
     padding: 16,
@@ -130,37 +144,46 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: colors.bg,
   },
-  emptyText: {
-    fontSize: 18,
-    color: '#888',
+  browseButton: {
+    backgroundColor: colors.primary,
+    height: 50,
+    paddingHorizontal: 28,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  browseButtonText: {
+    color: colors.white,
+    fontSize: 16,
+    fontWeight: '800',
   },
   cartItem: {
     flexDirection: 'row',
-    backgroundColor: '#fff',
-    borderRadius: 8,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg + 4,
     padding: 12,
     marginBottom: 12,
     alignItems: 'center',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+    borderWidth: 1,
+    borderColor: colors.line,
+    ...shadow.card,
   },
   itemImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 4,
-    backgroundColor: '#eee',
+    width: 68,
+    height: 68,
+    borderRadius: radius.md,
+    backgroundColor: colors.lineSoft,
   },
   placeholder: {
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: colors.primaryTint,
   },
   placeholderText: {
-    fontSize: 10,
-    color: '#aaa',
+    fontSize: 12,
+    color: colors.muted,
   },
   itemDetails: {
     flex: 1,
@@ -170,11 +193,11 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: 'bold',
     marginBottom: 4,
-    color: '#222',
+    color: colors.ink,
   },
   itemPrice: {
     fontSize: 13,
-    color: '#666',
+    color: colors.textSecondary,
     marginBottom: 8,
   },
   quantityContainer: {
@@ -182,22 +205,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   quantityButton: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: '#eee',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
   },
+  quantityButtonOutline: { borderWidth: 1.8, borderColor: colors.primary },
+  quantityButtonFilled: { backgroundColor: colors.primary },
   quantityButtonText: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#333',
+    color: colors.ink,
   },
   quantityText: {
-    marginHorizontal: 10,
-    fontSize: 14,
-    fontWeight: '600',
+    marginHorizontal: 12,
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.ink,
   },
   itemRightCol: {
     alignItems: 'flex-end',
@@ -208,21 +233,18 @@ const styles = StyleSheet.create({
   removeButton: {
     padding: 4,
   },
-  removeButtonText: {
-    fontSize: 16,
-    color: '#ff4444',
-  },
   itemSubtotal: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#2ecc71',
+    fontSize: 15,
+    fontWeight: '800',
+    color: colors.ink,
   },
+  // A rounded sheet that rises from the bottom, holding the total and the button.
   footer: {
-    backgroundColor: '#fff',
-    padding: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-    elevation: 10,
+    backgroundColor: colors.surface,
+    padding: 20,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    ...shadow.float,
   },
   feeRow: {
     flexDirection: 'row',
@@ -232,25 +254,25 @@ const styles = StyleSheet.create({
   },
   feeLabel: {
     fontSize: 15,
-    color: '#555',
+    color: colors.textSecondary,
   },
   feeValue: {
     fontSize: 15,
-    color: '#333',
+    color: colors.ink,
     fontWeight: '500',
   },
   freeTag: {
     fontSize: 14,
-    color: '#2ecc71',
+    color: colors.success,
     fontWeight: '700',
-    backgroundColor: '#e8f8f0',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
+    backgroundColor: colors.successBg,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: radius.pill,
   },
   divider: {
     height: 1,
-    backgroundColor: '#eee',
+    backgroundColor: colors.lineSoft,
     marginVertical: 10,
   },
   totalRow: {
@@ -262,22 +284,23 @@ const styles = StyleSheet.create({
   totalLabel: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#222',
+    color: colors.ink,
   },
   totalAmount: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#2ecc71',
+    fontSize: 24,
+    fontWeight: '800',
+    color: colors.ink,
   },
   checkoutButton: {
-    backgroundColor: '#007AFF',
-    paddingVertical: 14,
-    borderRadius: 8,
+    backgroundColor: colors.primary,
+    height: 54,
+    borderRadius: radius.md + 2,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   checkoutButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
+    color: colors.white,
+    fontSize: 17,
+    fontWeight: '800',
   },
 });

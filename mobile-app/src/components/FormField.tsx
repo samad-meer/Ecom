@@ -1,3 +1,4 @@
+import { colors } from '../theme';
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,8 +12,8 @@ import { Ionicons } from '@expo/vector-icons';
  * tell which fields they could safely skip.
  */
 
-export const OK_GREEN = '#34C759';
-export const ERROR_RED = '#D93025';
+export const OK_GREEN = colors.success;
+export const ERROR_RED = colors.danger;
 
 /** Small "Required" / "Optional" pill shown next to a field label. */
 export const FieldLabel = ({ text, required }: { text: string; required?: boolean }) => (
@@ -84,23 +85,23 @@ export const styles = StyleSheet.create({
   },
   label: {
     fontSize: 14,
-    color: '#333',
+    color: colors.ink,
     fontWeight: '500',
   },
   badge: {
     paddingHorizontal: 7,
     paddingVertical: 2,
-    borderRadius: 4,
+    borderRadius: 6,
   },
-  badgeRequired: { backgroundColor: '#FFE5E5' },
-  badgeOptional: { backgroundColor: '#EFEFEF' },
+  badgeRequired: { backgroundColor: colors.dangerBg },
+  badgeOptional: { backgroundColor: colors.bg },
   badgeText: {
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: '700',
     letterSpacing: 0.3,
   },
   badgeTextRequired: { color: ERROR_RED },
-  badgeTextOptional: { color: '#777' },
+  badgeTextOptional: { color: colors.muted },
   fieldError: {
     fontSize: 12,
     color: ERROR_RED,
@@ -109,14 +110,14 @@ export const styles = StyleSheet.create({
   rulesBox: {
     marginTop: 10,
     padding: 12,
-    borderRadius: 8,
-    backgroundColor: '#f6f8fa',
+    borderRadius: 12,
+    backgroundColor: colors.bg,
     gap: 6,
   },
   rulesTitle: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#555',
+    color: colors.textSecondary,
     marginBottom: 2,
   },
   ruleRow: {
@@ -126,7 +127,7 @@ export const styles = StyleSheet.create({
   },
   ruleText: {
     fontSize: 12,
-    color: '#888',
+    color: colors.muted,
   },
   ruleTextMet: {
     color: OK_GREEN,

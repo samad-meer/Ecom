@@ -8,14 +8,16 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
-  Platform,
   Modal,
   FlatList,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { colors, radius, space, fontSize, card, pagePadding } from '../../theme';
 import { API_URL } from '../../constants/config';
 import { getAuthToken } from '../../services/authService';
+import { EmptyState, ErrorState, StatusPill, Tone, friendlyError } from '../../components/ui';
+import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
 
 type RecipientType = 'all' | 'customers' | 'riders';
 type TabType = 'compose' | 'history' | 'templates';
@@ -26,6 +28,8 @@ interface Recipient {
   description: string;
   icon: keyof typeof Ionicons.glyphMap;
   color: string;
+  /** Soft fill behind the icon. */
+  tint: string;
 }
 
 interface NotificationTemplate {
@@ -47,27 +51,36 @@ interface NotificationHistory {
   scheduled_for?: string;
 }
 
+const TABS: { key: TabType; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { key: 'compose', label: 'Compose', icon: 'create-outline' },
+  { key: 'templates', label: 'Templates', icon: 'documents-outline' },
+  { key: 'history', label: 'History', icon: 'time-outline' },
+];
+
 const RECIPIENTS: Recipient[] = [
   {
     key: 'all',
     label: 'Everyone',
     description: 'All customers and delivery staff',
     icon: 'people',
-    color: '#007AFF',
+    color: colors.primary,
+    tint: colors.primaryTint,
   },
   {
     key: 'customers',
     label: 'Customers Only',
     description: 'All registered customers',
     icon: 'person',
-    color: '#34C759',
+    color: colors.success,
+    tint: colors.successBg,
   },
   {
     key: 'riders',
     label: 'Delivery Boys Only',
     description: 'All delivery staff members',
     icon: 'bicycle',
-    color: '#FF9500',
+    color: colors.warning,
+    tint: colors.warningBg,
   },
 ];
 
@@ -116,6 +129,61 @@ const TEMPLATES: NotificationTemplate[] = [
   },
 ];
 
+/** The server's own wording when it gave one; the raw body only as a last resort. */
+const reasonFrom = (data: any): string => {
+  if (!data) return '';
+  if (typeof data === 'string') return data;
+  if (typeof data.detail === 'string') return data.detail;
+  if (typeof data.error === 'string') return data.error;
+  if (typeof data.message === 'string') return data.message;
+  return JSON.stringify(data);
+};
+
+const recipientLabel = (type: string): string => {
+  if (type === 'all') return 'Everyone';
+  if (type === 'customers') return 'Customers';
+  if (type === 'riders') return 'Riders';
+  if (type === 'test') return 'Test';
+  return type ? type.charAt(0).toUpperCase() + type.slice(1) : 'Unknown';
+};
+
+/** How much of the send actually landed: the tone carries it, the words say it. */
+const deliveryTone = (sent: number, total: number): Tone => {
+  if (total <= 0) return 'neutral';
+  if (sent >= total) return 'success';
+  if (sent <= 0) return 'danger';
+  return 'warning';
+};
+
+// ─── Template card ────────────────────────────────────────────────────────────
+
+function TemplateCard({
+  template,
+  onPress,
+  compact,
+}: {
+  template: NotificationTemplate;
+  onPress: () => void;
+  /** The tab shows a two-line teaser and a chevron; the sheet shows it all. */
+  compact?: boolean;
+}) {
+  return (
+    <TouchableOpacity style={styles.templateCard} onPress={onPress} activeOpacity={0.7}>
+      <View style={styles.templateIcon}>
+        <Ionicons name={template.icon} size={24} color={colors.primary} />
+      </View>
+      <View style={styles.templateContent}>
+        <StatusPill label={template.category} tone="primary" />
+        <Text style={styles.templateTitle}>{template.title}</Text>
+        <Text style={styles.templateBody} numberOfLines={compact ? 2 : undefined}>
+          {template.body}
+        </Text>
+      </View>
+      {compact ? <Ionicons name="chevron-forward" size={20} color={colors.muted} /> : null}
+    </TouchableOpacity>
+  );
+}
+
 export const AdminNotificationScreen: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('compose');
   const [title, setTitle] = useState('');
@@ -145,16 +213,22 @@ export const AdminNotificationScreen: React.FC = () => {
       });
       if (!res.ok) {
         // Without this a failed request looked exactly like "nothing sent yet".
+        let detail = '';
+        try {
+          detail = reasonFrom(await res.json());
+        } catch {
+          // Not JSON: the status code below is all there is to report.
+        }
         throw new Error(
           res.status === 401 || res.status === 403
             ? 'You do not have permission to view history.'
-            : `Could not load history (${res.status}).`,
+            : detail || `Could not load history (${res.status}).`,
         );
       }
       setHistory(await res.json());
     } catch (e: any) {
       console.error('Error loading history:', e);
-      setHistoryError(e?.message || 'Could not load history.');
+      setHistoryError(friendlyError(e?.message));
     } finally {
       setLoadingHistory(false);
     }
@@ -221,11 +295,12 @@ export const AdminNotificationScreen: React.FC = () => {
                 },
                 body: JSON.stringify(payload),
               });
-              const data = await res.json();
-              if (!res.ok) throw new Error(JSON.stringify(data));
+              // A server error page is not JSON; the status is still worth showing.
+              const data = await res.json().catch(() => null);
+              if (!res.ok) throw new Error(reasonFrom(data) || `The server returned error ${res.status}.`);
 
               const { sent, total_tokens } = data as { sent: number; total_tokens: number };
-              
+
               if (testMode) {
                 Alert.alert('Test Sent', 'Test notification sent to your device.');
               } else {
@@ -242,7 +317,7 @@ export const AdminNotificationScreen: React.FC = () => {
                 );
               }
             } catch (e: any) {
-              Alert.alert('Error', 'Failed to send notification. Check your connection.');
+              Alert.alert('Error', `Failed to send notification: ${friendlyError(e?.message)}`);
             } finally {
               setSending(false);
             }
@@ -253,68 +328,41 @@ export const AdminNotificationScreen: React.FC = () => {
   };
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={styles.root}>
       {/* Tabs */}
       <View style={styles.tabs}>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'compose' && styles.tabActive]}
-          onPress={() => setActiveTab('compose')}
-        >
-          <Ionicons
-            name="create-outline"
-            size={20}
-            color={activeTab === 'compose' ? '#007AFF' : '#999'}
-          />
-          <Text style={[styles.tabText, activeTab === 'compose' && styles.tabTextActive]}>
-            Compose
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'templates' && styles.tabActive]}
-          onPress={() => setActiveTab('templates')}
-        >
-          <Ionicons
-            name="documents-outline"
-            size={20}
-            color={activeTab === 'templates' ? '#007AFF' : '#999'}
-          />
-          <Text style={[styles.tabText, activeTab === 'templates' && styles.tabTextActive]}>
-            Templates
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'history' && styles.tabActive]}
-          onPress={() => setActiveTab('history')}
-        >
-          <Ionicons
-            name="time-outline"
-            size={20}
-            color={activeTab === 'history' ? '#007AFF' : '#999'}
-          />
-          <Text style={[styles.tabText, activeTab === 'history' && styles.tabTextActive]}>
-            History
-          </Text>
-        </TouchableOpacity>
+        {TABS.map((t) => {
+          const active = activeTab === t.key;
+          return (
+            <TouchableOpacity
+              key={t.key}
+              style={[styles.tab, active && styles.tabActive]}
+              onPress={() => setActiveTab(t.key)}
+            >
+              <Ionicons name={t.icon} size={18} color={active ? colors.white : colors.muted} />
+              <Text style={[styles.tabText, active && styles.tabTextActive]}>{t.label}</Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       {/* Compose Tab */}
       {activeTab === 'compose' && (
-        <KeyboardAvoidingView
-          style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        <KeyboardAwareScrollView
+          style={styles.container}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
         >
-          <ScrollView
-            style={styles.container}
-            contentContainerStyle={{ paddingBottom: 40 }}
-            keyboardShouldPersistTaps="handled"
-          >
+          {/* Scrolls the focused field above the keyboard on both platforms,
+              which KeyboardAvoidingView does not do on Android. */}
+          <View>
             {/* Quick Actions */}
             <View style={styles.quickActions}>
               <TouchableOpacity
                 style={[styles.quickActionBtn, testMode && styles.quickActionBtnActive]}
                 onPress={() => setTestMode(!testMode)}
               >
-                <Ionicons name="flask" size={18} color={testMode ? '#007AFF' : '#666'} />
+                <Ionicons name="flask" size={16} color={testMode ? colors.white : colors.textSecondary} />
                 <Text style={[styles.quickActionText, testMode && styles.quickActionTextActive]}>
                   Test Mode
                 </Text>
@@ -323,11 +371,11 @@ export const AdminNotificationScreen: React.FC = () => {
                 style={styles.quickActionBtn}
                 onPress={() => setShowTemplates(true)}
               >
-                <Ionicons name="copy" size={18} color="#666" />
+                <Ionicons name="copy" size={16} color={colors.textSecondary} />
                 <Text style={styles.quickActionText}>Use Template</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.quickActionBtn} onPress={saveDraft}>
-                <Ionicons name="save" size={18} color="#666" />
+                <Ionicons name="save" size={16} color={colors.textSecondary} />
                 <Text style={styles.quickActionText}>Save Draft</Text>
               </TouchableOpacity>
             </View>
@@ -335,40 +383,37 @@ export const AdminNotificationScreen: React.FC = () => {
             {/* Recipients */}
             {!testMode && (
               <>
-                <Text style={styles.sectionLabel}>SEND TO</Text>
-                <View style={styles.card}>
-                  {RECIPIENTS.map((r, idx) => (
-                    <TouchableOpacity
-                      key={r.key}
-                      style={[
-                        styles.recipientRow,
-                        idx < RECIPIENTS.length - 1 && styles.rowDivider,
-                        recipient === r.key && styles.recipientRowActive,
-                      ]}
-                      onPress={() => setRecipient(r.key)}
-                      activeOpacity={0.7}
-                    >
-                      <View style={[styles.recipientIcon, { backgroundColor: r.color + '18' }]}>
-                        <Ionicons name={r.icon} size={20} color={r.color} />
-                      </View>
-                      <View style={styles.recipientText}>
-                        <Text style={styles.recipientLabel}>{r.label}</Text>
-                        <Text style={styles.recipientDesc}>{r.description}</Text>
-                      </View>
-                      <View style={[styles.radio, recipient === r.key && { borderColor: r.color }]}>
-                        {recipient === r.key && (
-                          <View style={[styles.radioDot, { backgroundColor: r.color }]} />
-                        )}
-                      </View>
-                    </TouchableOpacity>
-                  ))}
+                <Text style={styles.sectionTitle}>Send to</Text>
+                <View style={styles.recipientList}>
+                  {RECIPIENTS.map((r) => {
+                    const selected = recipient === r.key;
+                    return (
+                      <TouchableOpacity
+                        key={r.key}
+                        style={[styles.recipientRow, selected && styles.recipientRowActive]}
+                        onPress={() => setRecipient(r.key)}
+                        activeOpacity={0.7}
+                      >
+                        <View style={[styles.recipientIcon, { backgroundColor: r.tint }]}>
+                          <Ionicons name={r.icon} size={22} color={r.color} />
+                        </View>
+                        <View style={styles.recipientText}>
+                          <Text style={styles.recipientLabel}>{r.label}</Text>
+                          <Text style={styles.recipientDesc}>{r.description}</Text>
+                        </View>
+                        <View style={[styles.radio, selected && styles.radioActive]}>
+                          {selected && <View style={styles.radioDot} />}
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
               </>
             )}
 
             {testMode && (
               <View style={styles.testModeCard}>
-                <Ionicons name="information-circle" size={20} color="#007AFF" />
+                <Ionicons name="information-circle" size={22} color={colors.primaryDark} />
                 <Text style={styles.testModeText}>
                   Test mode: Notification will only be sent to your device
                 </Text>
@@ -376,43 +421,47 @@ export const AdminNotificationScreen: React.FC = () => {
             )}
 
             {/* Message composer */}
-            <Text style={styles.sectionLabel}>MESSAGE</Text>
-            <View style={styles.card}>
-              <View style={styles.inputRow}>
-                <Text style={styles.inputLabel}>Title</Text>
+            <Text style={styles.sectionTitle}>Message</Text>
+            <View style={styles.composer}>
+              <View style={styles.field}>
+                <View style={styles.labelRow}>
+                  <Text style={styles.inputLabel}>Title</Text>
+                  <Text style={styles.charCount}>{title.length}/80</Text>
+                </View>
                 <TextInput
                   style={styles.input}
                   placeholder="e.g. New offer available!"
-                  placeholderTextColor="#000"
+                  placeholderTextColor={colors.muted}
                   value={title}
                   onChangeText={setTitle}
                   maxLength={80}
                   returnKeyType="next"
                 />
-                <Text style={styles.charCount}>{title.length}/80</Text>
               </View>
-              <View style={styles.inputDivider} />
-              <View style={styles.inputRow}>
-                <Text style={styles.inputLabel}>Message</Text>
+              <View style={styles.field}>
+                <View style={styles.labelRow}>
+                  <Text style={styles.inputLabel}>Message</Text>
+                  <Text style={styles.charCount}>{body.length}/300</Text>
+                </View>
                 <TextInput
                   style={[styles.input, styles.textArea]}
                   placeholder="Enter notification message…"
-                  placeholderTextColor="#000"
+                  placeholderTextColor={colors.muted}
                   value={body}
                   onChangeText={setBody}
                   multiline
                   maxLength={300}
                   textAlignVertical="top"
                 />
-                <Text style={styles.charCount}>{body.length}/300</Text>
               </View>
-              <View style={styles.inputDivider} />
-              <View style={styles.inputRow}>
-                <Text style={styles.inputLabel}>Image URL (Optional)</Text>
+              <View style={styles.field}>
+                <View style={styles.labelRow}>
+                  <Text style={styles.inputLabel}>Image URL (Optional)</Text>
+                </View>
                 <TextInput
                   style={styles.input}
                   placeholder="https://example.com/image.png"
-                  placeholderTextColor="#000"
+                  placeholderTextColor={colors.muted}
                   value={imageUrl}
                   onChangeText={setImageUrl}
                   keyboardType="url"
@@ -424,10 +473,10 @@ export const AdminNotificationScreen: React.FC = () => {
             {/* Preview */}
             {(title.trim() || body.trim()) ? (
               <>
-                <Text style={styles.sectionLabel}>PREVIEW</Text>
+                <Text style={styles.sectionTitle}>Preview</Text>
                 <View style={styles.previewCard}>
                   <View style={styles.previewHeader}>
-                    <Ionicons name="notifications" size={16} color="#007AFF" />
+                    <Ionicons name="notifications" size={16} color={colors.primary} />
                     <Text style={styles.previewApp}>Century Sip</Text>
                     <Text style={styles.previewTime}>now</Text>
                   </View>
@@ -439,7 +488,7 @@ export const AdminNotificationScreen: React.FC = () => {
                   ) : null}
                   {imageUrl.trim() ? (
                     <View style={styles.previewImagePlaceholder}>
-                      <Ionicons name="image" size={24} color="#999" />
+                      <Ionicons name="image" size={24} color={colors.muted} />
                       <Text style={styles.previewImageText}>Image will be displayed here</Text>
                     </View>
                   ) : null}
@@ -449,54 +498,38 @@ export const AdminNotificationScreen: React.FC = () => {
 
             {/* Send button */}
             <TouchableOpacity
-              style={[
-                styles.sendBtn,
-                { backgroundColor: testMode ? '#FF9500' : selectedRecipient.color },
-                sending && styles.sendBtnDisabled,
-              ]}
+              style={[styles.sendBtn, sending && styles.sendBtnDisabled]}
               onPress={handleSend}
               disabled={sending}
               activeOpacity={0.85}
             >
               {sending ? (
-                <ActivityIndicator color="white" />
+                <ActivityIndicator color={colors.white} />
               ) : (
                 <>
-                  <Ionicons name="send" size={18} color="white" />
+                  <Ionicons name="send" size={18} color={colors.white} />
                   <Text style={styles.sendBtnText}>
                     {testMode ? 'Send Test' : `Send to ${selectedRecipient.label}`}
                   </Text>
                 </>
               )}
             </TouchableOpacity>
-          </ScrollView>
-        </KeyboardAvoidingView>
+          </View>
+        </KeyboardAwareScrollView>
       )}
 
       {/* Templates Tab */}
       {activeTab === 'templates' && (
-        <ScrollView style={styles.container}>
-          <Text style={styles.sectionLabel}>SELECT A TEMPLATE</Text>
+        <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+          <Text style={[styles.sectionTitle, styles.sectionTitleFirst]}>Select a template</Text>
           <View style={styles.templateList}>
             {TEMPLATES.map((template) => (
-              <TouchableOpacity
+              <TemplateCard
                 key={template.id}
-                style={styles.templateCard}
+                template={template}
                 onPress={() => applyTemplate(template)}
-                activeOpacity={0.7}
-              >
-                <View style={styles.templateIcon}>
-                  <Ionicons name={template.icon} size={24} color="#007AFF" />
-                </View>
-                <View style={styles.templateContent}>
-                  <Text style={styles.templateCategory}>{template.category}</Text>
-                  <Text style={styles.templateTitle}>{template.title}</Text>
-                  <Text style={styles.templateBody} numberOfLines={2}>
-                    {template.body}
-                  </Text>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color="#ccc" />
-              </TouchableOpacity>
+                compact
+              />
             ))}
           </View>
         </ScrollView>
@@ -505,96 +538,105 @@ export const AdminNotificationScreen: React.FC = () => {
       {/* History Tab */}
       {activeTab === 'history' && (
         <View style={{ flex: 1 }}>
-          {loadingHistory ? (
+          {loadingHistory && history.length === 0 ? (
             <View style={styles.centerContainer}>
-              <ActivityIndicator size="large" color="#007AFF" />
+              <ActivityIndicator size="large" color={colors.primary} />
             </View>
-          ) : historyError ? (
+          ) : historyError && history.length === 0 ? (
             <View style={styles.centerContainer}>
-              <Ionicons name="alert-circle-outline" size={56} color="#FF3B30" />
-              <Text style={[styles.emptyText, { color: '#FF3B30' }]}>{historyError}</Text>
-              <TouchableOpacity onPress={loadHistory}>
-                <Text style={{ color: '#007AFF', fontWeight: '700', marginTop: 8 }}>
-                  Try again
-                </Text>
-              </TouchableOpacity>
+              <ErrorState
+                title="Could not load history"
+                message={historyError}
+                onRetry={loadHistory}
+              />
             </View>
           ) : history.length === 0 ? (
             <View style={styles.centerContainer}>
-              <Ionicons name="time-outline" size={64} color="#ddd" />
-              <Text style={styles.emptyText}>No notifications sent yet</Text>
-              <Text style={styles.emptySubtext}>Your notification history will appear here</Text>
+              <EmptyState
+                icon="time-outline"
+                title="No notifications sent yet"
+                text="Your notification history will appear here."
+              />
             </View>
           ) : (
-            <FlatList
-              data={history}
-              keyExtractor={(item) => item.id.toString()}
-              contentContainerStyle={{ padding: 16 }}
-              renderItem={({ item }) => (
-                <View style={styles.historyCard}>
-                  <View style={styles.historyHeader}>
-                    <Text style={styles.historyTitle}>{item.title}</Text>
-                    <Text style={styles.historyDate}>
-                      {new Date(item.created_at).toLocaleDateString()}
-                    </Text>
-                  </View>
-                  <Text style={styles.historyBody} numberOfLines={2}>
-                    {item.body}
-                  </Text>
-                  <View style={styles.historyFooter}>
-                    <View style={styles.historyBadge}>
-                      <Ionicons name="people" size={12} color="#666" />
-                      <Text style={styles.historyBadgeText}>
-                        {item.recipient_type === 'all'
-                          ? 'Everyone'
-                          : item.recipient_type === 'customers'
-                          ? 'Customers'
-                          : 'Riders'}
-                      </Text>
-                    </View>
-                    <View style={styles.historyStats}>
-                      <Text style={styles.historyStatsText}>
-                        {item.sent_count} of {item.total_devices} sent
-                      </Text>
-                      <Text style={styles.historySuccessRate}>
-                        {item.total_devices > 0
-                          ? `(${Math.round((item.sent_count / item.total_devices) * 100)}%)`
-                          : '(0%)'}
-                      </Text>
-                    </View>
-                  </View>
+            <>
+              {/* A failed refresh keeps the list already loaded and says why here. */}
+              {historyError ? (
+                <View style={styles.errorBanner}>
+                  <Ionicons name="alert-circle" size={20} color={colors.danger} />
+                  <Text style={styles.errorBannerText}>{historyError}</Text>
+                  <TouchableOpacity onPress={loadHistory} style={styles.errorRetry}>
+                    <Text style={styles.errorRetryText}>Try again</Text>
+                  </TouchableOpacity>
                 </View>
-              )}
-            />
+              ) : null}
+              <FlatList
+                data={history}
+                keyExtractor={(item) => item.id.toString()}
+                contentContainerStyle={styles.historyList}
+                refreshControl={
+                  <RefreshControl
+                    refreshing={loadingHistory}
+                    onRefresh={loadHistory}
+                    colors={[colors.primary]}
+                    tintColor={colors.primary}
+                  />
+                }
+                renderItem={({ item }) => {
+                  const pct =
+                    item.total_devices > 0
+                      ? Math.round((item.sent_count / item.total_devices) * 100)
+                      : 0;
+                  return (
+                    <View style={styles.historyCard}>
+                      <View style={styles.historyHeader}>
+                        <Text style={styles.historyTitle}>{item.title}</Text>
+                        <Text style={styles.historyDate}>
+                          {new Date(item.created_at).toLocaleDateString()}
+                        </Text>
+                      </View>
+                      <Text style={styles.historyBody} numberOfLines={2}>
+                        {item.body}
+                      </Text>
+                      <View style={styles.historyFooter}>
+                        <StatusPill
+                          label={recipientLabel(item.recipient_type)}
+                          tone="neutral"
+                          icon="people"
+                        />
+                        <View style={styles.historyStats}>
+                          <StatusPill
+                            label={`${item.sent_count} of ${item.total_devices} sent`}
+                            tone={deliveryTone(item.sent_count, item.total_devices)}
+                          />
+                          <Text style={styles.historySuccessRate}>({pct}%)</Text>
+                        </View>
+                      </View>
+                    </View>
+                  );
+                }}
+              />
+            </>
           )}
         </View>
       )}
 
       {/* Template Modal */}
-      <Modal visible={showTemplates} animationType="slide" presentationStyle="pageSheet">
+      <Modal visible={showTemplates} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowTemplates(false)}>
         <View style={styles.modalContainer}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Choose Template</Text>
-            <TouchableOpacity onPress={() => setShowTemplates(false)}>
-              <Ionicons name="close" size={28} color="#666" />
+            <TouchableOpacity onPress={() => setShowTemplates(false)} style={styles.modalClose}>
+              <Ionicons name="close" size={28} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
-          <ScrollView>
+          <ScrollView contentContainerStyle={styles.modalList}>
             {TEMPLATES.map((template) => (
-              <TouchableOpacity
+              <TemplateCard
                 key={template.id}
-                style={styles.modalTemplateCard}
+                template={template}
                 onPress={() => applyTemplate(template)}
-              >
-                <View style={styles.modalTemplateIcon}>
-                  <Ionicons name={template.icon} size={24} color="#007AFF" />
-                </View>
-                <View style={styles.modalTemplateContent}>
-                  <Text style={styles.modalTemplateCategory}>{template.category}</Text>
-                  <Text style={styles.modalTemplateTitle}>{template.title}</Text>
-                  <Text style={styles.modalTemplateBody}>{template.body}</Text>
-                </View>
-              </TouchableOpacity>
+              />
             ))}
           </ScrollView>
         </View>
@@ -604,12 +646,17 @@ export const AdminNotificationScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  root: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1, backgroundColor: colors.bg },
+  scrollContent: { paddingHorizontal: pagePadding, paddingBottom: space.xxl },
+
+  // Pill tabs sit on the page itself, like the filters on the other admin screens.
   tabs: {
     flexDirection: 'row',
-    backgroundColor: 'white',
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    gap: space.sm,
+    paddingHorizontal: pagePadding,
+    paddingTop: space.sm,
+    paddingBottom: space.xs,
   },
   tab: {
     flex: 1,
@@ -617,403 +664,294 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    paddingVertical: 14,
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
+    height: 40,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.surface,
   },
-  tabActive: {
-    borderBottomColor: '#007AFF',
-  },
-  tabText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#999',
-  },
-  tabTextActive: {
-    color: '#007AFF',
-  },
+  tabActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  tabText: { fontSize: fontSize.sm, fontWeight: '700', color: colors.ink },
+  tabTextActive: { color: colors.white },
+
   quickActions: {
     flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingTop: 16,
+    flexWrap: 'wrap',
+    gap: space.sm,
+    paddingTop: space.md,
   },
   quickActionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: 'white',
-    borderRadius: 8,
+    minHeight: 40,
+    paddingHorizontal: 14,
+    backgroundColor: colors.surface,
+    borderRadius: radius.pill,
     borderWidth: 1,
-    borderColor: '#e5e5e5',
+    borderColor: colors.line,
   },
   quickActionBtnActive: {
-    backgroundColor: '#e8f4ff',
-    borderColor: '#007AFF',
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
   quickActionText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#666',
+    fontSize: fontSize.sm,
+    fontWeight: '700',
+    color: colors.ink,
   },
   quickActionTextActive: {
-    color: '#007AFF',
+    color: colors.white,
   },
   testModeCard: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    marginHorizontal: 16,
-    marginTop: 16,
-    padding: 14,
-    backgroundColor: '#e8f4ff',
-    borderRadius: 12,
+    marginTop: space.lg,
+    padding: space.lg,
+    backgroundColor: colors.primaryTint,
+    borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: '#007AFF',
+    borderColor: colors.primarySoft,
   },
   testModeText: {
     flex: 1,
-    fontSize: 13,
-    color: '#007AFF',
-    fontWeight: '500',
-  },
-  scheduleCard: {
-    marginHorizontal: 16,
-    marginTop: 16,
-    padding: 14,
-    backgroundColor: 'white',
-    borderRadius: 12,
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-  },
-  scheduleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  scheduleLabel: {
-    flex: 1,
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#1a1a1a',
-  },
-  dateButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 12,
-    padding: 12,
-    backgroundColor: '#f8f9ff',
-    borderRadius: 8,
-  },
-  dateButtonText: {
-    fontSize: 14,
-    color: '#007AFF',
-    fontWeight: '500',
-  },
-  sectionLabel: {
-    fontSize: 11,
+    fontSize: fontSize.sm,
+    color: colors.primaryDark,
     fontWeight: '700',
-    color: '#999',
-    letterSpacing: 0.8,
-    marginTop: 24,
-    marginBottom: 8,
-    marginHorizontal: 16,
+    lineHeight: 20,
   },
-  card: {
-    backgroundColor: 'white',
-    borderRadius: 14,
-    marginHorizontal: 16,
-    overflow: 'hidden',
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
+  sectionTitle: {
+    fontSize: fontSize.md,
+    fontWeight: '800',
+    color: colors.ink,
+    marginTop: space.xl,
+    marginBottom: space.md,
   },
+  sectionTitleFirst: { marginTop: space.lg },
+
+  recipientList: { gap: space.sm },
   recipientRow: {
+    ...card,
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 14,
-    gap: 12,
+    padding: space.md,
+    gap: space.md,
+    borderWidth: 1.5,
   },
   recipientRowActive: {
-    backgroundColor: '#f8f9ff',
-  },
-  rowDivider: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#f5f5f5',
+    backgroundColor: colors.primaryTint,
+    borderColor: colors.primary,
   },
   recipientIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
   },
   recipientText: { flex: 1 },
-  recipientLabel: { fontSize: 15, fontWeight: '600', color: '#1a1a1a' },
-  recipientDesc: { fontSize: 12, color: '#888', marginTop: 1 },
+  recipientLabel: { fontSize: fontSize.md, fontWeight: '800', color: colors.ink },
+  recipientDesc: { fontSize: fontSize.sm, color: colors.muted, marginTop: 2 },
   radio: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     borderWidth: 2,
-    borderColor: '#ddd',
+    borderColor: colors.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  radioDot: { width: 10, height: 10, borderRadius: 5 },
-  inputRow: { padding: 14 },
-  inputLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#999',
-    letterSpacing: 0.5,
-    marginBottom: 6,
+  radioActive: { borderColor: colors.primary },
+  radioDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: colors.primary },
+
+  composer: {
+    ...card,
+    padding: space.lg,
+    gap: space.lg,
   },
-  input: { fontSize: 15, color: '#000', minHeight: 24 },
-  textArea: { minHeight: 80 },
-  charCount: { fontSize: 11, color: '#ccc', textAlign: 'right', marginTop: 4 },
-  inputDivider: { height: 1, backgroundColor: '#f5f5f5', marginHorizontal: 14 },
+  field: { gap: 6 },
+  labelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  inputLabel: { fontSize: fontSize.sm, fontWeight: '700', color: colors.ink },
+  input: {
+    height: 48,
+    paddingHorizontal: 14,
+    fontSize: fontSize.md,
+    color: colors.ink,
+    backgroundColor: colors.surfaceTint,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  textArea: { height: 120, paddingTop: 12, paddingBottom: 12 },
+  charCount: { fontSize: fontSize.xs, color: colors.muted },
+
   previewCard: {
-    backgroundColor: 'white',
-    borderRadius: 14,
-    marginHorizontal: 16,
-    padding: 14,
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
+    ...card,
+    padding: space.lg,
   },
   previewHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginBottom: 6,
+    marginBottom: 8,
   },
-  previewApp: { flex: 1, fontSize: 12, fontWeight: '700', color: '#555' },
-  previewTime: { fontSize: 11, color: '#bbb' },
-  previewTitle: { fontSize: 14, fontWeight: '700', color: '#1a1a1a', marginBottom: 3 },
-  previewBody: { fontSize: 13, color: '#555', lineHeight: 18 },
+  previewApp: { flex: 1, fontSize: fontSize.xs, fontWeight: '800', color: colors.textSecondary },
+  previewTime: { fontSize: fontSize.xs, color: colors.muted },
+  previewTitle: { fontSize: fontSize.md, fontWeight: '800', color: colors.ink, marginBottom: 4 },
+  previewBody: { fontSize: fontSize.sm, color: colors.textSecondary, lineHeight: 20 },
   previewImagePlaceholder: {
-    marginTop: 10,
+    marginTop: 12,
     padding: 20,
-    backgroundColor: '#f5f5f5',
-    borderRadius: 8,
+    backgroundColor: colors.surfaceTint,
+    borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
   previewImageText: {
     marginTop: 6,
-    fontSize: 11,
-    color: '#999',
+    fontSize: fontSize.xs,
+    color: colors.muted,
   },
   sendBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    marginHorizontal: 16,
-    marginTop: 24,
-    paddingVertical: 16,
-    borderRadius: 14,
+    marginTop: space.xl,
+    height: 54,
+    borderRadius: radius.md,
+    backgroundColor: colors.primary,
   },
   sendBtnDisabled: { opacity: 0.6 },
-  sendBtnText: { fontSize: 16, fontWeight: '700', color: 'white' },
-  templateList: {
-    padding: 16,
-    gap: 12,
-  },
+  sendBtnText: { fontSize: fontSize.md, fontWeight: '800', color: colors.white },
+
+  templateList: { gap: space.md },
   templateCard: {
+    ...card,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    padding: 14,
-    backgroundColor: 'white',
-    borderRadius: 12,
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
+    gap: space.md,
+    padding: space.lg,
   },
   templateIcon: {
     width: 48,
     height: 48,
-    borderRadius: 12,
-    backgroundColor: '#e8f4ff',
+    borderRadius: 24,
+    backgroundColor: colors.primaryTint,
     alignItems: 'center',
     justifyContent: 'center',
   },
   templateContent: {
     flex: 1,
-  },
-  templateCategory: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#007AFF',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-    marginBottom: 4,
+    gap: 4,
   },
   templateTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#1a1a1a',
-    marginBottom: 4,
+    fontSize: fontSize.md,
+    fontWeight: '800',
+    color: colors.ink,
   },
   templateBody: {
-    fontSize: 12,
-    color: '#666',
-    lineHeight: 16,
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    lineHeight: 20,
   },
+
   centerContainer: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 40,
+    padding: space.xl,
   },
-  emptyText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#666',
-    marginTop: 16,
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginHorizontal: pagePadding,
+    marginTop: space.md,
+    padding: space.md,
+    backgroundColor: colors.dangerBg,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.dangerLine,
   },
-  emptySubtext: {
-    fontSize: 14,
-    color: '#999',
-    marginTop: 6,
-    textAlign: 'center',
-  },
+  errorBannerText: { flex: 1, fontSize: fontSize.xs, color: colors.danger, lineHeight: 17 },
+  errorRetry: { minHeight: 40, paddingHorizontal: space.sm, justifyContent: 'center' },
+  errorRetryText: { fontSize: fontSize.sm, fontWeight: '800', color: colors.primary },
+
+  historyList: { paddingHorizontal: pagePadding, paddingTop: space.md, paddingBottom: space.xxl },
   historyCard: {
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 12,
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
+    ...card,
+    padding: space.lg,
+    marginBottom: space.md,
   },
   historyHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 8,
+    marginBottom: space.sm,
   },
   historyTitle: {
     flex: 1,
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#1a1a1a',
+    fontSize: fontSize.md,
+    fontWeight: '800',
+    color: colors.ink,
     marginRight: 10,
   },
   historyDate: {
-    fontSize: 11,
-    color: '#999',
+    fontSize: fontSize.xs,
+    color: colors.muted,
+    marginTop: 3,
   },
   historyBody: {
-    fontSize: 13,
-    color: '#666',
-    lineHeight: 18,
-    marginBottom: 10,
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    lineHeight: 20,
+    marginBottom: space.md,
   },
   historyFooter: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
     alignItems: 'center',
-  },
-  historyBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    backgroundColor: '#f5f5f5',
-    borderRadius: 6,
-  },
-  historyBadgeText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#666',
+    rowGap: space.sm,
   },
   historyStats: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-  },
-  historyStatsText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#34C759',
+    gap: 6,
   },
   historySuccessRate: {
-    fontSize: 11,
-    color: '#999',
+    fontSize: fontSize.xs,
+    color: colors.muted,
   },
+
   modalContainer: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: colors.bg,
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
-    backgroundColor: 'white',
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    paddingHorizontal: pagePadding,
+    paddingTop: space.lg,
+    paddingBottom: space.sm,
   },
   modalTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#1a1a1a',
+    fontSize: fontSize.lg,
+    fontWeight: '800',
+    color: colors.ink,
   },
-  modalTemplateCard: {
-    flexDirection: 'row',
-    gap: 12,
-    padding: 16,
-    marginHorizontal: 16,
-    marginTop: 12,
-    backgroundColor: 'white',
-    borderRadius: 12,
-  },
-  modalTemplateIcon: {
-    width: 52,
-    height: 52,
-    borderRadius: 12,
-    backgroundColor: '#e8f4ff',
+  modalClose: {
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  modalTemplateContent: {
-    flex: 1,
-  },
-  modalTemplateCategory: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#007AFF',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-    marginBottom: 4,
-  },
-  modalTemplateTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1a1a1a',
-    marginBottom: 6,
-  },
-  modalTemplateBody: {
-    fontSize: 13,
-    color: '#666',
-    lineHeight: 18,
+  modalList: {
+    paddingHorizontal: pagePadding,
+    paddingBottom: space.xxl,
+    gap: space.md,
   },
 });

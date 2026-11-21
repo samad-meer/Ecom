@@ -1,3 +1,4 @@
+import { colors, radius, card, pagePadding } from '../../theme';
 import React, { useState, useContext, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { AuthContext, type AuthError } from '../../context/AuthContext';
@@ -13,10 +14,10 @@ import {
   AddressFields, EMPTY_ADDRESS, validateAddress, type AddressParts,
 } from '../../components/AddressFields';
 
-const BRAND_BLUE = '#0A84FF';
-const TEXT_DARK = '#000';
-const PLACEHOLDER = '#000';
-const OK_GREEN = '#34C759';
+const BRAND_BLUE = colors.primary;
+const TEXT_DARK = colors.ink;
+const PLACEHOLDER = colors.muted;
+const OK_GREEN = colors.success;
 
 // Pakistani mobile numbers: 03xx-xxxxxxx, +923xxxxxxxxx or 923xxxxxxxxx
 const PHONE_PATTERN = /^(?:\+92|92|0)3\d{9}$/;
@@ -140,6 +141,7 @@ const RegisterScreen = () => {
           <Text style={styles.subtitle}>{t('sign_up_started', 'Sign up to get started')}</Text>
 
           {/* ── Account details ────────────────────────────────────────── */}
+          <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>{t('section_account', 'Account Details')}</Text>
 
           <View style={styles.inputContainer}>
@@ -171,7 +173,7 @@ const RegisterScreen = () => {
                 <Ionicons
                   name={isEmailValid ? 'checkmark-circle' : 'close-circle'}
                   size={20}
-                  color={isEmailValid ? OK_GREEN : '#FF3B30'}
+                  color={isEmailValid ? OK_GREEN : colors.danger}
                   style={styles.rowIcon}
                 />
               )}
@@ -199,7 +201,7 @@ const RegisterScreen = () => {
                 <Ionicons
                   name={showPassword ? 'eye-off' : 'eye'}
                   size={24}
-                  color="#666"
+                  color={colors.textSecondary}
                 />
               </TouchableOpacity>
             </View>
@@ -232,7 +234,7 @@ const RegisterScreen = () => {
                 <Ionicons
                   name={showConfirmPassword ? 'eye-off' : 'eye'}
                   size={24}
-                  color="#666"
+                  color={colors.textSecondary}
                 />
               </TouchableOpacity>
             </View>
@@ -249,7 +251,10 @@ const RegisterScreen = () => {
             )}
           </View>
 
+          </View>
+
           {/* ── Contact & delivery ─────────────────────────────────────── */}
+          <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>{t('section_contact', 'Contact & Delivery')}</Text>
 
           <View style={styles.inputContainer}>
@@ -268,7 +273,7 @@ const RegisterScreen = () => {
                 <Ionicons
                   name={isPhoneValid ? 'checkmark-circle' : 'close-circle'}
                   size={20}
-                  color={isPhoneValid ? OK_GREEN : '#FF3B30'}
+                  color={isPhoneValid ? OK_GREEN : colors.danger}
                   style={styles.rowIcon}
                 />
               )}
@@ -297,10 +302,11 @@ const RegisterScreen = () => {
               hint={t('address_hint', 'We use this as your default delivery address')}
             />
           </View>
+          </View>
 
-          {(formMessage || error) && (
+          {!!(formMessage || error) && (
             <View style={styles.errorBanner}>
-              <Ionicons name="alert-circle" size={18} color="#D93025" />
+              <Ionicons name="alert-circle" size={18} color={colors.danger} />
               <Text style={styles.errorText}>{formMessage || error}</Text>
             </View>
           )}
@@ -311,7 +317,7 @@ const RegisterScreen = () => {
             disabled={isLoading}
           >
             {isLoading ? (
-              <ActivityIndicator color="#fff" />
+              <ActivityIndicator color={colors.white} />
             ) : (
               <Text style={styles.buttonText}>{t('signup_btn', 'Sign Up')}</Text>
             )}
@@ -329,6 +335,8 @@ const RegisterScreen = () => {
               <GoogleSignInButton
                 label="Sign up with Google"
                 failureTitle="Google Sign-Up Failed"
+                style={styles.googleButton}
+                textStyle={styles.googleButtonText}
                 disabled={isLoading}
               />
             </>
@@ -349,40 +357,46 @@ const RegisterScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.bg,
   },
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
-    padding: 20,
+    paddingHorizontal: pagePadding,
+    paddingVertical: 24,
   },
   formContainer: {
     width: '100%',
   },
   title: {
     fontSize: 32,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 10,
+    fontWeight: '800',
+    color: colors.ink,
+    marginBottom: 8,
     textAlign: 'center',
   },
   subtitle: {
     fontSize: 16,
-    color: '#666',
-    marginBottom: 24,
+    color: colors.textSecondary,
+    marginBottom: 20,
     textAlign: 'center',
   },
+  // Each group of fields is its own white card on the pale page.
+  sectionCard: {
+    ...card,
+    padding: 16,
+    marginBottom: 12,
+  },
   sectionTitle: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '800',
-    color: '#888',
+    color: colors.muted,
     letterSpacing: 0.8,
     textTransform: 'uppercase',
-    marginTop: 8,
     marginBottom: 14,
   },
   inputContainer: {
-    marginBottom: 15,
+    marginBottom: 14,
   },
   labelRow: {
     flexDirection: 'row',
@@ -392,43 +406,46 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 14,
-    color: '#333',
-    fontWeight: '500',
+    color: colors.ink,
+    fontWeight: '700',
   },
   badge: {
     paddingHorizontal: 7,
     paddingVertical: 2,
-    borderRadius: 4,
+    borderRadius: 6,
   },
-  badgeRequired: { backgroundColor: '#FFE5E5' },
-  badgeOptional: { backgroundColor: '#EFEFEF' },
+  badgeRequired: { backgroundColor: colors.dangerBg },
+  badgeOptional: { backgroundColor: colors.bg },
   badgeText: {
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: '700',
     letterSpacing: 0.3,
   },
-  badgeTextRequired: { color: '#D93025' },
-  badgeTextOptional: { color: '#777' },
+  badgeTextRequired: { color: colors.danger },
+  badgeTextOptional: { color: colors.muted },
   input: {
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 15,
+    borderColor: colors.line,
+    borderRadius: radius.md,
+    height: 50,
+    paddingHorizontal: 14,
     fontSize: 16,
     color: TEXT_DARK,
-    backgroundColor: '#f9f9f9',
+    backgroundColor: colors.surfaceTint,
   },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    backgroundColor: '#f9f9f9',
+    borderColor: colors.line,
+    borderRadius: radius.md,
+    height: 50,
+    backgroundColor: colors.surfaceTint,
   },
   rowInput: {
     flex: 1,
-    padding: 15,
+    height: 50,
+    paddingHorizontal: 14,
     fontSize: 16,
     color: TEXT_DARK,
   },
@@ -439,24 +456,28 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    backgroundColor: '#f9f9f9',
+    borderColor: colors.line,
+    borderRadius: radius.md,
+    height: 50,
+    backgroundColor: colors.surfaceTint,
   },
   passwordInput: {
     flex: 1,
-    padding: 15,
+    height: 50,
+    paddingHorizontal: 14,
     fontSize: 16,
     color: TEXT_DARK,
   },
   eyeIcon: {
-    padding: 10,
+    paddingHorizontal: 12,
+    height: 50,
+    justifyContent: 'center',
   },
   rulesBox: {
     marginTop: 10,
     padding: 12,
-    borderRadius: 8,
-    backgroundColor: '#f6f8fa',
+    borderRadius: radius.md,
+    backgroundColor: colors.bg,
     gap: 6,
   },
   rulesBoxTight: {
@@ -465,7 +486,7 @@ const styles = StyleSheet.create({
   rulesTitle: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#555',
+    color: colors.textSecondary,
     marginBottom: 2,
   },
   ruleRow: {
@@ -475,7 +496,7 @@ const styles = StyleSheet.create({
   },
   ruleText: {
     fontSize: 12,
-    color: '#888',
+    color: colors.muted,
   },
   ruleTextMet: {
     color: OK_GREEN,
@@ -483,94 +504,100 @@ const styles = StyleSheet.create({
   },
   helperText: {
     fontSize: 12,
-    color: '#888',
+    color: colors.muted,
     marginTop: 5,
   },
   button: {
     backgroundColor: BRAND_BLUE,
-    padding: 15,
-    borderRadius: 8,
+    height: 54,
+    borderRadius: radius.md,
     alignItems: 'center',
-    marginTop: 20,
+    justifyContent: 'center',
+    marginTop: 8,
   },
   buttonText: {
-    color: '#fff',
+    color: colors.white,
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '800',
   },
   addressRow: { flexDirection: 'row', gap: 8, marginBottom: 15 },
   addressCol: { flex: 1 },
   areaChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
   areaChip: {
-    paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16,
-    borderWidth: 1, borderColor: '#ddd', backgroundColor: '#fafafa',
+    paddingHorizontal: 16, height: 38, justifyContent: 'center', borderRadius: radius.pill,
+    borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface,
   },
-  areaChipActive: { backgroundColor: '#0A84FF', borderColor: '#0A84FF' },
-  areaChipText: { fontSize: 13, fontWeight: '600', color: '#666' },
-  areaChipTextActive: { color: '#fff' },
+  areaChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  areaChipText: { fontSize: 14, fontWeight: '700', color: colors.ink },
+  areaChipTextActive: { color: colors.white },
   inputInvalid: {
-    borderColor: '#D93025',
-    backgroundColor: '#FFF7F7',
+    borderColor: colors.danger,
+    backgroundColor: colors.dangerBg,
   },
   fieldError: {
     fontSize: 12,
-    color: '#D93025',
+    color: colors.danger,
     marginTop: 5,
   },
   errorBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginTop: 16,
+    marginTop: 4,
     padding: 12,
-    borderRadius: 8,
+    borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: '#F5C6C4',
-    backgroundColor: '#FFF0EF',
+    borderColor: colors.dangerLine,
+    backgroundColor: colors.dangerBg,
   },
   errorText: {
     flex: 1,
-    color: '#D93025',
-    fontSize: 13,
-    fontWeight: '500',
+    color: colors.danger,
+    fontSize: 14,
+    fontWeight: '600',
+    lineHeight: 20,
   },
   dividerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 24,
+    marginTop: 20,
     marginBottom: 16,
     gap: 10,
   },
-  dividerLine: { flex: 1, height: 1, backgroundColor: '#e0e0e0' },
-  dividerText: { fontSize: 12, color: '#aaa', fontWeight: '600' },
+  dividerLine: { flex: 1, height: 1, backgroundColor: colors.line },
+  dividerText: { fontSize: 12, color: colors.muted, fontWeight: '700' },
   googleButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 14,
-    backgroundColor: '#fff',
+    borderWidth: 1.5,
+    borderColor: colors.line,
+    borderRadius: radius.md,
+    height: 54,
+    backgroundColor: colors.surface,
   },
   googleIcon: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '800',
     color: '#EA4335',
   },
   googleButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#333',
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.ink,
   },
   linkButton: {
-    marginTop: 20,
+    marginTop: 12,
+    minHeight: 44,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   linkText: {
-    color: BRAND_BLUE,
+    // The darker blue: the bright one is only 4.2:1 on the pale page at this size.
+    color: colors.primaryDark,
     fontSize: 14,
+    fontWeight: '700',
   },
 });
 

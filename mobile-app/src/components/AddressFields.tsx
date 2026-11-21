@@ -1,3 +1,4 @@
+import { colors } from '../theme';
 import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
 import { API_URL } from '../constants/config';
@@ -141,7 +142,7 @@ export const AddressFields = ({ value, onChange, errors = {}, hint }: Props) => 
           <TextInput
             style={[styles.input, errors.house_number && styles.inputInvalid]}
             placeholder="12"
-            placeholderTextColor="#000"
+            placeholderTextColor={colors.muted}
             value={value.house_number}
             onChangeText={set('house_number')}
             maxLength={50}
@@ -156,7 +157,7 @@ export const AddressFields = ({ value, onChange, errors = {}, hint }: Props) => 
           <TextInput
             style={styles.input}
             placeholder="Block 6"
-            placeholderTextColor="#000"
+            placeholderTextColor={colors.muted}
             value={value.block}
             onChangeText={set('block')}
             maxLength={100}
@@ -228,7 +229,7 @@ export const AddressFields = ({ value, onChange, errors = {}, hint }: Props) => 
           <TextInput
             style={[styles.input, errors.area && styles.inputInvalid]}
             placeholder="Type the town or mohala"
-            placeholderTextColor="#000"
+            placeholderTextColor={colors.muted}
             value={value.area}
             onChangeText={set('area')}
             maxLength={150}
@@ -245,12 +246,12 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', gap: 8 },
   col: { flex: 1 },
   example: {
-    fontSize: 11, color: '#8a929b', marginTop: 5, lineHeight: 15,
+    fontSize: 12, color: colors.muted, marginTop: 5, lineHeight: 15,
   },
   caption: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#777',
+    color: colors.muted,
     marginBottom: 6,
   },
   portionBlock: { marginTop: 14 },
@@ -258,36 +259,36 @@ const styles = StyleSheet.create({
   chip: {
     paddingHorizontal: 12,
     paddingVertical: 7,
-    borderRadius: 16,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#ddd',
-    backgroundColor: '#fafafa',
+    borderColor: colors.line,
+    backgroundColor: colors.surfaceTint,
   },
-  chipActive: { backgroundColor: '#0A84FF', borderColor: '#0A84FF' },
-  chipText: { fontSize: 13, fontWeight: '600', color: '#666' },
+  chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  chipText: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
   chipTextActive: { color: '#fff' },
   input: {
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
+    borderColor: colors.line,
+    borderRadius: 12,
     padding: 12,
     fontSize: 15,
-    color: '#000',
-    backgroundColor: '#f9f9f9',
+    color: colors.ink,
+    backgroundColor: colors.bg,
   },
-  inputInvalid: { borderColor: '#D93025', backgroundColor: '#FFF7F7' },
+  inputInvalid: { borderColor: colors.danger, backgroundColor: colors.dangerBg },
   areaBlock: { marginTop: 14 },
   areaChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
   areaChip: {
     paddingHorizontal: 12,
     paddingVertical: 7,
-    borderRadius: 16,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#ddd',
-    backgroundColor: '#fafafa',
+    borderColor: colors.line,
+    backgroundColor: colors.surfaceTint,
   },
-  areaChipActive: { backgroundColor: '#0A84FF', borderColor: '#0A84FF' },
-  areaChipText: { fontSize: 13, fontWeight: '600', color: '#666' },
+  areaChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  areaChipText: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
   areaChipTextActive: { color: '#fff' },
-  hint: { fontSize: 12, color: '#888', marginTop: 5 },
+  hint: { fontSize: 12, color: colors.muted, marginTop: 5 },
 });

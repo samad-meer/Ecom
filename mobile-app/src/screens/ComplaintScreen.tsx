@@ -1,3 +1,5 @@
+import { useKeyboardHeight } from '../hooks/useKeyboardHeight';
+import { colors, radius, card, pagePadding } from '../theme';
 import React, { useEffect, useState } from 'react';
 import {
   View,
@@ -19,16 +21,31 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLanguage } from '../context/LanguageContext';
 import { LoadingScreen } from '../components/LoadingScreen';
 import { MultiImagePicker } from '../components/MultiImagePicker';
-import { KeyboardAwareScrollView } from '../components/KeyboardAwareScrollView';
+import { KeyboardAwareScrollView, SheetScrollView } from '../components/KeyboardAwareScrollView';
 import { PickedImage } from '../constants/imageLimits';
 import { FieldError } from '../components/FormField';
+import { ErrorState, EmptyState, StatusPill, Tone, friendlyError } from '../components/ui';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Complaints'>;
 
+/** A complaint's status as a pill colour and a readable word. */
+const statusPill = (status: string): { tone: Tone; label: string } => {
+  switch (status) {
+    case 'PENDING': return { tone: 'warning', label: 'Pending' };
+    case 'IN_PROGRESS': return { tone: 'primary', label: 'In progress' };
+    case 'RESOLVED': return { tone: 'success', label: 'Resolved' };
+    default: return { tone: 'neutral', label: status.replace('_', ' ') };
+  }
+};
+
 export const ComplaintScreen: React.FC<Props> = ({ navigation }) => {
+  const keyboardHeight = useKeyboardHeight();
   const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // Why the last load failed. Separate from the list so a failed refresh keeps
+  // the complaints already on screen.
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [subject, setSubject] = useState('');
   const [description, setDescription] = useState('');
@@ -42,9 +59,10 @@ export const ComplaintScreen: React.FC<Props> = ({ navigation }) => {
     try {
       const data = await ComplaintService.getComplaints();
       setComplaints(data);
-    } catch (error) {
+      setLoadError(null);
+    } catch (error: any) {
       console.error(error);
-      Alert.alert(t('error', 'Error'), t('fetch_complaints_failed', 'Failed to fetch complaints'));
+      setLoadError(error?.message || t('fetch_complaints_failed', 'Failed to fetch complaints'));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -78,69 +96,77 @@ export const ComplaintScreen: React.FC<Props> = ({ navigation }) => {
       setImages([]);
       fetchComplaints(true);
       Alert.alert(t('success', 'Success'), t('complaint_success', 'Complaint submitted successfully'));
-    } catch (error) {
-      Alert.alert(t('error', 'Error'), t('complaint_failed', 'Failed to submit complaint'));
+    } catch (error: any) {
+      Alert.alert(
+        t('error', 'Error'),
+        `${t('complaint_failed', 'Failed to submit complaint')}: ${friendlyError(error?.message)}`,
+      );
     } finally {
       setSubmitting(false);
     }
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'PENDING': return '#f39c12';
-      case 'IN_PROGRESS': return '#3498db';
-      case 'RESOLVED': return '#2ecc71';
-      default: return '#95a5a6';
-    }
-  };
-
-  const renderItem = ({ item }: { item: Complaint }) => (
-    <View style={styles.card}>
-      {/* Header row */}
-      <View style={styles.cardHeader}>
-        <Text style={styles.subject} numberOfLines={2}>{item.subject}</Text>
-        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
-          <Text style={styles.statusText}>{item.status.replace('_', ' ')}</Text>
+  const renderItem = ({ item }: { item: Complaint }) => {
+    const pill = statusPill(item.status);
+    return (
+      <View style={styles.card}>
+        {/* Header row */}
+        <View style={styles.cardHeader}>
+          <Text style={styles.subject} numberOfLines={2}>{item.subject}</Text>
+          <StatusPill label={pill.label} tone={pill.tone} />
         </View>
-      </View>
 
-      <Text style={styles.date}>{new Date(item.created_at).toLocaleDateString()}</Text>
+        <Text style={styles.date}>{new Date(item.created_at).toLocaleDateString()}</Text>
 
-      {/* Customer description */}
-      <View style={styles.messageBox}>
-        <Text style={styles.messageLabel}>Your message</Text>
-        <Text style={styles.description}>{item.description}</Text>
-      </View>
+        {/* Customer description */}
+        <View style={styles.messageBox}>
+          <Text style={styles.messageLabel}>Your message</Text>
+          <Text style={styles.description}>{item.description}</Text>
+        </View>
 
-      {/* Admin reply — shown only when present */}
-      {item.admin_reply ? (
-        <View style={styles.replyBox}>
-          <View style={styles.replyHeader}>
-            <Ionicons name="chatbubble-ellipses" size={14} color="#007AFF" />
-            <Text style={styles.replyLabel}>Support reply</Text>
-            {item.admin_reply_at && (
-              <Text style={styles.replyDate}>
-                {new Date(item.admin_reply_at).toLocaleDateString()}
-              </Text>
-            )}
+        {/* Admin reply — shown only when present */}
+        {item.admin_reply ? (
+          <View style={styles.replyBox}>
+            <View style={styles.replyHeader}>
+              <Ionicons name="chatbubble-ellipses" size={16} color={colors.primary} />
+              <Text style={styles.replyLabel}>Support reply</Text>
+              {!!item.admin_reply_at && (
+                <Text style={styles.replyDate}>
+                  {new Date(item.admin_reply_at).toLocaleDateString()}
+                </Text>
+              )}
+            </View>
+            <Text style={styles.replyText}>{item.admin_reply}</Text>
           </View>
-          <Text style={styles.replyText}>{item.admin_reply}</Text>
-        </View>
-      ) : item.status !== 'RESOLVED' ? (
-        <Text style={styles.pendingReply}>Waiting for support response…</Text>
-      ) : null}
-    </View>
-  );
+        ) : item.status !== 'RESOLVED' ? (
+          <View style={styles.pendingRow}>
+            <Ionicons name="time-outline" size={16} color={colors.muted} />
+            <Text style={styles.pendingReply}>Waiting for support response…</Text>
+          </View>
+        ) : null}
+      </View>
+    );
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#333" />
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={styles.roundButton}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
+          <Ionicons name="arrow-back" size={22} color={colors.ink} />
         </TouchableOpacity>
-        <Text style={styles.title}>{t('my_complaints', 'My Complaints')}</Text>
-        <TouchableOpacity onPress={() => setModalVisible(true)} style={styles.addButton}>
-          <Ionicons name="add" size={24} color="#007AFF" />
+        <Text style={styles.title} numberOfLines={1}>{t('my_complaints', 'My Complaints')}</Text>
+        <TouchableOpacity
+          onPress={() => setModalVisible(true)}
+          style={[styles.roundButton, styles.addButton]}
+          accessibilityRole="button"
+          accessibilityLabel={t('new_complaint', 'New Complaint')}
+        >
+          <Ionicons name="add" size={24} color={colors.white} />
         </TouchableOpacity>
       </View>
 
@@ -156,16 +182,38 @@ export const ComplaintScreen: React.FC<Props> = ({ navigation }) => {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              colors={['#007AFF']}
-              tintColor="#007AFF"
+              colors={[colors.primary]}
+              tintColor={colors.primary}
             />
           }
+          ListHeaderComponent={
+            // A failed refresh keeps the complaints below and says why they may be old.
+            !!loadError && complaints.length > 0 ? (
+              <View style={styles.errorBanner}>
+                <Ionicons name="cloud-offline-outline" size={18} color={colors.danger} />
+                <View style={styles.errorBannerBody}>
+                  <Text style={styles.errorBannerText}>{friendlyError(loadError)}</Text>
+                  <TouchableOpacity onPress={onRefresh} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Text style={styles.errorBannerLink}>Try again</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : null
+          }
           ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Ionicons name="chatbubbles-outline" size={48} color="#ccc" />
-              <Text style={styles.emptyText}>{t('no_complaints', 'No complaints yet')}</Text>
-              <Text style={styles.emptySubtext}>Tap + to submit a new complaint</Text>
-            </View>
+            loadError ? (
+              <ErrorState
+                title="Could not load your complaints"
+                message={loadError}
+                onRetry={() => fetchComplaints()}
+              />
+            ) : (
+              <EmptyState
+                icon="chatbubbles-outline"
+                title={t('no_complaints', 'No complaints yet')}
+                text="Tap + to submit a new complaint"
+              />
+            )
           }
         />
       )}
@@ -177,14 +225,14 @@ export const ComplaintScreen: React.FC<Props> = ({ navigation }) => {
         transparent={true}
         onRequestClose={() => setModalVisible(false)}
       >
-        <View style={styles.modalOverlay}>
+        <View style={[styles.modalOverlay, { paddingBottom: keyboardHeight }]}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>{t('new_complaint', 'New Complaint')}</Text>
 
             {/* The fields scroll, the title and the buttons do not: with the
                 keypad up the card has little room left, and Submit staying put
                 is worth more than seeing one extra line of the form. */}
-            <KeyboardAwareScrollView
+            <SheetScrollView
               style={styles.modalScroll}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
@@ -192,7 +240,7 @@ export const ComplaintScreen: React.FC<Props> = ({ navigation }) => {
               <TextInput
                 style={[styles.input, !!fieldErrors.subject && styles.inputInvalid]}
                 placeholder={t('subject_placeholder', 'Subject')}
-                placeholderTextColor="#000"
+                placeholderTextColor={colors.muted}
                 value={subject}
                 onChangeText={(v) => {
                   setSubject(v);
@@ -204,7 +252,7 @@ export const ComplaintScreen: React.FC<Props> = ({ navigation }) => {
               <TextInput
                 style={[styles.input, styles.textArea, !!fieldErrors.description && styles.inputInvalid]}
                 placeholder={t('description_placeholder', 'Describe your issue in detail…')}
-                placeholderTextColor="#000"
+                placeholderTextColor={colors.muted}
                 value={description}
                 onChangeText={(v) => {
                   setDescription(v);
@@ -220,7 +268,7 @@ export const ComplaintScreen: React.FC<Props> = ({ navigation }) => {
                 value={images}
                 onChange={setImages}
               />
-            </KeyboardAwareScrollView>
+            </SheetScrollView>
 
             <View style={styles.modalButtons}>
               <TouchableOpacity
@@ -231,14 +279,14 @@ export const ComplaintScreen: React.FC<Props> = ({ navigation }) => {
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.button, styles.submitButton]}
+                style={[styles.button, styles.submitButton, submitting && styles.buttonBusy]}
                 onPress={handleSubmit}
                 disabled={submitting}
               >
                 {submitting ? (
-                  <ActivityIndicator color="#fff" />
+                  <ActivityIndicator color={colors.white} />
                 ) : (
-                  <Text style={[styles.buttonText, { color: '#fff' }]}>{t('submit_btn', 'Submit')}</Text>
+                  <Text style={[styles.buttonText, { color: colors.white }]}>{t('submit_btn', 'Submit')}</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -252,157 +300,150 @@ export const ComplaintScreen: React.FC<Props> = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: colors.bg,
   },
+  // Sits straight on the page: round back and add buttons around the title,
+  // not a white band with a line under it.
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 16,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    gap: 12,
+    paddingHorizontal: pagePadding,
+    paddingVertical: 12,
   },
-  backButton: {
-    padding: 4,
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: 'bold',
+  roundButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
   },
   addButton: {
-    padding: 4,
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
-  loader: {
+  title: {
     flex: 1,
-    justifyContent: 'center',
+    fontSize: 20,
+    fontWeight: '800',
+    color: colors.ink,
   },
   list: {
-    padding: 16,
-    paddingBottom: 32,
+    paddingHorizontal: pagePadding,
+    paddingTop: 4,
+    paddingBottom: 24,
+    flexGrow: 1,
   },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    padding: 12,
+    marginBottom: 12,
+    borderRadius: radius.md,
+    backgroundColor: colors.dangerBg,
+    borderWidth: 1,
+    borderColor: colors.dangerLine,
+  },
+  errorBannerBody: { flex: 1, gap: 4 },
+  errorBannerText: { fontSize: 14, color: colors.danger, lineHeight: 20 },
+  errorBannerLink: { fontSize: 14, fontWeight: '800', color: colors.primaryDark },
+
   card: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
+    ...card,
     padding: 16,
     marginBottom: 12,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
   },
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 6,
+    gap: 12,
+    marginBottom: 4,
   },
   subject: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '800',
     flex: 1,
-    marginRight: 8,
-    color: '#222',
-  },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  statusText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: 'bold',
-    textTransform: 'uppercase',
+    color: colors.ink,
   },
   date: {
     fontSize: 12,
-    color: '#999',
+    color: colors.muted,
     marginBottom: 12,
   },
   messageBox: {
-    backgroundColor: '#f9f9f9',
-    borderRadius: 8,
+    backgroundColor: colors.surfaceTint,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.line,
     padding: 12,
     marginBottom: 10,
-    borderLeftWidth: 3,
-    borderLeftColor: '#ddd',
   },
   messageLabel: {
-    fontSize: 11,
-    color: '#999',
-    fontWeight: '600',
+    fontSize: 12,
+    color: colors.muted,
+    fontWeight: '800',
     textTransform: 'uppercase',
+    letterSpacing: 0.4,
     marginBottom: 4,
   },
   description: {
     fontSize: 14,
-    color: '#444',
+    color: colors.textSecondary,
     lineHeight: 20,
   },
   replyBox: {
-    backgroundColor: '#EBF4FF',
-    borderRadius: 8,
+    backgroundColor: colors.primaryTint,
+    borderRadius: radius.md,
     padding: 12,
-    borderLeftWidth: 3,
-    borderLeftColor: '#007AFF',
   },
   replyHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 6,
-    gap: 4,
+    gap: 6,
   },
   replyLabel: {
-    fontSize: 11,
-    color: '#007AFF',
-    fontWeight: '700',
+    fontSize: 12,
+    color: colors.primaryDark,
+    fontWeight: '800',
     textTransform: 'uppercase',
+    letterSpacing: 0.4,
     flex: 1,
-    marginLeft: 4,
   },
   replyDate: {
-    fontSize: 11,
-    color: '#888',
+    fontSize: 12,
+    color: colors.muted,
   },
   replyText: {
     fontSize: 14,
-    color: '#1a1a2e',
+    color: colors.ink,
     lineHeight: 20,
   },
-  pendingReply: {
-    fontSize: 12,
-    color: '#aaa',
-    fontStyle: 'italic',
-    marginTop: 4,
-  },
-  emptyContainer: {
+  pendingRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 60,
-    gap: 8,
+    gap: 6,
+    marginTop: 2,
   },
-  emptyText: {
-    color: '#555',
-    fontSize: 17,
-    fontWeight: '600',
-    marginTop: 8,
-  },
-  emptySubtext: {
-    color: '#aaa',
+  pendingReply: {
     fontSize: 14,
+    color: colors.muted,
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(10,31,68,0.5)',
     justifyContent: 'center',
     padding: 20,
   },
   modalContent: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
+    ...card,
+    borderRadius: radius.xl,
     padding: 20,
-    elevation: 5,
     // A definite height is what lets the field area shrink and scroll instead
     // of the card growing until the buttons are pushed off screen.
     maxHeight: '85%',
@@ -412,50 +453,58 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 20,
-    textAlign: 'center',
+    fontWeight: '800',
+    color: colors.ink,
+    marginBottom: 16,
   },
   input: {
+    minHeight: 48,
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 16,
+    borderColor: colors.line,
+    borderRadius: radius.md,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 12,
     fontSize: 16,
     // Without an explicit colour the device theme picks one, and on a
     // dark-mode phone that is white — invisible on this white modal.
-    color: '#000',
-    backgroundColor: '#fff',
+    color: colors.ink,
+    backgroundColor: colors.surfaceTint,
   },
   inputInvalid: {
-    borderColor: '#D93025',
-    backgroundColor: '#FFF7F7',
+    borderColor: colors.danger,
+    backgroundColor: colors.dangerBg,
   },
   textArea: {
-    height: 110,
+    height: 120,
     textAlignVertical: 'top',
   },
   modalButtons: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    gap: 12,
+    marginTop: 8,
   },
   button: {
     flex: 1,
-    padding: 12,
-    borderRadius: 8,
+    height: 50,
+    borderRadius: radius.md,
     alignItems: 'center',
-    marginHorizontal: 6,
+    justifyContent: 'center',
   },
   cancelButton: {
-    backgroundColor: '#eee',
+    backgroundColor: colors.surface,
+    borderWidth: 1.5,
+    borderColor: colors.muted,
   },
   submitButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: colors.primary,
+  },
+  buttonBusy: {
+    opacity: 0.7,
   },
   buttonText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
+    fontWeight: '800',
+    color: colors.ink,
   },
 });

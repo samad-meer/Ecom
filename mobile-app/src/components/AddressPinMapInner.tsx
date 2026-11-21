@@ -1,3 +1,4 @@
+import { colors } from '../theme';
 import React, { useEffect, useRef } from 'react';
 import { StyleProp, ViewStyle } from 'react-native';
 import MapView, { MapPressEvent, Marker, MarkerDragStartEndEvent, PROVIDER_GOOGLE } from 'react-native-maps';
@@ -72,7 +73,7 @@ const AddressPinMapInner: React.FC<AddressPinMapProps> = ({ pin, onChange, style
           onDragEnd={handleDragEnd}
           title="Delivery pin"
           description="Drag me to your door"
-          pinColor="#0A84FF"
+          pinColor={colors.primary}
         />
       )}
     </MapView>

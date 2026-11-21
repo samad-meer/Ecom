@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import { colors, radius, card, pagePadding } from '../../theme';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator, Alert, FlatList, Modal, RefreshControl,
   StyleSheet, Text, TextInput, TouchableOpacity, View,
@@ -6,7 +7,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { RouteProp, useRoute } from '@react-navigation/native';
 import { LoadingScreen } from '../../components/LoadingScreen';
-import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
+import { KeyboardAwareScrollView, SheetScrollView } from '../../components/KeyboardAwareScrollView';
+import { EmptyState, ErrorState, StatusPill, friendlyError, Tone } from '../../components/ui';
 import {
   adminService, LedgerEntry, LedgerStatement, Receivable,
 } from '../../services/adminService';
@@ -26,124 +28,181 @@ const fmt = (value: string | number | null | undefined) => {
   return `PKR ${Math.abs(n).toLocaleString('en-PK', { maximumFractionDigits: 0 })}`;
 };
 
+/** The figure alone, for places that set the PKR unit in a smaller size. */
+const num = (value: string | number | null | undefined) => {
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n)) return '—';
+  return Math.abs(n).toLocaleString('en-PK', { maximumFractionDigits: 0 });
+};
+
+/** An owed-positive balance as the word, pill tone and amount colour to show. */
+const balanceLook = (owed: number, words: { owes: string; credit: string }):
+  { label: string; tone: Tone; color: string } => {
+  if (owed > 0) return { label: words.owes, tone: 'danger', color: colors.danger };
+  if (owed < 0) return { label: words.credit, tone: 'success', color: colors.success };
+  return { label: 'Settled', tone: 'neutral', color: colors.textSecondary };
+};
+
 const today = () => new Date().toISOString().slice(0, 10);
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
-  tabBar: { flexDirection: 'row', backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#eee' },
-  tab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 13 },
-  tabActive: { borderBottomWidth: 2, borderBottomColor: '#007AFF' },
-  tabText: { fontSize: 14, fontWeight: '600', color: '#888' },
-  tabTextActive: { color: '#007AFF' },
-
-  searchBar: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: 'white', padding: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0',
+  container: { flex: 1, backgroundColor: colors.bg },
+  tabBar: {
+    flexDirection: 'row', gap: 8,
+    paddingHorizontal: pagePadding, paddingTop: 12, paddingBottom: 4,
   },
-  searchInput: { flex: 1, fontSize: 14, color: '#000' },
+  tab: {
+    flex: 1, height: 42, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line,
+  },
+  tabActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  tabDisabled: { opacity: 0.6 },
+  tabText: { fontSize: 14, fontWeight: '800', color: colors.ink },
+  tabTextActive: { color: colors.white },
+
+  searchBar: { paddingHorizontal: pagePadding, paddingTop: 10 },
+  searchBox: {
+    flexDirection: 'row', alignItems: 'center', gap: 10, height: 48, paddingHorizontal: 14,
+    backgroundColor: colors.surface, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.line,
+  },
+  searchInput: { flex: 1, fontSize: 14, color: colors.ink },
+  clearBtn: { padding: 4 },
+  filterRow: { flexDirection: 'row', gap: 8, paddingHorizontal: pagePadding, paddingTop: 10, paddingBottom: 12 },
   filterChip: {
-    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14,
-    borderWidth: 1, borderColor: '#e0e0e0', backgroundColor: 'white',
+    height: 40, paddingHorizontal: 18, borderRadius: radius.pill, justifyContent: 'center',
+    borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface,
   },
-  filterChipActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
-  filterChipText: { fontSize: 12, fontWeight: '600', color: '#666' },
-  filterChipTextActive: { color: 'white' },
+  filterChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  filterChipText: { fontSize: 14, fontWeight: '700', color: colors.ink },
+  filterChipTextActive: { color: colors.white },
 
-  row: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: 'white', paddingHorizontal: 16, paddingVertical: 13,
+  list: { paddingHorizontal: pagePadding, paddingBottom: 24, flexGrow: 1 },
+
+  // Receivable cards
+  totalCard: {
+    ...card, padding: 16, marginBottom: 12,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12,
   },
-  avatar: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
-  avatarText: { fontSize: 17, fontWeight: '700' },
+  totalLabel: { fontSize: 14, fontWeight: '700', color: colors.textSecondary, marginBottom: 4 },
+  totalCount: { fontSize: 14, fontWeight: '700', color: colors.muted, textAlign: 'right' },
+  row: { ...card, padding: 16, marginBottom: 12 },
+  rowTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  avatar: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
+  avatarText: { fontSize: 20, fontWeight: '800' },
   rowInfo: { flex: 1, gap: 2 },
-  name: { fontSize: 15, fontWeight: '600', color: '#1a1a1a' },
-  sub: { fontSize: 12, color: '#888' },
-  balance: { fontSize: 15, fontWeight: '700' },
-  balanceLabel: { fontSize: 10, color: '#aaa', textAlign: 'right' },
-  separator: { height: 1, backgroundColor: '#f5f5f5' },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12, paddingTop: 60 },
-  emptyText: { fontSize: 15, color: '#aaa' },
+  name: { fontSize: 16, fontWeight: '800', color: colors.ink },
+  sub: { fontSize: 14, color: colors.textSecondary },
+  subMuted: { fontSize: 12, color: colors.muted },
+  rowFooter: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+    marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.lineSoft,
+  },
+  amountUnit: { fontSize: 12, fontWeight: '700', color: colors.muted },
+  amountLg: { fontSize: 20, fontWeight: '800', letterSpacing: -0.3 },
+  amountXl: { fontSize: 24, fontWeight: '800', letterSpacing: -0.3 },
 
   // Statement
-  headerCard: { backgroundColor: 'white', padding: 16, gap: 4 },
-  headerName: { fontSize: 18, fontWeight: '700', color: '#1a1a1a' },
-  headerMeta: { fontSize: 12, color: '#888' },
-  summaryRow: { flexDirection: 'row', gap: 10, padding: 12 },
-  summaryCard: {
-    flex: 1, backgroundColor: 'white', borderRadius: 12, padding: 12,
-    borderLeftWidth: 3,
-  },
-  summaryValue: { fontSize: 17, fontWeight: '700', color: '#1a1a1a' },
-  summaryLabel: { fontSize: 11, color: '#888', marginTop: 2 },
+  headerCard: { ...card, padding: 16, gap: 4, marginBottom: 12 },
+  headerName: { fontSize: 20, fontWeight: '800', color: colors.ink },
+  headerMeta: { fontSize: 14, color: colors.textSecondary },
+  summaryRow: { flexDirection: 'row', gap: 12, marginBottom: 16 },
+  summaryCard: { ...card, flex: 1, padding: 16, gap: 6 },
+  summaryValue: { fontSize: 24, fontWeight: '800', color: colors.ink, letterSpacing: -0.3 },
+  summaryLabel: { fontSize: 14, fontWeight: '700', color: colors.textSecondary },
 
-  entryCard: {
-    backgroundColor: 'white', marginHorizontal: 12, marginBottom: 8,
-    borderRadius: 10, padding: 12,
-  },
-  entryTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  entryDate: { fontSize: 12, color: '#888' },
-  entryDoc: { fontSize: 13, fontWeight: '700', color: '#1a1a1a' },
-  entryItem: { fontSize: 13, color: '#555', marginTop: 2 },
-  entryAmount: { fontSize: 15, fontWeight: '700' },
-  entryBalance: { fontSize: 11, color: '#aaa', textAlign: 'right', marginTop: 2 },
+  entryCard: { ...card, padding: 16, marginBottom: 12 },
+  entryTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 },
+  entryDate: { fontSize: 12, color: colors.muted },
+  entryDoc: { fontSize: 16, fontWeight: '800', color: colors.ink, marginTop: 2 },
+  entryItem: { fontSize: 14, color: colors.textSecondary, marginTop: 2 },
+  entryAmountCol: { alignItems: 'flex-end', gap: 2 },
+  entryAmount: { fontSize: 16, fontWeight: '800' },
+  entryAmountWord: { fontSize: 12, fontWeight: '700', color: colors.muted },
+  entryBalance: { fontSize: 12, color: colors.muted, textAlign: 'right' },
   entryFooter: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#f2f2f2',
+    flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8,
+    marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.lineSoft,
   },
-  chip: {
-    paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6,
-    backgroundColor: '#f0f0f0',
+  linkBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 40, paddingHorizontal: 4,
   },
-  chipText: { fontSize: 10, fontWeight: '700', color: '#777' },
-  linkBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  linkText: { fontSize: 12, fontWeight: '700', color: '#007AFF' },
+  linkText: { fontSize: 14, fontWeight: '800', color: colors.primary },
 
-  actionBar: {
-    flexDirection: 'row', gap: 10, padding: 12,
-    backgroundColor: 'white', borderTopWidth: 1, borderTopColor: '#eee',
-  },
+  actionBar: { flexDirection: 'row', gap: 10, paddingHorizontal: pagePadding, paddingTop: 8, paddingBottom: 16 },
   actionBtn: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 6, paddingVertical: 13, borderRadius: 10,
+    flex: 1, height: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 8, borderRadius: radius.md,
   },
-  payBtn: { backgroundColor: '#007AFF' },
-  shareBtn: { backgroundColor: '#25D366' },
-  actionText: { fontSize: 14, fontWeight: '700', color: 'white' },
+  payBtn: { backgroundColor: colors.primary },
+  shareBtn: { backgroundColor: colors.whatsapp },
+  actionText: { fontSize: 14, fontWeight: '800', color: colors.white },
+  shareText: { fontSize: 14, fontWeight: '800', color: colors.ink },
 });
 
+const inline = StyleSheet.create({
+  box: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    marginHorizontal: pagePadding, marginBottom: 12, padding: 12,
+    backgroundColor: colors.dangerBg, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.dangerLine,
+  },
+  textCol: { flex: 1, gap: 2 },
+  title: { fontSize: 14, fontWeight: '800', color: colors.danger },
+  text: { fontSize: 14, color: colors.ink },
+  btn: {
+    height: 40, paddingHorizontal: 14, borderRadius: radius.pill,
+    backgroundColor: colors.danger, alignItems: 'center', justifyContent: 'center',
+  },
+  btnText: { fontSize: 14, fontWeight: '800', color: colors.white },
+});
+
+/** A failed refresh while good data is still on screen: say why, offer a retry. */
+function InlineError({ title, message, onRetry }: { title: string; message: string; onRetry: () => void }) {
+  return (
+    <View style={inline.box}>
+      <Ionicons name="alert-circle" size={22} color={colors.danger} />
+      <View style={inline.textCol}>
+        <Text style={inline.title}>{title}</Text>
+        <Text style={inline.text}>{friendlyError(message)}</Text>
+      </View>
+      <TouchableOpacity style={inline.btn} onPress={onRetry} accessibilityLabel="Try again">
+        <Text style={inline.btnText}>Retry</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 const sheet = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  overlay: { flex: 1, backgroundColor: 'rgba(10,31,68,0.45)', justifyContent: 'flex-end' },
   body: {
-    backgroundColor: 'white', borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    backgroundColor: colors.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl,
     padding: 20, paddingBottom: 34, maxHeight: '90%',
   },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
-  title: { fontSize: 18, fontWeight: '700', color: '#1a1a1a' },
+  title: { fontSize: 20, fontWeight: '800', color: colors.ink },
   closeBtn: {
-    width: 32, height: 32, borderRadius: 16, backgroundColor: '#f0f0f0',
+    width: 40, height: 40, borderRadius: 20, backgroundColor: colors.lineSoft,
     alignItems: 'center', justifyContent: 'center',
   },
-  label: { fontSize: 13, fontWeight: '600', color: '#444', marginBottom: 5, marginTop: 12 },
+  fromBox: {
+    padding: 14, borderRadius: radius.md, backgroundColor: colors.surfaceTint,
+    borderWidth: 1, borderColor: colors.line, gap: 8,
+  },
+  fromLabel: { fontSize: 12, fontWeight: '700', color: colors.muted },
+  fromName: { fontSize: 16, fontWeight: '800', color: colors.ink },
+  label: { fontSize: 14, fontWeight: '700', color: colors.textSecondary, marginBottom: 6, marginTop: 16 },
   input: {
-    borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 8,
-    padding: 12, fontSize: 15, color: '#000', backgroundColor: '#fafafa',
+    height: 50, borderWidth: 1, borderColor: colors.line, borderRadius: radius.md,
+    paddingHorizontal: 14, fontSize: 16, color: colors.ink, backgroundColor: colors.surfaceTint,
   },
-  methods: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
-  method: {
-    paddingHorizontal: 13, paddingVertical: 7, borderRadius: 16,
-    borderWidth: 1, borderColor: '#e0e0e0', backgroundColor: 'white',
-  },
-  methodActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
-  methodText: { fontSize: 12, fontWeight: '600', color: '#666' },
-  methodTextActive: { color: 'white' },
+  amountInput: { height: 58, fontSize: 24, fontWeight: '800' },
   submit: {
-    marginTop: 20, backgroundColor: '#007AFF', borderRadius: 12, paddingVertical: 15,
+    marginTop: 24, height: 54, backgroundColor: colors.primary, borderRadius: radius.md,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
   },
-  submitText: { color: 'white', fontSize: 15, fontWeight: '700' },
-  hint: { fontSize: 12, color: '#888', marginTop: 8 },
+  submitText: { color: colors.white, fontSize: 16, fontWeight: '800' },
 });
 
 // ─── Record payment sheet ─────────────────────────────────────────────────────
@@ -210,7 +269,7 @@ function RecordPaymentSheet({
         ],
       );
     } catch (e: any) {
-      Alert.alert('Could not record payment', e?.message || 'Please try again.');
+      Alert.alert('Could not record payment', friendlyError(e?.message));
     } finally {
       setSaving(false);
     }
@@ -224,35 +283,39 @@ function RecordPaymentSheet({
         <View style={sheet.body}>
           <View style={sheet.header}>
             <Text style={sheet.title}>Record Payment</Text>
-            <TouchableOpacity onPress={onClose} style={sheet.closeBtn}>
-              <Ionicons name="close" size={20} color="#555" />
+            <TouchableOpacity onPress={onClose} style={sheet.closeBtn} accessibilityLabel="Close">
+              <Ionicons name="close" size={20} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
 
-          <KeyboardAwareScrollView keyboardShouldPersistTaps="handled">
-            <Text style={sheet.hint}>From {customer.name}</Text>
+          <SheetScrollView keyboardShouldPersistTaps="handled">
+            <View style={sheet.fromBox}>
+              <Text style={sheet.fromLabel}>Received from</Text>
+              <Text style={sheet.fromName}>{customer.name}</Text>
+              <StatusPill label={`Paid by ${PAYMENT_METHOD}`} tone="neutral" icon="cash-outline" />
+            </View>
 
             <Text style={sheet.label}>Amount (PKR) *</Text>
             <TextInput
-              style={sheet.input}
+              style={[sheet.input, sheet.amountInput]}
               value={amount}
               onChangeText={setAmount}
               keyboardType="decimal-pad"
               placeholder="0.00"
-              placeholderTextColor="#000"
+              placeholderTextColor={colors.muted}
               autoFocus
             />
 
             <Text style={sheet.label}>Reference (voucher / slip no.)</Text>
             <TextInput
               style={sheet.input} value={reference} onChangeText={setReference}
-              placeholder="Optional" placeholderTextColor="#000"
+              placeholder="Optional" placeholderTextColor={colors.muted}
             />
 
             <Text style={sheet.label}>Notes</Text>
             <TextInput
               style={sheet.input} value={notes} onChangeText={setNotes}
-              placeholder="Optional" placeholderTextColor="#000"
+              placeholder="Optional" placeholderTextColor={colors.muted}
             />
 
             <TouchableOpacity
@@ -261,11 +324,11 @@ function RecordPaymentSheet({
               disabled={saving}
             >
               {saving
-                ? <ActivityIndicator color="white" />
-                : <><Ionicons name="checkmark-circle" size={18} color="white" />
+                ? <ActivityIndicator color={colors.white} />
+                : <><Ionicons name="checkmark-circle" size={20} color={colors.white} />
                     <Text style={sheet.submitText}>Record Payment</Text></>}
             </TouchableOpacity>
-          </KeyboardAwareScrollView>
+          </SheetScrollView>
         </View>
       </View>
     </Modal>
@@ -278,16 +341,27 @@ function ReceivablesTab({ onOpen }: { onOpen: (r: Receivable) => void }) {
   const [rows, setRows] = useState<Receivable[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [onlyOwing, setOnlyOwing] = useState(true);
+  // A slow answer to an old search must not overwrite the current list.
+  const requestId = useRef(0);
 
   const load = useCallback(async (isRefresh = false) => {
+    const id = ++requestId.current;
     if (!isRefresh) setLoading(true);
+    setError(null);
     try {
-      const data = await adminService.getReceivables({ search, only_owing: onlyOwing });
+      const data = await adminService.getReceivables({ search, only_owing: onlyOwing, limit: 500 });
+      if (id !== requestId.current) return;
       setRows(data.results || []);
-    } catch { /* keep whatever is on screen */ }
-    finally { setLoading(false); setRefreshing(false); }
+    } catch (e: any) {
+      if (id !== requestId.current) return;
+      // Whatever is on screen stays; the reason shows above it.
+      setError(e?.message || 'Could not load balances.');
+    } finally {
+      if (id === requestId.current) { setLoading(false); setRefreshing(false); }
+    }
   }, [search, onlyOwing]);
 
   useEffect(() => {
@@ -299,30 +373,32 @@ function ReceivablesTab({ onOpen }: { onOpen: (r: Receivable) => void }) {
 
   const renderRow = ({ item }: { item: Receivable }) => {
     const balance = Number(item.balance);
-    const colour = balance > 0 ? '#FF3B30' : balance < 0 ? '#34C759' : '#888';
+    const look = balanceLook(balance, { owes: 'Owes', credit: 'In credit' });
     return (
-      <TouchableOpacity style={styles.row} onPress={() => onOpen(item)}>
-        <View style={[styles.avatar, { backgroundColor: colour + '20' }]}>
-          <Text style={[styles.avatarText, { color: colour }]}>
-            {(item.name || item.username).charAt(0).toUpperCase()}
+      <TouchableOpacity style={styles.row} onPress={() => onOpen(item)} activeOpacity={0.85}>
+        <View style={styles.rowTop}>
+          <View style={[styles.avatar, { backgroundColor: balance > 0 ? colors.dangerBg : balance < 0 ? colors.successBg : colors.primaryTint }]}>
+            <Text style={[styles.avatarText, { color: balance > 0 || balance < 0 ? look.color : colors.primary }]}>
+              {(item.name || item.username).charAt(0).toUpperCase()}
+            </Text>
+          </View>
+          <View style={styles.rowInfo}>
+            <Text style={styles.name} numberOfLines={1}>{item.name || item.username}</Text>
+            <Text style={styles.sub} numberOfLines={1}>
+              {item.customer_code ? `#${item.customer_code} · ` : ''}{item.phone || 'No phone'}
+            </Text>
+            {item.bottles_held !== 0 && (
+              <Text style={styles.subMuted}>{item.bottles_held} bottle(s) held</Text>
+            )}
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+        </View>
+        <View style={styles.rowFooter}>
+          <StatusPill label={look.label} tone={look.tone} />
+          <Text style={[styles.amountLg, { color: look.color }]}>
+            <Text style={styles.amountUnit}>PKR </Text>{num(balance)}
           </Text>
         </View>
-        <View style={styles.rowInfo}>
-          <Text style={styles.name}>{item.name || item.username}</Text>
-          <Text style={styles.sub}>
-            {item.customer_code ? `#${item.customer_code} · ` : ''}{item.phone || 'No phone'}
-          </Text>
-          {item.bottles_held !== 0 && (
-            <Text style={styles.sub}>{item.bottles_held} bottle(s) held</Text>
-          )}
-        </View>
-        <View>
-          <Text style={[styles.balance, { color: colour }]}>{fmt(balance)}</Text>
-          <Text style={styles.balanceLabel}>
-            {balance > 0 ? 'Owes' : balance < 0 ? 'Credit' : 'Settled'}
-          </Text>
-        </View>
-        <Ionicons name="chevron-forward" size={16} color="#ccc" />
       </TouchableOpacity>
     );
   };
@@ -330,51 +406,94 @@ function ReceivablesTab({ onOpen }: { onOpen: (r: Receivable) => void }) {
   return (
     <View style={{ flex: 1 }}>
       <View style={styles.searchBar}>
-        <Ionicons name="search" size={16} color="#888" />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search name, code, phone…"
-          placeholderTextColor="#000"
-          value={search}
-          onChangeText={setSearch}
-        />
+        <View style={styles.searchBox}>
+          <Ionicons name="search" size={18} color={colors.muted} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search name, code, phone…"
+            placeholderTextColor={colors.muted}
+            value={search}
+            onChangeText={setSearch}
+          />
+          {search.length > 0 && (
+            <TouchableOpacity
+              onPress={() => setSearch('')}
+              style={styles.clearBtn}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              accessibilityLabel="Clear search"
+            >
+              <Ionicons name="close-circle" size={18} color={colors.muted} />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
+      <View style={styles.filterRow}>
         <TouchableOpacity
           style={[styles.filterChip, onlyOwing && styles.filterChipActive]}
-          onPress={() => setOnlyOwing(v => !v)}
+          onPress={() => setOnlyOwing(true)}
         >
           <Text style={[styles.filterChipText, onlyOwing && styles.filterChipTextActive]}>
             Owing
           </Text>
         </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.filterChip, !onlyOwing && styles.filterChipActive]}
+          onPress={() => setOnlyOwing(false)}
+        >
+          <Text style={[styles.filterChipText, !onlyOwing && styles.filterChipTextActive]}>
+            Everyone
+          </Text>
+        </TouchableOpacity>
       </View>
-
-      {rows.length > 0 && (
-        <Text style={{ fontSize: 12, color: '#888', paddingHorizontal: 16, paddingVertical: 7 }}>
-          {rows.length} customer(s) · {fmt(totalOwed)} outstanding
-        </Text>
-      )}
 
       {loading ? (
         <LoadingScreen message="Loading balances…" />
+      ) : error && rows.length === 0 ? (
+        <ErrorState title="Could not load balances" message={error} onRetry={() => load()} />
       ) : (
-        <FlatList
-          data={rows}
-          keyExtractor={r => String(r.id)}
-          renderItem={renderRow}
-          ItemSeparatorComponent={() => <View style={styles.separator} />}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} />
-          }
-          ListEmptyComponent={
-            <View style={styles.center}>
-              <Ionicons name="wallet-outline" size={48} color="#ccc" />
-              <Text style={styles.emptyText}>
-                {onlyOwing ? 'Nobody owes anything' : 'No customers found'}
-              </Text>
-            </View>
-          }
-          contentContainerStyle={rows.length === 0 ? { flex: 1 } : { paddingBottom: 24 }}
-        />
+        <>
+          {error ? (
+            <InlineError title="Could not refresh balances" message={error} onRetry={() => load(true)} />
+          ) : null}
+          <FlatList
+            data={rows}
+            keyExtractor={r => String(r.id)}
+            renderItem={renderRow}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={() => { setRefreshing(true); load(true); }}
+                colors={[colors.primary]}
+                tintColor={colors.primary}
+              />
+            }
+            ListHeaderComponent={
+              rows.length > 0 ? (
+                <View style={styles.totalCard}>
+                  <View>
+                    <Text style={styles.totalLabel}>Total outstanding</Text>
+                    <Text style={[styles.amountXl, { color: totalOwed > 0 ? colors.danger : colors.textSecondary }]}>
+                      <Text style={styles.amountUnit}>PKR </Text>{num(totalOwed)}
+                    </Text>
+                  </View>
+                  <Text style={styles.totalCount}>{rows.length} customer(s)</Text>
+                </View>
+              ) : null
+            }
+            ListEmptyComponent={
+              <EmptyState
+                icon={onlyOwing ? 'checkmark-done-outline' : 'wallet-outline'}
+                title={onlyOwing ? 'Nobody owes anything' : 'No customers found'}
+                text={onlyOwing
+                  ? 'Customers with an unpaid balance will appear here.'
+                  : 'Try a different name, code or phone number.'}
+              />
+            }
+            contentContainerStyle={styles.list}
+            keyboardShouldPersistTaps="handled"
+          />
+        </>
       )}
     </View>
   );
@@ -392,12 +511,14 @@ function StatementTab({
   const [data, setData] = useState<LedgerStatement | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
 
   const load = useCallback(async (isRefresh = false) => {
     if (!isRefresh) setLoading(true);
+    setError(null);
     try { setData(await adminService.getStatement(customerId)); }
-    catch { /* keep what is on screen */ }
+    catch (e: any) { setError(e?.message || 'Could not load the statement.'); }
     finally { setLoading(false); setRefreshing(false); }
   }, [customerId]);
 
@@ -406,15 +527,12 @@ function StatementTab({
   if (loading) return <LoadingScreen message="Loading statement…" />;
   if (!data) {
     return (
-      <View style={styles.center}>
-        <Ionicons name="alert-circle-outline" size={48} color="#ccc" />
-        <Text style={styles.emptyText}>Could not load the statement</Text>
-      </View>
+      <ErrorState title="Could not load the statement" message={error} onRetry={() => load()} />
     );
   }
 
   const balance = Number(data.closing_balance);
-  const balanceColour = balance > 0 ? '#FF3B30' : balance < 0 ? '#34C759' : '#888';
+  const look = balanceLook(balance, { owes: 'Outstanding', credit: 'In credit' });
   const customer = { id: customerId, name: customerName, phone: data.customer.phone };
 
   const renderEntry = ({ item }: { item: LedgerEntry }) => {
@@ -432,26 +550,25 @@ function StatementTab({
               </Text>
             )}
           </View>
-          <View>
-            <Text style={[styles.entryAmount, { color: isCredit ? '#34C759' : '#FF3B30' }]}>
+          <View style={styles.entryAmountCol}>
+            <Text style={[styles.entryAmount, { color: isCredit ? colors.success : colors.danger }]}>
               {isCredit ? '−' : '+'}{fmt(item.amount)}
             </Text>
+            <Text style={styles.entryAmountWord}>{isCredit ? 'Credit' : 'Charge'}</Text>
             <Text style={styles.entryBalance}>Bal {fmt(item.running_balance)}</Text>
           </View>
         </View>
 
         <View style={styles.entryFooter}>
-          <View style={styles.chip}><Text style={styles.chipText}>{item.source.toUpperCase()}</Text></View>
+          <StatusPill label={item.source.toUpperCase()} tone="neutral" />
           {item.bottles_out !== 0 && (
-            <View style={styles.chip}><Text style={styles.chipText}>OUT {item.bottles_out}</Text></View>
+            <StatusPill label={`OUT ${item.bottles_out}`} tone="neutral" />
           )}
           {item.bottles_in !== 0 && (
-            <View style={styles.chip}><Text style={styles.chipText}>EMPTY {item.bottles_in}</Text></View>
+            <StatusPill label={`EMPTY ${item.bottles_in}`} tone="neutral" />
           )}
           {item.is_reversed && (
-            <View style={[styles.chip, { backgroundColor: '#FF3B3020' }]}>
-              <Text style={[styles.chipText, { color: '#FF3B30' }]}>VOIDED</Text>
-            </View>
+            <StatusPill label="VOIDED" tone="danger" />
           )}
           <View style={{ flex: 1 }} />
           {!!item.receipt_number && !item.is_reversed && (
@@ -459,7 +576,7 @@ function StatementTab({
               style={styles.linkBtn}
               onPress={() => sharePaymentReceipt(item.id, item.receipt_number)}
             >
-              <Ionicons name="share-outline" size={14} color="#007AFF" />
+              <Ionicons name="share-outline" size={16} color={colors.primary} />
               <Text style={styles.linkText}>Receipt</Text>
             </TouchableOpacity>
           )}
@@ -470,15 +587,26 @@ function StatementTab({
 
   return (
     <View style={{ flex: 1 }}>
+      {/* A failed refresh keeps the statement on screen and says why. */}
+      {error ? (
+        <View style={{ paddingTop: 12 }}>
+          <InlineError title="Could not refresh the statement" message={error} onRetry={() => load(true)} />
+        </View>
+      ) : null}
       <FlatList
         data={data.results}
         keyExtractor={e => String(e.id)}
         renderItem={renderEntry}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => { setRefreshing(true); load(true); }}
+            colors={[colors.primary]}
+            tintColor={colors.primary}
+          />
         }
         ListHeaderComponent={
-          <>
+          <View style={{ paddingTop: 12 }}>
             <View style={styles.headerCard}>
               <Text style={styles.headerName}>{data.customer.name}</Text>
               <Text style={styles.headerMeta}>
@@ -490,31 +618,34 @@ function StatementTab({
               )}
             </View>
             <View style={styles.summaryRow}>
-              <View style={[styles.summaryCard, { borderLeftColor: balanceColour }]}>
-                <Text style={[styles.summaryValue, { color: balanceColour }]}>{fmt(balance)}</Text>
-                <Text style={styles.summaryLabel}>
-                  {balance > 0 ? 'Outstanding' : balance < 0 ? 'In credit' : 'Settled'}
+              <View style={styles.summaryCard}>
+                <Text style={styles.summaryLabel}>Balance</Text>
+                <Text style={[styles.summaryValue, { color: look.color }]}>
+                  <Text style={styles.amountUnit}>PKR </Text>{num(balance)}
                 </Text>
+                <StatusPill label={look.label} tone={look.tone} />
               </View>
-              <View style={[styles.summaryCard, { borderLeftColor: '#32ADE6' }]}>
-                <Text style={styles.summaryValue}>{data.closing_stock}</Text>
+              <View style={styles.summaryCard}>
                 <Text style={styles.summaryLabel}>Bottles held</Text>
+                <Text style={styles.summaryValue}>{data.closing_stock}</Text>
+                <StatusPill label="With customer" tone="primary" icon="water-outline" />
               </View>
             </View>
-          </>
-        }
-        ListEmptyComponent={
-          <View style={styles.center}>
-            <Ionicons name="document-text-outline" size={48} color="#ccc" />
-            <Text style={styles.emptyText}>No ledger entries yet</Text>
           </View>
         }
-        contentContainerStyle={{ paddingBottom: 16 }}
+        ListEmptyComponent={
+          <EmptyState
+            icon="document-text-outline"
+            title="No ledger entries yet"
+            text="Orders, payments and bottle returns for this customer will be listed here."
+          />
+        }
+        contentContainerStyle={styles.list}
       />
 
       <View style={styles.actionBar}>
         <TouchableOpacity style={[styles.actionBtn, styles.payBtn]} onPress={() => onPay(customer)}>
-          <Ionicons name="cash-outline" size={17} color="white" />
+          <Ionicons name="cash-outline" size={18} color={colors.white} />
           <Text style={styles.actionText}>Record Payment</Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -527,9 +658,9 @@ function StatementTab({
           }}
         >
           {sharing
-            ? <ActivityIndicator color="white" size="small" />
-            : <><Ionicons name="share-social-outline" size={17} color="white" />
-                <Text style={styles.actionText}>Send Statement</Text></>}
+            ? <ActivityIndicator color={colors.ink} size="small" />
+            : <><Ionicons name="share-social-outline" size={18} color={colors.ink} />
+                <Text style={styles.shareText}>Send Statement</Text></>}
         </TouchableOpacity>
       </View>
     </View>
@@ -563,23 +694,23 @@ export const AdminLedgerScreen: React.FC = () => {
           style={[styles.tab, tab === 'receivables' && styles.tabActive]}
           onPress={() => setTab('receivables')}
         >
-          <Ionicons name="wallet-outline" size={17}
-                    color={tab === 'receivables' ? '#007AFF' : '#888'} />
+          <Ionicons name="wallet-outline" size={18}
+                    color={tab === 'receivables' ? colors.white : colors.ink} />
           <Text style={[styles.tabText, tab === 'receivables' && styles.tabTextActive]}>
             Receivables
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.tab, tab === 'statement' && styles.tabActive]}
+          style={[styles.tab, tab === 'statement' && styles.tabActive, !selected && styles.tabDisabled]}
           onPress={() => selected && setTab('statement')}
           disabled={!selected}
         >
-          <Ionicons name="document-text-outline" size={17}
-                    color={tab === 'statement' ? '#007AFF' : selected ? '#888' : '#ccc'} />
+          <Ionicons name="document-text-outline" size={18}
+                    color={tab === 'statement' ? colors.white : selected ? colors.ink : colors.muted} />
           <Text style={[
             styles.tabText,
             tab === 'statement' && styles.tabTextActive,
-            !selected && { color: '#ccc' },
+            !selected && { color: colors.muted },
           ]}>
             Statement
           </Text>

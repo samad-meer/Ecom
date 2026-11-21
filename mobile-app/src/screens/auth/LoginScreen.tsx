@@ -1,3 +1,4 @@
+import { colors, radius, shadow } from '../../theme';
 import React, { useState, useContext, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
@@ -19,8 +20,8 @@ import {
 } from '../../services/rememberedCredentials';
 
 const { height: SCREEN_H } = Dimensions.get('window');
-const BRAND_BLUE = '#0A84FF';
-const BRAND_DARK = '#0D1B2A';
+const BRAND_BLUE = colors.primary;
+const BRAND_DARK = colors.ink;
 
 const FEATURE_PILLS = ['💧 Fresh & Pure', '🚴 Fast Delivery', '📱 Track Orders'];
 
@@ -267,8 +268,8 @@ const LoginScreen = () => {
   });
 
   const fieldStyle = (value: Animated.Value) => ({
-    borderColor: value.interpolate({ inputRange: [0, 1], outputRange: ['#eee', BRAND_BLUE] }),
-    backgroundColor: value.interpolate({ inputRange: [0, 1], outputRange: ['#fafafa', '#F4F9FF'] }),
+    borderColor: value.interpolate({ inputRange: [0, 1], outputRange: [colors.line, BRAND_BLUE] }),
+    backgroundColor: value.interpolate({ inputRange: [0, 1], outputRange: [colors.surfaceTint, colors.white] }),
   });
 
   const riseStyle = (value: Animated.Value, distance: number) => ({
@@ -332,14 +333,14 @@ const LoginScreen = () => {
               ]}
             >
               <View style={styles.logoInner}>
-                <Ionicons name="water" size={44} color="#fff" />
+                <Ionicons name="water" size={44} color={colors.primary} />
               </View>
             </Animated.View>
           </View>
 
           <Animated.View style={[styles.titleWrap, riseStyle(titleIn, 14)]}>
             <Text style={styles.brandName}>
-              Century<Text style={{ color: '#60B4FF' }}> Sip</Text>
+              Century<Text style={{ color: colors.sun }}> Sip</Text>
             </Text>
             <Text style={styles.tagline}>Pure water. Fast delivery.</Text>
           </Animated.View>
@@ -432,7 +433,7 @@ const LoginScreen = () => {
             <TextInput
               style={styles.fieldInput}
               placeholder={t('username_placeholder', 'Username')}
-              placeholderTextColor="#000"
+              placeholderTextColor={colors.muted}
               value={username}
               onChangeText={(v) => {
                 setUsername(v);
@@ -456,7 +457,7 @@ const LoginScreen = () => {
             <TextInput
               style={styles.fieldInput}
               placeholder={t('password_placeholder', 'Password')}
-              placeholderTextColor="#000"
+              placeholderTextColor={colors.muted}
               value={password}
               onChangeText={(v) => {
                 setPassword(v);
@@ -475,7 +476,7 @@ const LoginScreen = () => {
               accessibilityRole="button"
               accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
             >
-              <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color="#aaa" />
+              <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color={colors.muted} />
             </TouchableOpacity>
           </Animated.View>
           <FieldError message={fieldErrors.password} />
@@ -495,7 +496,7 @@ const LoginScreen = () => {
             hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
           >
             <View style={[styles.checkbox, remember && styles.checkboxOn]}>
-              {remember && <Ionicons name="checkmark" size={14} color="#fff" />}
+              {remember && <Ionicons name="checkmark" size={14} color={colors.white} />}
             </View>
             <View style={styles.rememberTextWrap}>
               <Text style={styles.rememberText}>
@@ -507,7 +508,12 @@ const LoginScreen = () => {
             </View>
           </TouchableOpacity>
 
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+          {error ? (
+            <View style={styles.errorBanner}>
+              <Ionicons name="alert-circle" size={18} color={colors.danger} />
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          ) : null}
 
           {/* Login button — presses in slightly so the tap is acknowledged
               before the network round trip has anything to show for it. */}
@@ -529,7 +535,7 @@ const LoginScreen = () => {
               activeOpacity={0.9}
             >
               {isLoading
-                ? <ActivityIndicator color="#fff" />
+                ? <ActivityIndicator color={colors.white} />
                 : <Text style={styles.loginBtnText}>{t('login_btn', 'Sign In')}</Text>
               }
             </TouchableOpacity>
@@ -561,7 +567,7 @@ const LoginScreen = () => {
           >
             <Text style={styles.registerText}>
               {t('no_account_signup', "Don't have an account?")}{' '}
-              <Text style={{ color: BRAND_BLUE, fontWeight: '700' }}>Sign Up</Text>
+              <Text style={{ color: BRAND_BLUE, fontWeight: '800' }}>Sign Up</Text>
             </Text>
           </TouchableOpacity>
         </Animated.View>
@@ -573,12 +579,12 @@ const LoginScreen = () => {
 export default LoginScreen;
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: BRAND_DARK },
+  root: { flex: 1, backgroundColor: colors.primary },
   scroll: { flexGrow: 1 },
 
   // ── Hero ──────────────────────────────────────────────────────────────────
   hero: {
-    backgroundColor: BRAND_DARK,
+    backgroundColor: colors.primary,
     minHeight: SCREEN_H * 0.42,
     alignItems: 'center',
     justifyContent: 'center',
@@ -589,12 +595,12 @@ const styles = StyleSheet.create({
   // Decorative background circles
   decCircle1: {
     position: 'absolute', width: 280, height: 280, borderRadius: 140,
-    backgroundColor: `${BRAND_BLUE}18`,
+    backgroundColor: 'rgba(255,255,255,0.14)',
     top: -60, right: -60,
   },
   decCircle2: {
     position: 'absolute', width: 180, height: 180, borderRadius: 90,
-    backgroundColor: `${BRAND_BLUE}10`,
+    backgroundColor: 'rgba(255,255,255,0.10)',
     bottom: 0, left: -40,
   },
   // Fixed box so the absolutely-positioned ripples have something to centre on.
@@ -607,54 +613,52 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: 110, height: 110, borderRadius: 55,
     borderWidth: 1.5,
-    borderColor: BRAND_BLUE,
+    borderColor: 'rgba(255,255,255,0.7)',
   },
   logoRing: {
     width: 110, height: 110, borderRadius: 55,
-    borderWidth: 2, borderColor: `${BRAND_BLUE}40`,
+    borderWidth: 2, borderColor: 'rgba(255,255,255,0.4)',
     alignItems: 'center', justifyContent: 'center',
   },
   logoInner: {
     width: 86, height: 86, borderRadius: 43,
-    backgroundColor: BRAND_BLUE,
+    backgroundColor: colors.white,
     alignItems: 'center', justifyContent: 'center',
-    shadowColor: BRAND_BLUE,
+    shadowColor: colors.ink,
     shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.55,
+    shadowOpacity: 0.25,
     shadowRadius: 16,
     elevation: 14,
   },
   titleWrap: { alignItems: 'center' },
   brandName: {
-    fontSize: 34, fontWeight: '900', color: '#fff',
+    fontSize: 32, fontWeight: '900', color: colors.white,
     letterSpacing: -0.5, marginBottom: 6,
   },
   tagline: {
-    fontSize: 14, color: 'rgba(255,255,255,0.45)',
+    // Solid white: see-through white on this blue falls under 4.5:1.
+    fontSize: 14, color: colors.white,
     letterSpacing: 0.4, marginBottom: 24,
   },
   pills: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center', paddingHorizontal: 16 },
   pill: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 20, paddingHorizontal: 12, paddingVertical: 5,
+    // A see-through white fill under white 12px text is only about 3.3:1.
+    backgroundColor: colors.primaryDark,
+    borderRadius: 24, paddingHorizontal: 12, paddingVertical: 5,
   },
-  pillText: { fontSize: 12, color: 'rgba(255,255,255,0.65)', fontWeight: '500' },
+  pillText: { fontSize: 12, color: colors.white, fontWeight: '600' },
 
   // ── Form card ─────────────────────────────────────────────────────────────
   card: {
     flex: 1,
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    padding: 28,
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    padding: 24,
     paddingBottom: 40,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 8,
+    ...shadow.float,
   },
-  cardTitle: { fontSize: 24, fontWeight: '800', color: '#1a1a1a', marginBottom: 2 },
+  cardTitle: { fontSize: 24, fontWeight: '800', color: colors.ink, marginBottom: 2 },
   // alignSelf keeps the track the width of the bar, so the sheen is clipped to
   // the bar rather than travelling the whole card.
   accentTrack: { alignSelf: 'flex-start', marginTop: 9, marginBottom: 12 },
@@ -671,32 +675,35 @@ const styles = StyleSheet.create({
     width: ACCENT_SHEEN_W,
     backgroundColor: 'rgba(255,255,255,0.9)',
   },
-  cardSub: { fontSize: 14, color: '#999', marginBottom: 24 },
+  cardSub: { fontSize: 14, color: colors.muted, marginBottom: 24 },
 
   // ── Fields ────────────────────────────────────────────────────────────────
   field: {
     flexDirection: 'row', alignItems: 'center',
-    borderWidth: 1.5, borderColor: '#eee',
-    borderRadius: 14, backgroundColor: '#fafafa',
+    borderWidth: 1.5, borderColor: colors.line,
+    borderRadius: radius.md, backgroundColor: colors.surfaceTint,
     marginBottom: 14, paddingHorizontal: 4,
   },
   fieldIconWrap: {
     width: 42, height: 52, alignItems: 'center', justifyContent: 'center',
   },
   fieldInvalid: {
-    borderColor: '#D93025',
-    backgroundColor: '#FFF7F7',
+    borderColor: colors.danger,
+    backgroundColor: colors.dangerBg,
   },
   fieldInput: {
-    flex: 1, height: 52, fontSize: 15, color: '#000',
+    flex: 1, height: 52, fontSize: 16, color: colors.ink,
     paddingRight: 12,
   },
-  eyeBtn: { paddingHorizontal: 12 },
+  // Full height of the field, so the touch target is 44 x 52 rather than the 20px icon.
+  eyeBtn: { paddingHorizontal: 12, height: 52, justifyContent: 'center' },
 
-  errorText: {
-    color: '#FF3B30', fontSize: 13, textAlign: 'center',
-    marginBottom: 10, marginTop: -4,
+  errorBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    padding: 12, marginBottom: 12, borderRadius: radius.md,
+    backgroundColor: colors.dangerBg, borderWidth: 1, borderColor: colors.dangerLine,
   },
+  errorText: { flex: 1, color: colors.danger, fontSize: 14, lineHeight: 20 },
 
   // ── Remember me ───────────────────────────────────────────────────────────
   rememberRow: {
@@ -708,44 +715,39 @@ const styles = StyleSheet.create({
   },
   checkbox: {
     width: 20, height: 20, borderRadius: 5,
-    borderWidth: 1.5, borderColor: '#c7c7cc',
+    borderWidth: 1.5, borderColor: colors.muted,
     alignItems: 'center', justifyContent: 'center',
     marginTop: 1,
   },
   checkboxOn: { backgroundColor: BRAND_BLUE, borderColor: BRAND_BLUE },
   rememberTextWrap: { flex: 1 },
-  rememberText: { fontSize: 14, color: '#333', fontWeight: '500' },
-  rememberHint: { fontSize: 11, color: '#999', marginTop: 2 },
+  rememberText: { fontSize: 14, color: colors.ink, fontWeight: '700' },
+  rememberHint: { fontSize: 12, color: colors.muted, marginTop: 2 },
 
   // ── Login button ──────────────────────────────────────────────────────────
   loginBtn: {
     backgroundColor: BRAND_BLUE,
-    borderRadius: 14, paddingVertical: 16,
-    alignItems: 'center', marginTop: 4,
-    shadowColor: BRAND_BLUE,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
-    elevation: 6,
+    borderRadius: radius.md, height: 54,
+    alignItems: 'center', justifyContent: 'center', marginTop: 4,
   },
   loginBtnDisabled: { opacity: 0.6 },
-  loginBtnText: { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.3 },
+  loginBtnText: { color: colors.white, fontSize: 16, fontWeight: '800', letterSpacing: 0.3 },
 
   // ── Divider ───────────────────────────────────────────────────────────────
   divider: { flexDirection: 'row', alignItems: 'center', marginVertical: 20, gap: 10 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: '#eee' },
-  dividerOr: { fontSize: 12, color: '#bbb', fontWeight: '700' },
+  dividerLine: { flex: 1, height: 1, backgroundColor: colors.lineSoft },
+  dividerOr: { fontSize: 12, color: colors.muted, fontWeight: '700' },
 
   // ── Google ────────────────────────────────────────────────────────────────
   googleBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 10, borderWidth: 1.5, borderColor: '#eee',
-    borderRadius: 14, paddingVertical: 14, backgroundColor: '#fff',
+    gap: 10, borderWidth: 1.5, borderColor: colors.line,
+    borderRadius: radius.md, height: 54, backgroundColor: colors.surface,
   },
-  googleG: { fontSize: 17, fontWeight: '900', color: '#EA4335' },
-  googleText: { fontSize: 15, fontWeight: '600', color: '#333' },
+  googleG: { fontSize: 16, fontWeight: '900', color: '#EA4335' },
+  googleText: { fontSize: 16, fontWeight: '700', color: colors.ink },
 
   // ── Register link ─────────────────────────────────────────────────────────
-  registerLink: { alignItems: 'center', marginTop: 20 },
-  registerText: { fontSize: 14, color: '#888' },
+  registerLink: { alignItems: 'center', justifyContent: 'center', marginTop: 12, minHeight: 44 },
+  registerText: { fontSize: 14, color: colors.muted },
 });

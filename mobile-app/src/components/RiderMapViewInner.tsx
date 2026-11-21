@@ -1,3 +1,4 @@
+import { colors } from '../theme';
 import React, { useEffect, useRef } from 'react';
 import { StyleProp, ViewStyle } from 'react-native';
 import MapView, { LatLng, Marker, Polyline, PROVIDER_GOOGLE, Region } from 'react-native-maps';
@@ -104,7 +105,7 @@ const RiderMapViewInner: React.FC<RiderMapViewProps> = ({
       showsMyLocationButton={false}
     >
       {trail.length > 1 && (
-        <Polyline coordinates={trail} strokeColor="#007AFF" strokeWidth={4} />
+        <Polyline coordinates={trail} strokeColor={colors.primary} strokeWidth={4} />
       )}
 
       {markers.map((marker) => (

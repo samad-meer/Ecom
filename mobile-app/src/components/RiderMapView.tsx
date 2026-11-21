@@ -1,3 +1,4 @@
+import { colors } from '../theme';
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,7 +25,7 @@ export const RiderMapView: React.FC<RiderMapViewProps> = (props) => {
   if (!Inner) {
     return (
       <View style={[styles.placeholder, props.style]}>
-        <Ionicons name="map-outline" size={48} color="#ccc" />
+        <Ionicons name="map-outline" size={48} color={colors.muted} />
         <Text style={styles.title}>Map key not configured</Text>
         <Text style={styles.body}>
           Add GOOGLE_MAPS_API_KEY to mobile-app/.env and rebuild the app. Rider positions are still
@@ -39,8 +40,8 @@ export const RiderMapView: React.FC<RiderMapViewProps> = (props) => {
 const styles = StyleSheet.create({
   placeholder: {
     flex: 1, alignItems: 'center', justifyContent: 'center',
-    gap: 10, padding: 32, backgroundColor: '#f5f5f5',
+    gap: 10, padding: 32, backgroundColor: colors.bg,
   },
-  title: { fontSize: 15, fontWeight: '600', color: '#888' },
-  body: { fontSize: 13, color: '#aaa', textAlign: 'center', lineHeight: 19 },
+  title: { fontSize: 15, fontWeight: '600', color: colors.muted },
+  body: { fontSize: 13, color: colors.muted, textAlign: 'center', lineHeight: 19 },
 });

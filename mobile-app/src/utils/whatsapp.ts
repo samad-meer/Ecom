@@ -123,3 +123,118 @@ export function paymentReceivedMessage(opts: {
   );
   return lines.join('\n');
 }
+
+export interface OrderDispatchMessageOptions {
+  businessName?: string;
+  customerName?: string | null;
+  orderId: number | string;
+  items?: Array<{
+    quantity?: number;
+    price?: number | string;
+    product_details?: { name?: string | null } | null;
+    product_name?: string | null;
+    name?: string | null;
+  }> | null;
+  orderTotal?: number | string | null;
+  previousBalance?: number | string | null;
+  isPaid?: boolean | null;
+  shippingAddress?: string | null;
+  mode?: 'dispatch' | 'info';
+}
+
+/**
+ * Detailed order dispatch message sent via WhatsApp to customer.
+ * Includes items list, quantities, prices, previous ledger balance,
+ * and clear total payable amount.
+ */
+export function orderDispatchMessage(opts: OrderDispatchMessageOptions): string {
+  const {
+    businessName = 'Century Sip',
+    customerName,
+    orderId,
+    items = [],
+    orderTotal,
+    previousBalance,
+    isPaid = false,
+    shippingAddress,
+    mode = 'dispatch',
+  } = opts;
+
+  const displayName = customerName?.trim() || 'Customer';
+  const greeting =
+    mode === 'dispatch'
+      ? `Hello *${displayName}*,\nI am on my way with your order *#${orderId}*. 🚚`
+      : `Hello *${displayName}*,\nRegarding your order *#${orderId}*:`;
+
+  const lines: string[] = [
+    `*${businessName}*`,
+    '',
+    greeting,
+  ];
+
+  // 1. Order Items
+  if (items && items.length > 0) {
+    lines.push('', '📦 *Order Items:*');
+    items.forEach((item) => {
+      const qty = item.quantity ?? 1;
+      const name = item.product_details?.name || item.product_name || item.name || 'Item';
+      const unitPrice = Number(item.price || 0);
+      const lineTotal = unitPrice > 0 ? unitPrice * qty : 0;
+      if (lineTotal > 0) {
+        lines.push(`• ${qty}× ${name} (${pkr(lineTotal)})`);
+      } else {
+        lines.push(`• ${qty}× ${name}`);
+      }
+    });
+  }
+
+  // 2. Shipping Address
+  if (shippingAddress && shippingAddress.trim()) {
+    lines.push('', `📍 *Delivery Address:*\n${shippingAddress.trim()}`);
+  }
+
+  // 3. Payment details
+  lines.push('', '💰 *Payment Summary:*');
+
+  const currentTotal = Number(orderTotal || 0);
+  const prev =
+    previousBalance !== null && previousBalance !== undefined && previousBalance !== ''
+      ? Number(previousBalance)
+      : 0;
+
+  if (isPaid) {
+    lines.push(`• Order Total: *${pkr(currentTotal)}*`);
+    lines.push('• Payment Status: *Paid Online* ✅');
+
+    if (prev > 0) {
+      lines.push(`• Previous Balance (Due): *${pkr(prev)}*`);
+      lines.push('─────────────────');
+      lines.push(`*Total Payable (Previous Due): ${pkr(prev)}*`);
+      lines.push('Please keep cash ready for your previous dues. 💵');
+    } else {
+      lines.push('─────────────────');
+      lines.push('*Total to Pay: PKR 0* (Fully Paid)');
+    }
+  } else {
+    lines.push(`• This Order: *${pkr(currentTotal)}*`);
+
+    if (prev > 0) {
+      lines.push(`• Previous Balance (Due): *${pkr(prev)}*`);
+    } else if (prev < 0) {
+      lines.push(`• Previous Credit / Advance: *- ${pkr(Math.abs(prev))}*`);
+    }
+
+    const totalToPay = Math.max(0, currentTotal + prev);
+    lines.push('─────────────────');
+    lines.push(`*Total Payable: ${pkr(totalToPay)}*`);
+    if (totalToPay > 0) {
+      lines.push('Please keep the cash ready at the time of delivery. 💵');
+    } else {
+      lines.push('Order covered by advance balance.');
+    }
+  }
+
+  lines.push('', 'Thank you for choosing us!');
+  return lines.join('\n');
+}
+

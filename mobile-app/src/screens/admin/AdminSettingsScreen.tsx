@@ -4,10 +4,70 @@ import {
   TextInput, ActivityIndicator, Alert, Switch,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { colors, radius, space, fontSize, card, pagePadding } from '../../theme';
+import { ErrorState, StatusPill, friendlyError } from '../../components/ui';
 import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
 import { adminService, PricedType, PlantSettings } from '../../services/adminService';
 import { PaymentAccountsSection } from './PaymentAccountsSection';
 import { LanguageSection } from './LanguageSection';
+import { BusinessNameSection } from './BusinessNameSection';
+
+/** Soft tint behind each section's icon. */
+const TONES = {
+  primary: { fg: colors.primary, bg: colors.primaryTint },
+  info: { fg: colors.info, bg: colors.infoBg },
+  success: { fg: colors.success, bg: colors.successBg },
+  warning: { fg: colors.warningText, bg: colors.warningBg },
+  mint: { fg: colors.mintText, bg: colors.mint },
+} as const;
+
+type ToneKey = keyof typeof TONES;
+
+/** One on/off look for every switch on this screen. */
+function Toggle({
+  value, onValueChange, disabled, style,
+}: {
+  value: boolean;
+  onValueChange: (value: boolean) => void;
+  disabled?: boolean;
+  style?: React.ComponentProps<typeof Switch>['style'];
+}) {
+  return (
+    <Switch
+      value={value}
+      onValueChange={onValueChange}
+      disabled={disabled}
+      style={style}
+      trackColor={{ false: colors.line, true: colors.primarySoft }}
+      thumbColor={value ? colors.primary : colors.disabled}
+    />
+  );
+}
+
+function SectionHeader({ icon, tone, title }: { icon: keyof typeof Ionicons.glyphMap; tone: ToneKey; title: string }) {
+  const t = TONES[tone];
+  return (
+    <View style={styles.sectionHeader}>
+      <View style={[styles.sectionIcon, { backgroundColor: t.bg }]}>
+        <Ionicons name={icon} size={20} color={t.fg} />
+      </View>
+      <Text style={styles.sectionTitle}>{title}</Text>
+    </View>
+  );
+}
+
+/** A failed refresh keeps the last good data visible, with the reason above it. */
+function ErrorNote({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <View style={styles.errorNote}>
+      <Ionicons name="cloud-offline-outline" size={20} color={colors.danger} />
+      <Text style={styles.errorNoteText}>{friendlyError(message)}</Text>
+      <TouchableOpacity onPress={onRetry} accessibilityLabel="Try again">
+        <Text style={styles.errorNoteRetry}>Retry</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
 
 // ─── Reusable TypeRow ─────────────────────────────────────────────────────────
 
@@ -29,20 +89,20 @@ function TypeRow({
   return (
     <View style={styles.typeRow}>
       <View style={styles.typeInfo}>
-        <Text style={[styles.typeName, !item.is_active && styles.typeNameInactive]}>
+        <Text style={[styles.typeName, !item.is_active && styles.typeNameInactive]} numberOfLines={1}>
           {item.name}
         </Text>
         <Text style={styles.typePrice}>{price}</Text>
+        {!item.is_active && <StatusPill label="Off" tone="neutral" style={styles.offPill} />}
       </View>
-      <Switch
-        value={item.is_active}
-        onValueChange={onToggle}
+      <Toggle value={item.is_active} onValueChange={onToggle} disabled={busy} />
+      <TouchableOpacity
+        onPress={onDelete}
         disabled={busy}
-        trackColor={{ false: '#e0e0e0', true: '#34C75940' }}
-        thumbColor={item.is_active ? '#34C759' : '#ccc'}
-      />
-      <TouchableOpacity onPress={onDelete} disabled={busy} style={styles.deleteBtn}>
-        <Ionicons name="trash-outline" size={17} color={busy ? '#ddd' : '#FF3B30'} />
+        style={styles.deleteBtn}
+        accessibilityLabel={`Delete ${item.name}`}
+      >
+        <Ionicons name="trash-outline" size={20} color={busy ? colors.disabled : colors.danger} />
       </TouchableOpacity>
     </View>
   );
@@ -53,7 +113,7 @@ function TypeRow({
 function TypeList({
   title,
   icon,
-  color,
+  tone,
   load,
   create,
   update,
@@ -63,7 +123,7 @@ function TypeList({
 }: {
   title: string;
   icon: keyof typeof Ionicons.glyphMap;
-  color: string;
+  tone: ToneKey;
   load: () => Promise<PricedType[]>;
   create: (name: string, price: number | null) => Promise<PricedType>;
   update: (id: number, data: { is_active?: boolean }) => Promise<PricedType>;
@@ -74,17 +134,22 @@ function TypeList({
 }) {
   const [items, setItems] = useState<PricedType[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
   const [adding, setAdding] = useState(false);
 
   const reload = useCallback(async () => {
-    try { setItems(await load()); } catch { /* silent */ }
+    setError(null);
+    try { setItems(await load()); }
+    catch (e: any) { setError(e?.message || 'Could not load this list.'); }
     finally { setLoading(false); }
   }, [load]);
 
   useEffect(() => { reload(); }, [reload]);
+
+  const retry = () => { setLoading(true); reload(); };
 
   const handleAdd = async () => {
     if (!name.trim()) return;
@@ -95,7 +160,7 @@ function TypeList({
       setPrice('');
       reload();
     } catch (e: any) {
-      Alert.alert('Error', e.message || 'Failed to add.');
+      Alert.alert('Error', `Could not add: ${friendlyError(e?.message)}`);
     } finally {
       setAdding(false);
     }
@@ -104,7 +169,7 @@ function TypeList({
   const handleToggle = async (item: PricedType) => {
     setBusyId(item.id);
     try { await update(item.id, { is_active: !item.is_active }); reload(); }
-    catch { Alert.alert('Error', 'Failed to update.'); }
+    catch (e: any) { Alert.alert('Error', `Failed to update: ${friendlyError(e?.message)}`); }
     finally { setBusyId(null); }
   };
 
@@ -121,7 +186,7 @@ Turning it off does the same thing and can be undone.`,
           onPress: async () => {
             setBusyId(item.id);
             try { await remove(item.id); reload(); }
-            catch { Alert.alert('Error', 'Failed to delete.'); }
+            catch (e: any) { Alert.alert('Error', `Failed to delete: ${friendlyError(e?.message)}`); }
             finally { setBusyId(null); }
           },
         },
@@ -131,27 +196,22 @@ Turning it off does the same thing and can be undone.`,
 
   return (
     <View style={styles.section}>
-      <View style={styles.sectionHeader}>
-        <View style={[styles.sectionIcon, { backgroundColor: color + '18' }]}>
-          <Ionicons name={icon} size={18} color={color} />
-        </View>
-        <Text style={styles.sectionTitle}>{title}</Text>
-      </View>
+      <SectionHeader icon={icon} tone={tone} title={title} />
 
       {/* Add row */}
       <View style={styles.addRow}>
         <TextInput
-          style={[styles.addInput, { flex: 2 }]}
+          style={[styles.input, { flex: 2 }]}
           placeholder={namePlaceholder}
-          placeholderTextColor="#000"
+          placeholderTextColor={colors.muted}
           value={name}
           onChangeText={setName}
         />
         {showPrice && (
           <TextInput
-            style={[styles.addInput, { flex: 1 }]}
+            style={[styles.input, { flex: 1 }]}
             placeholder="Price (opt.)"
-            placeholderTextColor="#000"
+            placeholderTextColor={colors.muted}
             value={price}
             onChangeText={setPrice}
             keyboardType="decimal-pad"
@@ -161,29 +221,37 @@ Turning it off does the same thing and can be undone.`,
           style={[styles.addBtn, (!name.trim() || adding) && { opacity: 0.5 }]}
           onPress={handleAdd}
           disabled={!name.trim() || adding}
+          accessibilityLabel={`Add to ${title}`}
         >
           {adding
-            ? <ActivityIndicator size="small" color="white" />
-            : <Ionicons name="add" size={20} color="white" />
+            ? <ActivityIndicator size="small" color={colors.white} />
+            : <Ionicons name="add" size={22} color={colors.white} />
           }
         </TouchableOpacity>
       </View>
 
       {/* List */}
       {loading ? (
-        <ActivityIndicator size="small" color="#007AFF" style={{ marginVertical: 12 }} />
-      ) : items.length === 0 ? (
-        <Text style={styles.emptyText}>No {title.toLowerCase()} yet.</Text>
+        <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: 12 }} />
+      ) : error && items.length === 0 ? (
+        <ErrorState title={`Could not load ${title.toLowerCase()}`} message={error} onRetry={retry} style={styles.errorState} />
       ) : (
-        items.map(item => (
-          <TypeRow
-            key={item.id}
-            item={item}
-            onToggle={() => handleToggle(item)}
-            onDelete={() => handleDelete(item)}
-            busy={busyId === item.id}
-          />
-        ))
+        <>
+          {!!error && <ErrorNote message={error} onRetry={retry} />}
+          {items.length === 0 ? (
+            <Text style={styles.emptyText}>No {title.toLowerCase()} yet.</Text>
+          ) : (
+            items.map(item => (
+              <TypeRow
+                key={item.id}
+                item={item}
+                onToggle={() => handleToggle(item)}
+                onDelete={() => handleDelete(item)}
+                busy={busyId === item.id}
+              />
+            ))
+          )}
+        </>
       )}
     </View>
   );
@@ -195,14 +263,18 @@ function PricingSection() {
   const [settings, setSettings] = useState<PlantSettings | null>(null);
   const [price, setPrice] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    adminService.getPlantSettings()
+  const load = useCallback(() => {
+    setLoadError(null);
+    return adminService.getPlantSettings()
       .then(s => { setSettings(s); setPrice(String(s.standard_unit_price)); })
-      .catch(() => null)
+      .catch((e: any) => setLoadError(e?.message || 'Could not load the standard price.'))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => { load(); }, [load]);
 
   const save = async () => {
     const val = parseFloat(price);
@@ -213,7 +285,7 @@ function PricingSection() {
       setSettings(updated);
       Alert.alert('Saved', 'Standard price updated.');
     } catch (e: any) {
-      Alert.alert('Error', e.message || 'Failed to save.');
+      Alert.alert('Error', `Could not save the price: ${friendlyError(e?.message)}`);
     } finally {
       setSaving(false);
     }
@@ -223,18 +295,20 @@ function PricingSection() {
 
   return (
     <View style={styles.section}>
-      <View style={styles.sectionHeader}>
-        <View style={[styles.sectionIcon, { backgroundColor: '#FF950018' }]}>
-          <Ionicons name="pricetag" size={18} color="#FF9500" />
-        </View>
-        <Text style={styles.sectionTitle}>Standard Pricing</Text>
-      </View>
+      <SectionHeader icon="pricetag" tone="warning" title="Standard Pricing" />
       <Text style={styles.sectionDesc}>
         Default price per bottle. Customers with a custom price override this.
       </Text>
 
       {loading ? (
-        <ActivityIndicator size="small" color="#007AFF" style={{ marginVertical: 12 }} />
+        <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: 12 }} />
+      ) : loadError && !settings ? (
+        <ErrorState
+          title="Could not load the price"
+          message={loadError}
+          onRetry={() => { setLoading(true); load(); }}
+          style={styles.errorState}
+        />
       ) : (
         <View style={styles.priceRow}>
           <Text style={styles.priceLabel}>PKR</Text>
@@ -244,7 +318,7 @@ function PricingSection() {
             onChangeText={setPrice}
             keyboardType="decimal-pad"
             placeholder="0"
-            placeholderTextColor="#000"
+            placeholderTextColor={colors.muted}
           />
           <TouchableOpacity
             style={[styles.saveBtn, (!dirty || saving) && { opacity: 0.4 }]}
@@ -252,7 +326,7 @@ function PricingSection() {
             disabled={!dirty || saving}
           >
             {saving
-              ? <ActivityIndicator size="small" color="white" />
+              ? <ActivityIndicator size="small" color={colors.white} />
               : <Text style={styles.saveBtnText}>Save</Text>
             }
           </TouchableOpacity>
@@ -284,14 +358,18 @@ function MobileProfileSection() {
   const [dirty, setDirty] = useState<Record<string, { visible?: boolean; editable?: boolean }>>({});
   const [activeTab, setActiveTab] = useState<UserTypeKey>('delivery_boy');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    adminService.getMobileProfileConfig()
+  const load = useCallback(() => {
+    setLoadError(null);
+    return adminService.getMobileProfileConfig()
       .then(setConfigs)
-      .catch(() => Alert.alert('Error', 'Failed to load profile config.'))
+      .catch((e: any) => setLoadError(e?.message || 'Could not load the profile fields.'))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => { load(); }, [load]);
 
   const switchTab = (t: UserTypeKey) => { setDirty({}); setActiveTab(t); };
 
@@ -318,7 +396,7 @@ function MobileProfileSection() {
       setDirty({});
       Alert.alert('Saved', `${activeTab === 'delivery_boy' ? 'Rider' : 'Staff'} profile config updated.`);
     } catch (e: any) {
-      Alert.alert('Error', e.message || 'Save failed.');
+      Alert.alert('Error', `Save failed: ${friendlyError(e?.message)}`);
     } finally {
       setSaving(false);
     }
@@ -328,12 +406,7 @@ function MobileProfileSection() {
 
   return (
     <View style={styles.section}>
-      <View style={styles.sectionHeader}>
-        <View style={[styles.sectionIcon, { backgroundColor: '#34C75918' }]}>
-          <Ionicons name="phone-portrait" size={18} color="#34C759" />
-        </View>
-        <Text style={styles.sectionTitle}>Mobile Profile Fields</Text>
-      </View>
+      <SectionHeader icon="phone-portrait" tone="mint" title="Mobile Profile Fields" />
       <Text style={styles.sectionDesc}>
         Control which fields riders and staff can see and edit on their mobile profile.
       </Text>
@@ -354,7 +427,14 @@ function MobileProfileSection() {
       </View>
 
       {loading ? (
-        <ActivityIndicator size="small" color="#007AFF" style={{ marginVertical: 16 }} />
+        <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: 16 }} />
+      ) : loadError && !configs ? (
+        <ErrorState
+          title="Could not load the profile fields"
+          message={loadError}
+          onRetry={() => { setLoading(true); load(); }}
+          style={styles.errorState}
+        />
       ) : (
         <>
           {/* Legend */}
@@ -381,21 +461,17 @@ function MobileProfileSection() {
                         {isDirty && <Text style={mps.unsaved}> •</Text>}
                       </Text>
                       {/* Visible toggle */}
-                      <Switch
+                      <Toggle
                         value={field.visible}
                         onValueChange={v => setField(key, 'visible', v)}
                         style={mps.toggle}
-                        trackColor={{ false: '#e0e0e0', true: '#34C75940' }}
-                        thumbColor={field.visible ? '#34C759' : '#ccc'}
                       />
                       {/* Editable toggle */}
-                      <Switch
+                      <Toggle
                         value={field.editable && field.visible}
                         onValueChange={v => setField(key, 'editable', v)}
                         disabled={!field.visible}
                         style={mps.toggle}
-                        trackColor={{ false: '#e0e0e0', true: '#007AFF40' }}
-                        thumbColor={field.editable && field.visible ? '#007AFF' : '#ccc'}
                       />
                     </View>
                   );
@@ -411,7 +487,7 @@ function MobileProfileSection() {
               disabled={!hasDirty || saving}
             >
               {saving
-                ? <ActivityIndicator size="small" color="white" />
+                ? <ActivityIndicator size="small" color={colors.white} />
                 : <Text style={mps.saveBtnText}>
                     Save {activeTab === 'delivery_boy' ? 'Rider' : 'Staff'} Config
                   </Text>
@@ -430,50 +506,56 @@ function MobileProfileSection() {
 }
 
 const mps = StyleSheet.create({
-  tabRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
+  tabRow: { flexDirection: 'row', gap: 8, marginBottom: space.lg },
   tab: {
-    flex: 1, paddingVertical: 8, borderRadius: 10,
-    backgroundColor: '#f5f5f5', alignItems: 'center',
+    flex: 1, minHeight: 40, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line,
   },
-  tabActive: { backgroundColor: '#007AFF15' },
-  tabText: { fontSize: 13, fontWeight: '600', color: '#888' },
-  tabTextActive: { color: '#007AFF' },
-  legend: {
-    flexDirection: 'row', paddingHorizontal: 4,
-    marginBottom: 6,
+  tabActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  tabText: { fontSize: fontSize.sm, fontWeight: '700', color: colors.ink },
+  tabTextActive: { color: colors.white },
+  // Padded to line up with the switches, which sit inside the group card.
+  legend: { flexDirection: 'row', paddingHorizontal: 17, marginBottom: 6 },
+  legendField: { flex: 1, fontSize: fontSize.xs, fontWeight: '700', color: colors.muted, textTransform: 'uppercase', letterSpacing: 0.5 },
+  legendToggle: { width: 60, fontSize: fontSize.xs, fontWeight: '700', color: colors.muted, textAlign: 'center' },
+  group: {
+    backgroundColor: colors.surfaceTint, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line,
+    padding: space.md, marginBottom: space.md,
   },
-  legendField: { flex: 1, fontSize: 11, color: '#bbb', textTransform: 'uppercase', letterSpacing: 0.5 },
-  legendToggle: { width: 60, fontSize: 11, color: '#bbb', textAlign: 'center' },
-  group: { marginBottom: 10 },
   groupLabel: {
-    fontSize: 11, fontWeight: '700', color: '#aaa',
+    fontSize: fontSize.xs, fontWeight: '800', color: colors.muted,
     textTransform: 'uppercase', letterSpacing: 0.7,
     marginBottom: 4, paddingHorizontal: 4,
   },
   fieldRow: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingVertical: 8, paddingHorizontal: 4,
-    borderRadius: 8,
+    flexDirection: 'row', alignItems: 'center', minHeight: 44,
+    paddingVertical: 4, paddingHorizontal: 4,
+    borderRadius: radius.sm,
   },
-  fieldRowDirty: { backgroundColor: '#007AFF08' },
-  fieldLabel: { flex: 1, fontSize: 14, color: '#333' },
-  fieldLabelDim: { color: '#bbb' },
-  unsaved: { color: '#007AFF', fontWeight: '800' },
+  fieldRowDirty: { backgroundColor: colors.primaryTint },
+  fieldLabel: { flex: 1, fontSize: fontSize.sm, fontWeight: '600', color: colors.ink },
+  fieldLabelDim: { color: colors.muted, fontWeight: '400' },
+  unsaved: { color: colors.primary, fontWeight: '800' },
   toggle: { width: 60, transform: [{ scaleX: 0.85 }, { scaleY: 0.85 }] },
-  actions: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  actions: { flexDirection: 'row', gap: 10, marginTop: 4 },
   saveBtn: {
-    flex: 1, backgroundColor: '#007AFF',
-    paddingVertical: 12, borderRadius: 10, alignItems: 'center',
+    flex: 1, height: 50, backgroundColor: colors.primary,
+    borderRadius: radius.md, alignItems: 'center', justifyContent: 'center',
   },
-  saveBtnText: { color: 'white', fontWeight: '700', fontSize: 14 },
-  discardBtn: { paddingHorizontal: 16, justifyContent: 'center' },
-  discardText: { color: '#888', fontSize: 13 },
+  saveBtnText: { color: colors.white, fontWeight: '800', fontSize: fontSize.sm },
+  discardBtn: {
+    height: 50, paddingHorizontal: 18, borderRadius: radius.md, borderWidth: 1.5, borderColor: colors.muted,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  discardText: { color: colors.ink, fontSize: fontSize.sm, fontWeight: '700' },
 });
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export const AdminSettingsScreen: React.FC = () => (
-  <KeyboardAwareScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
+  <KeyboardAwareScrollView style={styles.container} contentContainerStyle={styles.content} extraBottomSpace={24}>
+    <BusinessNameSection />
+
     <PricingSection />
 
     <PaymentAccountsSection />
@@ -483,7 +565,7 @@ export const AdminSettingsScreen: React.FC = () => (
     <TypeList
       title="Bottle Types"
       icon="water"
-      color="#32ADE6"
+      tone="info"
       load={() => adminService.getBottleTypes()}
       create={(n, p) => adminService.createBottleType(n, p)}
       update={(id, d) => adminService.updateBottleType(id, d)}
@@ -494,7 +576,7 @@ export const AdminSettingsScreen: React.FC = () => (
     <TypeList
       title="Customer Types"
       icon="people"
-      color="#5856D6"
+      tone="primary"
       load={() => adminService.getCustomerTypes()}
       create={(n, p) => adminService.createCustomerType(n, p)}
       update={(id, d) => adminService.updateCustomerType(id, d)}
@@ -505,7 +587,7 @@ export const AdminSettingsScreen: React.FC = () => (
     <TypeList
       title="Delivery Areas"
       icon="location"
-      color="#FF9500"
+      tone="warning"
       load={() => adminService.getAreas()}
       create={n => adminService.createArea(n)}
       update={(id, d) => adminService.updateArea(id, d)}
@@ -517,7 +599,7 @@ export const AdminSettingsScreen: React.FC = () => (
     <TypeList
       title="Delivery Statuses"
       icon="checkmark-done"
-      color="#34C759"
+      tone="success"
       load={() => adminService.getDeliveryStatusOptions()}
       create={n => adminService.createDeliveryStatusOption(n)}
       update={(id, d) => adminService.updateDeliveryStatusOption(id, d)}
@@ -531,62 +613,65 @@ export const AdminSettingsScreen: React.FC = () => (
 );
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  container: { flex: 1, backgroundColor: colors.bg },
+  content: { paddingTop: space.xs, paddingBottom: space.xxl },
   section: {
-    backgroundColor: 'white',
-    marginHorizontal: 16,
-    marginTop: 16,
-    borderRadius: 14,
-    padding: 16,
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
+    ...card,
+    marginHorizontal: pagePadding,
+    marginBottom: space.lg,
+    padding: space.lg,
   },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginBottom: space.md },
   sectionIcon: {
-    width: 34, height: 34, borderRadius: 10,
+    width: 40, height: 40, borderRadius: 20,
     alignItems: 'center', justifyContent: 'center',
   },
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#1a1a1a' },
-  sectionDesc: { fontSize: 13, color: '#888', marginBottom: 12, lineHeight: 18 },
+  sectionTitle: { flex: 1, fontSize: fontSize.md, fontWeight: '800', color: colors.ink },
+  sectionDesc: { fontSize: fontSize.sm, color: colors.muted, marginBottom: space.md, lineHeight: 20 },
+  errorState: { paddingVertical: space.sm },
+  errorNote: {
+    flexDirection: 'row', alignItems: 'center', gap: space.sm, marginBottom: space.md, padding: space.md,
+    backgroundColor: colors.dangerBg, borderRadius: radius.md, borderWidth: 1, borderColor: colors.dangerLine,
+  },
+  errorNoteText: { flex: 1, fontSize: fontSize.sm, color: colors.danger, lineHeight: 19 },
+  errorNoteRetry: { fontSize: fontSize.sm, fontWeight: '800', color: colors.danger, paddingHorizontal: space.sm, paddingVertical: space.sm },
+  input: {
+    height: 48, borderWidth: 1, borderColor: colors.line, borderRadius: radius.md,
+    paddingHorizontal: 12, fontSize: fontSize.sm, color: colors.ink, backgroundColor: colors.surfaceTint,
+  },
   // Pricing
-  priceRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  priceLabel: { fontSize: 15, fontWeight: '600', color: '#555' },
+  priceRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  priceLabel: { fontSize: fontSize.md, fontWeight: '700', color: colors.textSecondary },
   priceInput: {
-    flex: 1, borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 10,
-    paddingHorizontal: 12, paddingVertical: 10, fontSize: 18,
-    fontWeight: '700', color: '#000',
+    flex: 1, height: 52, borderWidth: 1, borderColor: colors.line, borderRadius: radius.md,
+    paddingHorizontal: 14, fontSize: fontSize.lg,
+    fontWeight: '800', color: colors.ink, backgroundColor: colors.surfaceTint,
   },
   saveBtn: {
-    backgroundColor: '#007AFF', borderRadius: 10,
-    paddingHorizontal: 18, paddingVertical: 12,
+    height: 52, backgroundColor: colors.primary, borderRadius: radius.md,
+    paddingHorizontal: 20, alignItems: 'center', justifyContent: 'center',
   },
-  saveBtnText: { color: 'white', fontWeight: '700', fontSize: 14 },
+  saveBtnText: { color: colors.white, fontWeight: '800', fontSize: fontSize.sm },
   // Add row
-  addRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
-  addInput: {
-    borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 10,
-    paddingHorizontal: 10, paddingVertical: 9, fontSize: 13, color: '#000',
-  },
+  addRow: { flexDirection: 'row', gap: space.sm, marginBottom: space.md },
   addBtn: {
-    width: 40, height: 40, borderRadius: 10,
-    backgroundColor: '#007AFF', alignItems: 'center', justifyContent: 'center',
+    width: 48, height: 48, borderRadius: radius.md,
+    backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center',
   },
   // TypeRow
   typeRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingVertical: 10,
-    borderTopWidth: 1, borderTopColor: '#f5f5f5',
+    flexDirection: 'row', alignItems: 'center', gap: space.sm,
+    minHeight: 60, paddingVertical: space.sm, paddingLeft: space.md, paddingRight: space.sm, marginBottom: space.sm,
+    backgroundColor: colors.surfaceTint, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line,
   },
-  typeInfo: { flex: 1 },
-  typeName: { fontSize: 14, fontWeight: '600', color: '#1a1a1a' },
-  typeNameInactive: { color: '#aaa' },
-  typePrice: { fontSize: 12, color: '#888', marginTop: 1 },
+  typeInfo: { flex: 1, gap: 2 },
+  typeName: { fontSize: fontSize.md, fontWeight: '700', color: colors.ink },
+  typeNameInactive: { color: colors.muted },
+  typePrice: { fontSize: fontSize.xs, color: colors.muted },
+  offPill: { marginTop: 2 },
   deleteBtn: {
-    width: 34, height: 34, borderRadius: 8,
-    backgroundColor: '#FF3B3010', alignItems: 'center', justifyContent: 'center',
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: colors.dangerBg, alignItems: 'center', justifyContent: 'center',
   },
-  emptyText: { fontSize: 13, color: '#aaa', marginTop: 4, marginBottom: 4 },
+  emptyText: { fontSize: fontSize.sm, color: colors.muted, marginTop: 4, marginBottom: 4 },
 });

@@ -1,3 +1,4 @@
+import { colors } from '../theme';
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -29,7 +30,7 @@ export const AddressPinMap: React.FC<AddressPinMapProps> = (props) => {
   if (!Inner) {
     return (
       <View style={[styles.placeholder, props.style]}>
-        <Ionicons name="map-outline" size={36} color="#c8c8c8" />
+        <Ionicons name="map-outline" size={36} color={colors.muted} />
         <Text style={styles.title}>Map not available in this build</Text>
         <Text style={styles.body}>
           {props.pin
@@ -49,10 +50,10 @@ const styles = StyleSheet.create({
     gap: 8,
     padding: 24,
     backgroundColor: '#f4f5f7',
-    borderRadius: 10,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#e6e8eb',
+    borderColor: colors.line,
   },
-  title: { fontSize: 14, fontWeight: '600', color: '#8a8a8a' },
+  title: { fontSize: 14, fontWeight: '600', color: colors.muted },
   body: { fontSize: 12, color: '#a3a3a3', textAlign: 'center', lineHeight: 18 },
 });

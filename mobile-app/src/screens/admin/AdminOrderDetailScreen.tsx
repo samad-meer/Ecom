@@ -3,13 +3,16 @@ import {
   View, Text, StyleSheet, TouchableOpacity,
   Alert, Switch, TextInput, ActivityIndicator,
 } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import { colors, radius, fontSize, card, pagePadding } from '../../theme';
+import { StatusPill, orderStatusTone, friendlyError } from '../../components/ui';
 import { adminService, AdminOrder, DeliveryBoy } from '../../services/adminService';
 import { OrderLocationMap } from '../../components/OrderLocationMap';
 import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
-import { canWhatsApp, openWhatsApp } from '../../utils/whatsapp';
+import { canWhatsApp, openWhatsApp, orderDispatchMessage } from '../../utils/whatsapp';
 import { callNumber, canCall } from '../../utils/phone';
+import { AdminEditOrderModal } from './AdminEditOrderModal';
 
 interface RouteParams {
   order: AdminOrder;
@@ -18,16 +21,16 @@ interface RouteParams {
 
 const ORDER_STATUSES = ['Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled'];
 
-const STATUS_COLORS: Record<string, string> = {
-  Pending: '#FF9500',
-  Processing: '#5856D6',
-  Shipped: '#32ADE6',
-  Delivered: '#34C759',
-  Cancelled: '#FF3B30',
+// Fill colour of the selected status button, matching orderStatusTone's pills.
+const STATUS_FILL: Record<string, string> = {
+  Pending: colors.warning,
+  Processing: colors.primary,
+  Shipped: colors.info,
+  Delivered: colors.success,
+  Cancelled: colors.danger,
 };
 
 export const AdminOrderDetailScreen: React.FC = () => {
-  const navigation = useNavigation();
   const route = useRoute();
   const { order: initial, deliveryBoys } = route.params as RouteParams;
 
@@ -35,6 +38,7 @@ export const AdminOrderDetailScreen: React.FC = () => {
   const [saving, setSaving] = useState<string | null>(null);
   const [notes, setNotes] = useState(order.delivery_notes || '');
   const [editingNotes, setEditingNotes] = useState(false);
+  const [editModalVisible, setEditModalVisible] = useState(false);
 
   const patch = async (field: string, data: object) => {
     setSaving(field);
@@ -43,7 +47,7 @@ export const AdminOrderDetailScreen: React.FC = () => {
       setOrder(updated);
       if (field === 'notes') setEditingNotes(false);
     } catch (e: any) {
-      Alert.alert('Error', e?.message || 'Update failed.');
+      Alert.alert('Error', e?.message ? friendlyError(e.message) : 'Update failed.');
     } finally {
       setSaving(null);
     }
@@ -62,21 +66,29 @@ export const AdminOrderDetailScreen: React.FC = () => {
     >
       {/* Header card */}
       <View style={styles.card}>
-        <View style={styles.cardHeader}>
+        <View style={styles.headerTopRow}>
           <Text style={styles.orderTitle}>Order #{order.id}</Text>
-          <View style={[
-            styles.statusPill,
-            { backgroundColor: (STATUS_COLORS[order.status] || '#888') + '20' }
-          ]}>
-            <Text style={[styles.statusPillText, { color: STATUS_COLORS[order.status] || '#888' }]}>
-              {order.status}
-            </Text>
-          </View>
+          <TouchableOpacity
+            style={styles.editOrderHeaderBtn}
+            onPress={() => setEditModalVisible(true)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="create-outline" size={15} color={colors.primary} />
+            <Text style={styles.editOrderHeaderBtnText}>Edit Order</Text>
+          </TouchableOpacity>
         </View>
         <Text style={styles.metaText}>{dateStr}</Text>
+        <View style={styles.headerPills}>
+          <StatusPill label={order.status} tone={orderStatusTone(order.status)} />
+          <StatusPill
+            label={order.is_paid ? 'Paid' : 'Unpaid'}
+            tone={order.is_paid ? 'success' : 'danger'}
+            icon={order.is_paid ? 'checkmark-circle' : 'alert-circle'}
+          />
+        </View>
         {order.is_hidden && (
           <View style={styles.hiddenBanner}>
-            <Ionicons name="eye-off" size={14} color="#FF9500" />
+            <Ionicons name="eye-off" size={16} color={colors.warningText} />
             <Text style={styles.hiddenBannerText}>Hidden from default list</Text>
           </View>
         )}
@@ -87,12 +99,22 @@ export const AdminOrderDetailScreen: React.FC = () => {
       <View style={styles.card}>
         <View style={styles.addressHeader}>
           <Text style={[styles.sectionTitle, styles.addressTitle]}>Delivery Address</Text>
-          {!!order.shipping_label && (
-            <View style={styles.labelChip}>
-              <Ionicons name="bookmark" size={11} color="#007AFF" />
-              <Text style={styles.labelChipText}>{order.shipping_label}</Text>
-            </View>
-          )}
+          <View style={styles.addressActions}>
+            {!!order.shipping_label && (
+              <View style={styles.labelChip}>
+                <Ionicons name="bookmark" size={12} color={colors.primaryDark} />
+                <Text style={styles.labelChipText}>{order.shipping_label}</Text>
+              </View>
+            )}
+            <TouchableOpacity
+              style={styles.editInlineBtn}
+              onPress={() => setEditModalVisible(true)}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="pencil" size={13} color={colors.primary} />
+              <Text style={styles.editInlineBtnText}>Edit</Text>
+            </TouchableOpacity>
+          </View>
         </View>
         <Text style={styles.addressText}>{order.shipping_address || '—'}</Text>
         <OrderLocationMap
@@ -108,14 +130,14 @@ export const AdminOrderDetailScreen: React.FC = () => {
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>Customer</Text>
         <InfoRow label="Name" value={order.customer_name} />
-        {order.guest_name && <InfoRow label="Type" value="📞 Guest / Call-in" />}
-        {order.customer_phone && <InfoRow label="Phone" value={order.customer_phone} />}
-        {order.customer_email && <InfoRow label="Email" value={order.customer_email} />}
+        {!!order.guest_name && <InfoRow label="Type" value="📞 Guest / Call-in" />}
+        {!!order.customer_phone && <InfoRow label="Phone" value={order.customer_phone} />}
+        {!!order.customer_email && <InfoRow label="Email" value={order.customer_email} />}
         {order.customer_balance !== null && (
           <InfoRow
             label="Balance"
             value={`PKR ${order.customer_balance}`}
-            valueColor={order.customer_balance < 0 ? '#FF3B30' : '#34C759'}
+            valueColor={order.customer_balance < 0 ? colors.danger : colors.success}
           />
         )}
 
@@ -132,8 +154,8 @@ export const AdminOrderDetailScreen: React.FC = () => {
                 accessibilityRole="button"
                 accessibilityLabel={`Call ${order.customer_name}`}
               >
-                <Ionicons name="call" size={16} color="#fff" />
-                <Text style={styles.contactBtnText}>Call</Text>
+                <Ionicons name="call" size={18} color={colors.white} />
+                <Text style={styles.callBtnText}>Call</Text>
               </TouchableOpacity>
             )}
             {canWhatsApp(order.customer_phone) && (
@@ -141,14 +163,23 @@ export const AdminOrderDetailScreen: React.FC = () => {
                 style={[styles.contactBtn, styles.waBtn]}
                 onPress={() => openWhatsApp(
                   order.customer_phone,
-                  `Hello ${order.customer_name}, regarding your order #${order.id}.`,
+                  orderDispatchMessage({
+                    customerName: order.customer_name,
+                    orderId: order.id,
+                    items: order.items,
+                    orderTotal: order.total_price,
+                    previousBalance: order.customer_balance,
+                    isPaid: order.is_paid,
+                    shippingAddress: order.shipping_address,
+                    mode: 'info',
+                  }),
                 )}
                 activeOpacity={0.85}
                 accessibilityRole="button"
                 accessibilityLabel={`WhatsApp ${order.customer_name}`}
               >
-                <Ionicons name="logo-whatsapp" size={16} color="#fff" />
-                <Text style={styles.contactBtnText}>WhatsApp</Text>
+                <Ionicons name="logo-whatsapp" size={18} color={colors.ink} />
+                <Text style={styles.waBtnText}>WhatsApp</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -157,7 +188,17 @@ export const AdminOrderDetailScreen: React.FC = () => {
 
       {/* Items */}
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Items</Text>
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>Items</Text>
+          <TouchableOpacity
+            style={styles.editInlineBtn}
+            onPress={() => setEditModalVisible(true)}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="pencil" size={13} color={colors.primary} />
+            <Text style={styles.editInlineBtnText}>Edit Items</Text>
+          </TouchableOpacity>
+        </View>
         {order.items.map((item) => (
           <View key={item.id} style={styles.itemRow}>
             <Text style={styles.itemName}>{item.product_details.name}</Text>
@@ -175,17 +216,17 @@ export const AdminOrderDetailScreen: React.FC = () => {
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>Payment</Text>
         <InfoRow label="Method" value={order.payment_method} />
-        {order.payment_number && <InfoRow label="Number" value={order.payment_number} />}
+        {!!order.payment_number && <InfoRow label="Number" value={order.payment_number} />}
         <InfoRow label="Cash Received" value={order.cash_amount ? `PKR ${order.cash_amount}` : '—'} />
         <View style={styles.switchRow}>
-          <Text style={styles.infoLabel}>Paid</Text>
+          <Text style={styles.switchLabel}>Paid</Text>
           {saving === 'paid' ? (
-            <ActivityIndicator size="small" color="#007AFF" />
+            <ActivityIndicator size="small" color={colors.primary} />
           ) : (
             <Switch
               value={order.is_paid}
               onValueChange={(v) => patch('paid', { is_paid: v })}
-              trackColor={{ false: '#ccc', true: '#34C759' }}
+              trackColor={{ false: colors.disabled, true: colors.success }}
             />
           )}
         </View>
@@ -195,26 +236,28 @@ export const AdminOrderDetailScreen: React.FC = () => {
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>Update Status</Text>
         <View style={styles.statusGrid}>
-          {ORDER_STATUSES.map((s) => (
-            <TouchableOpacity
-              key={s}
-              style={[
-                styles.statusBtn,
-                { borderColor: STATUS_COLORS[s] || '#ccc' },
-                order.status === s && { backgroundColor: (STATUS_COLORS[s] || '#007AFF') + '20' },
-              ]}
-              onPress={() => order.status !== s && patch('status', { status: s })}
-              disabled={saving === 'status'}
-            >
-              {saving === 'status' && order.status === s ? (
-                <ActivityIndicator size="small" color={STATUS_COLORS[s]} />
-              ) : (
-                <Text style={[styles.statusBtnText, { color: STATUS_COLORS[s] || '#888' }]}>
-                  {order.status === s ? '✓ ' : ''}{s}
-                </Text>
-              )}
-            </TouchableOpacity>
-          ))}
+          {ORDER_STATUSES.map((s) => {
+            const selected = order.status === s;
+            return (
+              <TouchableOpacity
+                key={s}
+                style={[
+                  styles.statusBtn,
+                  selected && { backgroundColor: STATUS_FILL[s] || colors.primary, borderColor: STATUS_FILL[s] || colors.primary },
+                ]}
+                onPress={() => order.status !== s && patch('status', { status: s })}
+                disabled={saving === 'status'}
+              >
+                {saving === 'status' && selected ? (
+                  <ActivityIndicator size="small" color={colors.white} />
+                ) : (
+                  <Text style={[styles.statusBtnText, selected && styles.statusBtnTextSelected]}>
+                    {selected ? '✓ ' : ''}{s}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            );
+          })}
         </View>
       </View>
 
@@ -245,22 +288,28 @@ export const AdminOrderDetailScreen: React.FC = () => {
               onPress={() => patch('rider', { assigned_delivery_boy: db.id })}
               disabled={saving === 'rider'}
             >
-              <Text style={styles.riderBtnText}>
-                {db.name}{!db.is_available ? ' 🔴' : ' 🟢'}
-              </Text>
+              <Text style={styles.riderBtnText}>{db.name}</Text>
+              <View style={styles.riderState}>
+                <View style={[styles.riderDot, { backgroundColor: db.is_available ? colors.success : colors.danger }]} />
+                <Text style={styles.riderBtnSub}>{db.is_available ? 'Available' : 'Unavailable'}</Text>
+              </View>
             </TouchableOpacity>
           ))}
         </View>
-        {saving === 'rider' && <ActivityIndicator size="small" color="#007AFF" style={{ marginTop: 8 }} />}
+        {saving === 'rider' && <ActivityIndicator size="small" color={colors.primary} style={{ marginTop: 10 }} />}
       </View>
 
       {/* Notes */}
       <View style={styles.card}>
         <View style={styles.notesHeader}>
-          <Text style={styles.sectionTitle}>Note for the rider</Text>
+          <Text style={[styles.sectionTitle, styles.notesTitle]}>Note for the rider</Text>
           {!editingNotes && (
-            <TouchableOpacity onPress={() => setEditingNotes(true)}>
-              <Ionicons name="pencil" size={16} color="#007AFF" />
+            <TouchableOpacity
+              style={styles.editBtn}
+              onPress={() => setEditingNotes(true)}
+              accessibilityLabel="Edit note for the rider"
+            >
+              <Ionicons name="pencil" size={18} color={colors.primary} />
             </TouchableOpacity>
           )}
         </View>
@@ -273,7 +322,7 @@ export const AdminOrderDetailScreen: React.FC = () => {
               multiline
               numberOfLines={3}
               placeholder="Gate code 1234 · Call on arrival · Leave with the guard"
-              placeholderTextColor="#000"
+              placeholderTextColor={colors.muted}
               maxLength={500}
             />
             <Text style={styles.notesHint}>
@@ -286,7 +335,7 @@ export const AdminOrderDetailScreen: React.FC = () => {
                 disabled={saving === 'notes'}
               >
                 {saving === 'notes' ? (
-                  <ActivityIndicator size="small" color="white" />
+                  <ActivityIndicator size="small" color={colors.white} />
                 ) : (
                   <Text style={styles.saveBtnText}>Save</Text>
                 )}
@@ -308,27 +357,36 @@ export const AdminOrderDetailScreen: React.FC = () => {
 
       {/* Hide/Unhide */}
       <View style={styles.card}>
+        <Text style={styles.sectionTitle}>Visibility</Text>
         <TouchableOpacity
           style={[styles.hideBtn, order.is_hidden && styles.unhideBtn]}
           onPress={() => patch('hidden', { is_hidden: !order.is_hidden })}
           disabled={saving === 'hidden'}
         >
           {saving === 'hidden' ? (
-            <ActivityIndicator size="small" color={order.is_hidden ? '#34C759' : '#FF9500'} />
+            <ActivityIndicator size="small" color={order.is_hidden ? colors.success : colors.warningText} />
           ) : (
             <>
               <Ionicons
                 name={order.is_hidden ? 'eye' : 'eye-off'}
-                size={16}
-                color={order.is_hidden ? '#34C759' : '#FF9500'}
+                size={18}
+                color={order.is_hidden ? colors.success : colors.warningText}
               />
-              <Text style={[styles.hideBtnText, { color: order.is_hidden ? '#34C759' : '#FF9500' }]}>
+              <Text style={[styles.hideBtnText, { color: order.is_hidden ? colors.success : colors.warningText }]}>
                 {order.is_hidden ? 'Unhide Order' : 'Hide Order'}
               </Text>
             </>
           )}
         </TouchableOpacity>
       </View>
+
+      <AdminEditOrderModal
+        visible={editModalVisible}
+        order={order}
+        deliveryBoys={deliveryBoys}
+        onClose={() => setEditModalVisible(false)}
+        onSaved={(updated) => setOrder(updated)}
+      />
 
     </KeyboardAwareScrollView>
   );
@@ -344,99 +402,138 @@ function InfoRow({ label, value, valueColor }: { label: string; value: string; v
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  container: { flex: 1, backgroundColor: colors.bg },
   // Room to scroll the notes box clear of the keyboard. Replaces the spacer
   // View that used to sit at the bottom of the scroll.
-  scrollContent: { paddingBottom: 48 },
-  card: {
-    backgroundColor: 'white', margin: 12, marginBottom: 0,
-    borderRadius: 12, padding: 16,
-    elevation: 1, shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 3,
-  },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
-  orderTitle: { fontSize: 20, fontWeight: 'bold', color: '#1a1a1a' },
-  statusPill: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 20 },
-  statusPillText: { fontSize: 13, fontWeight: '700' },
-  metaText: { fontSize: 13, color: '#888', marginTop: 2 },
-  hiddenBanner: {
+  scrollContent: { paddingHorizontal: pagePadding, paddingTop: 4, paddingBottom: 48 },
+  card: { ...card, padding: 16, marginBottom: 12 },
+  headerTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  editOrderHeaderBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: '#FF950015', borderRadius: 8, padding: 8, marginTop: 8,
+    paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.pill,
+    backgroundColor: colors.primaryTint, borderWidth: 1, borderColor: colors.primary,
   },
-  hiddenBannerText: { fontSize: 12, color: '#FF9500', fontWeight: '500' },
-  sectionTitle: { fontSize: 15, fontWeight: '700', color: '#1a1a1a', marginBottom: 12 },
-  addressHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  editOrderHeaderBtnText: { fontSize: fontSize.xs, fontWeight: '800', color: colors.primaryDark },
+  orderTitle: { fontSize: fontSize.lg, fontWeight: '800', color: colors.ink },
+  metaText: { fontSize: fontSize.sm, color: colors.muted, marginTop: 4 },
+  headerPills: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
+  hiddenBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: colors.warningBg, borderRadius: radius.sm,
+    borderWidth: 1, borderColor: colors.warningLine,
+    paddingHorizontal: 12, paddingVertical: 10, marginTop: 12,
+  },
+  hiddenBannerText: { fontSize: fontSize.sm, color: colors.warningText, fontWeight: '700' },
+
+  sectionTitle: { fontSize: fontSize.md, fontWeight: '800', color: colors.ink, marginBottom: 12 },
+  sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  addressHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' },
   addressTitle: { marginBottom: 0 },
+  addressActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  editInlineBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.sm,
+    backgroundColor: colors.primaryTint,
+  },
+  editInlineBtnText: { fontSize: fontSize.xs, fontWeight: '700', color: colors.primaryDark },
   labelChip: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: '#007AFF15', borderRadius: 20,
-    paddingHorizontal: 9, paddingVertical: 3,
+    backgroundColor: colors.primaryTint, borderRadius: radius.pill,
+    paddingHorizontal: 10, paddingVertical: 4,
   },
-  labelChipText: { fontSize: 11, fontWeight: '700', color: '#007AFF' },
-  addressText: { fontSize: 15, color: '#1a1a1a', fontWeight: '600', lineHeight: 21, marginTop: 8 },
+  labelChipText: { fontSize: fontSize.xs, fontWeight: '800', color: colors.primaryDark },
+  addressText: { fontSize: fontSize.md, color: colors.ink, fontWeight: '700', lineHeight: 22, marginTop: 10 },
   addressMap: { marginTop: 12 },
-  infoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 },
-  infoLabel: { fontSize: 13, color: '#888', flex: 1 },
-  infoValue: { fontSize: 13, color: '#1a1a1a', fontWeight: '500', flex: 2, textAlign: 'right' },
-  itemRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-  itemName: { flex: 1, fontSize: 14, color: '#333' },
-  itemQty: { fontSize: 14, color: '#888', marginHorizontal: 12 },
-  itemPrice: { fontSize: 14, fontWeight: '600', color: '#1a1a1a' },
-  totalRow: {
-    flexDirection: 'row', justifyContent: 'space-between',
-    borderTopWidth: 1, borderTopColor: '#f0f0f0', paddingTop: 10, marginTop: 4,
+
+  infoRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
+    gap: 12, marginBottom: 10,
   },
-  totalLabel: { fontSize: 15, fontWeight: '700', color: '#333' },
-  totalValue: { fontSize: 15, fontWeight: '700', color: '#007AFF' },
-  switchRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 },
+  infoLabel: { fontSize: fontSize.sm, color: colors.muted, flex: 1 },
+  infoValue: { fontSize: fontSize.sm, color: colors.ink, fontWeight: '700', flex: 2, textAlign: 'right' },
+
+  itemRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
+  itemName: { flex: 1, fontSize: fontSize.sm, color: colors.ink, fontWeight: '600' },
+  itemQty: { fontSize: fontSize.sm, color: colors.muted, marginHorizontal: 12 },
+  itemPrice: { fontSize: fontSize.sm, fontWeight: '700', color: colors.ink },
+  totalRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 12, marginTop: 4,
+  },
+  totalLabel: { fontSize: fontSize.md, fontWeight: '700', color: colors.ink },
+  totalValue: { fontSize: fontSize.lg, fontWeight: '800', color: colors.ink },
+
+  switchRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    minHeight: 44, marginTop: 2,
+  },
+  switchLabel: { fontSize: fontSize.md, fontWeight: '700', color: colors.ink },
+
   statusGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   statusBtn: {
-    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10,
-    borderWidth: 1.5, borderColor: '#ccc', backgroundColor: 'white',
+    minHeight: 40, minWidth: 96, paddingHorizontal: 16, borderRadius: radius.pill,
+    borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface,
+    alignItems: 'center', justifyContent: 'center',
   },
-  statusBtnText: { fontSize: 13, fontWeight: '600' },
-  currentRider: { fontSize: 14, color: '#555', marginBottom: 10 },
+  statusBtnText: { fontSize: fontSize.sm, fontWeight: '700', color: colors.ink },
+  statusBtnTextSelected: { color: colors.white, fontWeight: '800' },
+
+  currentRider: { fontSize: fontSize.md, fontWeight: '700', color: colors.ink, marginBottom: 12 },
   riderGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   riderBtn: {
-    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10,
-    borderWidth: 1, borderColor: '#ddd', backgroundColor: 'white',
+    minHeight: 48, justifyContent: 'center',
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface,
   },
-  riderBtnActive: { backgroundColor: '#007AFF20', borderColor: '#007AFF' },
-  riderBtnText: { fontSize: 13, color: '#333' },
+  riderBtnActive: { backgroundColor: colors.primaryTint, borderColor: colors.primary },
+  riderBtnText: { fontSize: fontSize.sm, fontWeight: '700', color: colors.ink },
+  riderState: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
+  riderDot: { width: 8, height: 8, borderRadius: 4 },
+  riderBtnSub: { fontSize: fontSize.xs, color: colors.muted },
+
   notesHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  notesText: { fontSize: 14, color: '#555', lineHeight: 20 },
+  notesTitle: { marginBottom: 0 },
+  editBtn: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: colors.primaryTint, alignItems: 'center', justifyContent: 'center',
+  },
+  notesText: { fontSize: fontSize.sm, color: colors.textSecondary, lineHeight: 20 },
   notesInput: {
-    borderWidth: 1, borderColor: '#ddd', borderRadius: 8,
-    padding: 10, fontSize: 14, color: '#000', minHeight: 80,
+    borderWidth: 1, borderColor: colors.line, borderRadius: radius.md,
+    backgroundColor: colors.surfaceTint,
+    paddingHorizontal: 14, paddingVertical: 12, fontSize: fontSize.sm, color: colors.ink, minHeight: 96,
     textAlignVertical: 'top',
   },
-  notesHint: { fontSize: 11.5, color: '#8a929b', marginTop: 6, lineHeight: 16 },
+  notesHint: { fontSize: fontSize.xs, color: colors.muted, marginTop: 8, lineHeight: 16 },
+  notesActions: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  saveBtn: {
+    flex: 2, height: 46, backgroundColor: colors.primary, borderRadius: radius.md,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  saveBtnText: { color: colors.white, fontWeight: '800', fontSize: fontSize.md },
+  cancelBtn: {
+    flex: 1, height: 46, borderRadius: radius.md, borderWidth: 1.5, borderColor: colors.muted,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  cancelBtnText: { color: colors.ink, fontWeight: '700', fontSize: fontSize.sm },
 
   // ── Customer contact ──────────────────────────────────────────────────────
-  contactActions: { flexDirection: 'row', gap: 10, marginTop: 14 },
+  contactActions: { flexDirection: 'row', gap: 10, marginTop: 8 },
   contactBtn: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 7, paddingVertical: 11, borderRadius: 10,
+    flex: 1, height: 46, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 8, borderRadius: radius.md,
   },
-  callBtn: { backgroundColor: '#0A84FF' },
-  waBtn: { backgroundColor: '#25D366' },
-  contactBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
-  notesActions: { flexDirection: 'row', gap: 10, marginTop: 10 },
-  saveBtn: {
-    flex: 1, backgroundColor: '#007AFF', borderRadius: 8,
-    paddingVertical: 10, alignItems: 'center',
-  },
-  saveBtnText: { color: 'white', fontWeight: '600', fontSize: 14 },
-  cancelBtn: {
-    flex: 1, backgroundColor: '#f0f0f0', borderRadius: 8,
-    paddingVertical: 10, alignItems: 'center',
-  },
-  cancelBtnText: { color: '#555', fontWeight: '600', fontSize: 14 },
+  callBtn: { backgroundColor: colors.primary },
+  callBtnText: { color: colors.white, fontSize: fontSize.sm, fontWeight: '800' },
+  // White text on this green is only 2.0:1, so the WhatsApp button is navy on green.
+  waBtn: { backgroundColor: colors.whatsapp },
+  waBtnText: { color: colors.ink, fontSize: fontSize.sm, fontWeight: '800' },
+
   hideBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 8, paddingVertical: 12, borderRadius: 10,
-    borderWidth: 1, borderColor: '#FF950050',
+    height: 46, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 8, borderRadius: radius.md,
+    backgroundColor: colors.warningBg, borderWidth: 1, borderColor: colors.warningLine,
   },
-  unhideBtn: { borderColor: '#34C75950' },
-  hideBtnText: { fontSize: 14, fontWeight: '600' },
+  unhideBtn: { backgroundColor: colors.successBg, borderColor: colors.success },
+  hideBtnText: { fontSize: fontSize.sm, fontWeight: '800' },
 });

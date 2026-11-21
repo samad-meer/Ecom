@@ -1,10 +1,13 @@
+import { colors, radius, shadow, card, pagePadding } from '../theme';
 import React, { useState } from 'react';
 import { View, Text, Image, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import { useCart } from '../context/CartContext';
 import { useLanguage } from '../context/LanguageContext';
+import { StatusPill } from '../components/ui';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ProductDetail'>;
 
@@ -13,6 +16,11 @@ export const ProductDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const { addToCart } = useCart();
   const { t } = useLanguage();
   const [quantity, setQuantity] = useState(1);
+
+  const price = Number(product.price);
+  const priceText = Number.isFinite(price)
+    ? price.toLocaleString('en-PK', { maximumFractionDigits: 2 })
+    : String(product.price);
 
   const handleAddToCart = () => {
     addToCart(product, quantity);
@@ -25,25 +33,33 @@ export const ProductDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right']}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        {product.image ? (
-          <Image source={{ uri: product.image }} style={styles.image} resizeMode="cover" />
-        ) : (
-          <View style={[styles.image, styles.placeholder]}>
-            <Text style={styles.placeholderText}>{t('no_img', 'No Image Available')}</Text>
-          </View>
-        )}
+        <View style={styles.imageCard}>
+          {product.image ? (
+            <Image source={{ uri: product.image }} style={styles.image} resizeMode="cover" />
+          ) : (
+            <View style={[styles.image, styles.placeholder]}>
+              <Ionicons name="water" size={72} color={colors.primary} />
+              <Text style={styles.placeholderText}>{t('no_img', 'No Image Available')}</Text>
+            </View>
+          )}
+        </View>
 
-        <View style={styles.detailsContainer}>
-          <Text style={styles.name}>{product.name}</Text>
-          <Text style={styles.price}>PKR {product.price}</Text>
-
+        <View style={styles.detailsCard}>
           <View style={styles.statusContainer}>
             {product.is_active ? (
-              <Text style={styles.activeLabel}>{t('in_stock', 'In Stock')}</Text>
+              <StatusPill label={t('in_stock', 'In Stock')} tone="success" icon="checkmark-circle" />
             ) : (
-              <Text style={styles.inactiveLabel}>{t('out_of_stock', 'Out of Stock')}</Text>
+              <StatusPill label={t('out_of_stock', 'Out of Stock')} tone="danger" icon="close-circle" />
             )}
           </View>
+
+          <Text style={styles.name}>{product.name}</Text>
+          <View style={styles.priceRow}>
+            <Text style={styles.priceUnit}>PKR</Text>
+            <Text style={styles.price}>{priceText}</Text>
+          </View>
+
+          <View style={styles.divider} />
 
           <Text style={styles.sectionTitle}>{t('description_title', 'Description')}</Text>
           <Text style={styles.description}>
@@ -52,23 +68,28 @@ export const ProductDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         </View>
       </ScrollView>
 
+      {/* Sits below the scroll area rather than floating over it, so the last
+          lines of the description are never hidden behind the button. The
+          stack already pads every screen by the bottom inset, so none is added. */}
       <View style={styles.footer}>
         <View style={styles.quantityRow}>
           <Text style={styles.quantityLabel}>{t('quantity', 'Quantity')}</Text>
           <View style={styles.quantityControls}>
             <TouchableOpacity
-              style={[styles.qtyButton, quantity <= 1 && styles.qtyButtonDisabled]}
+              style={[styles.qtyButton, styles.qtyButtonOutline, quantity <= 1 && styles.qtyButtonDisabled]}
               onPress={() => setQuantity(q => Math.max(1, q - 1))}
               disabled={quantity <= 1}
+              accessibilityLabel={`Remove one ${product.name}`}
             >
-              <Text style={styles.qtyButtonText}>−</Text>
+              <Ionicons name="remove" size={22} color={quantity <= 1 ? colors.disabled : colors.primary} />
             </TouchableOpacity>
             <Text style={styles.qtyValue}>{quantity}</Text>
             <TouchableOpacity
-              style={styles.qtyButton}
+              style={[styles.qtyButton, styles.qtyButtonFilled]}
               onPress={() => setQuantity(q => q + 1)}
+              accessibilityLabel={`Add one more ${product.name}`}
             >
-              <Text style={styles.qtyButtonText}>+</Text>
+              <Ionicons name="add" size={22} color={colors.white} />
             </TouchableOpacity>
           </View>
         </View>
@@ -77,8 +98,10 @@ export const ProductDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           style={[styles.addToCartButton, !product.is_active && styles.disabledButton]}
           disabled={!product.is_active}
           onPress={handleAddToCart}
+          accessibilityLabel={`${t('add_to_cart', 'Add to Cart')}, ${product.name}`}
         >
-          <Text style={styles.addToCartText}>
+          <Ionicons name="cart" size={20} color={product.is_active ? colors.white : colors.textSecondary} />
+          <Text style={[styles.addToCartText, !product.is_active && styles.addToCartTextDisabled]}>
             {t('add_to_cart', 'Add to Cart')}
             {quantity > 1 ? ` (${quantity})` : ''}
           </Text>
@@ -91,130 +114,141 @@ export const ProductDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.bg,
   },
   scrollContent: {
-    paddingBottom: 160,
+    padding: pagePadding,
+    paddingBottom: 24,
+  },
+  imageCard: {
+    ...card,
+    borderRadius: radius.xl,
+    overflow: 'hidden',
+    marginBottom: 12,
   },
   image: {
     width: '100%',
     height: 300,
-    backgroundColor: '#f0f0f0',
+    backgroundColor: colors.primaryTint,
   },
   placeholder: {
     justifyContent: 'center',
     alignItems: 'center',
+    gap: 8,
   },
   placeholderText: {
-    color: '#888',
-    fontSize: 16,
+    color: colors.muted,
+    fontSize: 14,
   },
-  detailsContainer: {
+  detailsCard: {
+    ...card,
     padding: 20,
+  },
+  statusContainer: {
+    marginBottom: 12,
   },
   name: {
     fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 8,
-    color: '#333',
+    fontWeight: '800',
+    color: colors.ink,
+    lineHeight: 30,
+  },
+  priceRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 6,
+    marginTop: 6,
+  },
+  priceUnit: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.textSecondary,
   },
   price: {
-    fontSize: 22,
-    fontWeight: '600',
-    color: '#2ecc71',
-    marginBottom: 16,
+    fontSize: 32,
+    fontWeight: '800',
+    color: colors.primary,
+    letterSpacing: -0.5,
   },
-  statusContainer: {
-    marginBottom: 20,
-  },
-  activeLabel: {
-    color: 'green',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  inactiveLabel: {
-    color: 'red',
-    fontSize: 14,
-    fontWeight: '500',
+  divider: {
+    height: 1,
+    backgroundColor: colors.lineSoft,
+    marginVertical: 16,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 16,
+    fontWeight: '800',
     marginBottom: 8,
-    color: '#444',
+    color: colors.ink,
   },
   description: {
     fontSize: 16,
     lineHeight: 24,
-    color: '#666',
+    color: colors.textSecondary,
   },
+  // A rounded sheet that rises from the bottom, like the cart's.
   footer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: '#fff',
-    padding: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-    elevation: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    backgroundColor: colors.surface,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    ...shadow.float,
   },
   quantityRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    marginBottom: 14,
   },
   quantityLabel: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
+    fontWeight: '700',
+    color: colors.ink,
   },
   quantityControls: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 6,
   },
   qtyButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#007AFF',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  qtyButtonOutline: { borderWidth: 1.8, borderColor: colors.primary },
+  qtyButtonFilled: { backgroundColor: colors.primary },
   qtyButtonDisabled: {
-    backgroundColor: '#ccc',
-  },
-  qtyButtonText: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: 'bold',
-    lineHeight: 22,
+    borderColor: colors.disabled,
   },
   qtyValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-    minWidth: 36,
+    fontSize: 20,
+    fontWeight: '800',
+    color: colors.ink,
+    minWidth: 44,
     textAlign: 'center',
   },
   addToCartButton: {
-    backgroundColor: '#007AFF',
-    paddingVertical: 16,
-    borderRadius: 12,
+    flexDirection: 'row',
+    gap: 8,
+    backgroundColor: colors.primary,
+    height: 54,
+    borderRadius: radius.md,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   disabledButton: {
-    backgroundColor: '#ccc',
+    backgroundColor: colors.disabled,
   },
   addToCartText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
+    color: colors.white,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  // White on the pale disabled fill is unreadable.
+  addToCartTextDisabled: {
+    color: colors.textSecondary,
   },
 });

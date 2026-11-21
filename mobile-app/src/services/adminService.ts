@@ -1,5 +1,5 @@
 import { API_URL } from '../constants/config';
-import { getAuthToken } from './authService';
+import { getAuthToken, authedFetch } from './authService';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -200,6 +200,12 @@ async function errorMessage(res: Response, fallback: string): Promise<string> {
   let text = '';
   try { text = await res.text(); } catch { /* body already consumed / empty */ }
   if (!text) return fallback;
+  // A server crash comes back as a web page, not JSON.
+  if (/^\s*<(!doctype|html)/i.test(text)) {
+    return res.status >= 500
+      ? `The server had a problem (error ${res.status}). Tell the office the time you saw this.`
+      : `The server refused the request (error ${res.status}).`;
+  }
   try {
     const data = JSON.parse(text);
     if (typeof data === 'string') return data;
@@ -214,12 +220,10 @@ async function errorMessage(res: Response, fallback: string): Promise<string> {
 }
 
 async function adminFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = await getAuthToken();
-  const res = await fetch(`${API_URL}${path}`, {
+  const res = await authedFetch(`${API_URL}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
       ...(options.headers || {}),
     },
   });
@@ -307,9 +311,20 @@ export const adminService = {
     is_hidden: boolean;
     assigned_delivery_boy: number | null;
     delivery_notes: string;
+    rider_note: string;
     cash_amount: number;
     cash_received: boolean;
     delivery_status: string;
+    user_id: number | null;
+    guest_name: string;
+    guest_phone: string;
+    shipping_address: string;
+    house_number: string;
+    portion: string;
+    block: string;
+    area: string;
+    items: { product_id: number; quantity: number }[];
+    discount_override: number | null;
   }>): Promise<AdminOrder> {
     return adminFetch(`/orders/admin/${id}/`, {
       method: 'PATCH',
@@ -670,11 +685,13 @@ export const adminService = {
   // customer owes money. That is the opposite of the stored account_balance,
   // and matches the printed statement.
 
-  getReceivables(params: { search?: string; only_owing?: boolean } = {}):
+  /** The server returns 100 rows unless asked for more (500 at most), most owing first. */
+  getReceivables(params: { search?: string; only_owing?: boolean; limit?: number } = {}):
     Promise<{ count: number; results: Receivable[] }> {
     const qs = new URLSearchParams();
     if (params.search) qs.set('search', params.search);
     if (params.only_owing) qs.set('only_owing', 'true');
+    if (params.limit != null) qs.set('limit', String(params.limit));
     const query = qs.toString();
     return adminFetch(`/ledger/customers/${query ? `?${query}` : ''}`);
   },
@@ -770,6 +787,37 @@ export const adminService = {
     });
   },
 
+  // ── Online payments waiting for the office ─────────────────────────────────
+  // A rider's Online tap is only a claim. The balance moves when the office
+  // confirms it against the bank or wallet record.
+
+  getPaymentClaims(params: { status?: PaymentClaimStatus; search?: string; limit?: number; offset?: number } = {}):
+    Promise<PaymentClaimList> {
+    const qs = new URLSearchParams();
+    if (params.status) qs.set('status', params.status);
+    if (params.search) qs.set('search', params.search);
+    if (params.limit != null) qs.set('limit', String(params.limit));
+    if (params.offset != null) qs.set('offset', String(params.offset));
+    const query = qs.toString();
+    return adminFetch(`/ledger/claims/${query ? `?${query}` : ''}`);
+  },
+
+  /** The money is in the bank. `reference` is the transaction ID; optional. */
+  confirmPaymentClaim(claimId: number, reference = ''): Promise<PaymentClaim> {
+    return adminFetch(`/ledger/claims/${claimId}/confirm/`, {
+      method: 'POST',
+      body: JSON.stringify({ reference }),
+    });
+  },
+
+  /** The bank does not show it. Nothing moves; it can still be confirmed later. */
+  markPaymentClaimNotFound(claimId: number, note = ''): Promise<PaymentClaim> {
+    return adminFetch(`/ledger/claims/${claimId}/not-found/`, {
+      method: 'POST',
+      body: JSON.stringify({ note }),
+    });
+  },
+
   // ─── Rider tracking ───────────────────────────────────────────────────────
   // Riders that have never reported are absent from the list entirely, which is
   // a different thing from is_stale — they have no known position at all.
@@ -803,6 +851,36 @@ export const adminService = {
 };
 
 // ── Ledger types ─────────────────────────────────────────────────────────────
+
+export type PaymentClaimStatus = 'waiting' | 'confirmed' | 'not_found';
+
+/** Someone saying an online payment was made. Not money until confirmed. */
+export interface PaymentClaim {
+  id: number;
+  status: PaymentClaimStatus;
+  amount: string;
+  reference: string;
+  note: string;
+  order: number | null;
+  order_total: string | null;
+  /** Null on a guest order, which has no ledger. */
+  customer: number | null;
+  customer_name: string;
+  customer_code: string | null;
+  phone: string | null;
+  claimed_by_name: string | null;
+  created_at: string;
+  resolved_by_name: string | null;
+  resolved_at: string | null;
+  entry: number | null;
+  receipt_number: string | null;
+}
+
+export interface PaymentClaimList {
+  count: number;
+  total_amount: string | number;
+  results: PaymentClaim[];
+}
 
 export interface Receivable {
   id: number;

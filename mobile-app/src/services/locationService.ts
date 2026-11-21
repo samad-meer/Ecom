@@ -1,3 +1,4 @@
+import { colors } from '../theme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Device from 'expo-device';
 import * as Location from 'expo-location';
@@ -454,7 +455,7 @@ const startBackgroundUpdates = async (config: TrackingConfig): Promise<void> => 
       // the status-bar location indicator, which is where that belongs.
       notificationTitle: 'Century Sip',
       notificationBody: 'On shift',
-      notificationColor: '#0A84FF',
+      notificationColor: colors.primary,
       // Survive a swipe-away: a rider who clears their recents is not asking
       // to go dark, and Android would otherwise never restart the service.
       killServiceOnDestroy: false,

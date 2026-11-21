@@ -1,3 +1,4 @@
+import { colors, radius, card, pagePadding } from '../../theme';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
@@ -6,7 +7,8 @@ import {
 } from 'react-native';
 import { useRoute, RouteProp } from '@react-navigation/native';
 import { LoadingScreen } from '../../components/LoadingScreen';
-import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
+import { KeyboardAwareScrollView, SheetScrollView } from '../../components/KeyboardAwareScrollView';
+import { EmptyState, ErrorState, StatusPill, friendlyError, Tone } from '../../components/ui';
 import { Ionicons } from '@expo/vector-icons';
 import { adminService, AdminStaff } from '../../services/adminService';
 import { RootStackParamList, StaffRoleFilter } from '../../types/navigation';
@@ -17,199 +19,261 @@ const ROLE_TABS: { key: StaffRoleFilter; label: string }[] = [
   { key: 'staff', label: 'Staff' },
 ];
 
-const STATUS_COLORS: Record<string, string> = {
-  Active: '#34C759',
-  Inactive: '#FF9500',
-  'On Leave': '#32ADE6',
-  Resigned: '#888',
-  Terminated: '#FF3B30',
+/** How each working status reads: ink and soft fill for avatars and chips, plus the pill tone. */
+const STATUS_LOOK: Record<string, { fg: string; bg: string; tone: Tone }> = {
+  Active: { fg: colors.success, bg: colors.successBg, tone: 'success' },
+  Inactive: { fg: colors.warningText, bg: colors.warningBg, tone: 'warning' },
+  'On Leave': { fg: colors.info, bg: colors.infoBg, tone: 'info' },
+  Resigned: { fg: colors.textSecondary, bg: colors.lineSoft, tone: 'neutral' },
+  Terminated: { fg: colors.danger, bg: colors.dangerBg, tone: 'danger' },
+};
+const statusLook = (status: string) => STATUS_LOOK[status] ?? STATUS_LOOK.Resigned;
+
+/** The server sends field errors as JSON; anything else is plain text. */
+const failureReason = (e: any, prefix: string): string => {
+  const raw = e?.message;
+  try {
+    const parsed = JSON.parse(raw);
+    const text = parsed && typeof parsed === 'object' ? Object.values(parsed).flat().join(' ') : '';
+    if (text) return text;
+  } catch { /* plain text, not JSON */ }
+  return `${prefix}: ${friendlyError(raw)}`;
 };
 
 // ─── Styles (declared first) ──────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
-  searchBar: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: 'white', padding: 12,
-    borderBottomWidth: 1, borderBottomColor: '#f0f0f0',
+  container: { flex: 1, backgroundColor: colors.bg },
+  topRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: pagePadding, paddingTop: 12,
   },
-  searchInput: { flex: 1, fontSize: 14, color: '#000' },
+  searchBox: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10,
+    height: 48, paddingHorizontal: 14,
+    backgroundColor: colors.surface, borderRadius: radius.lg,
+    borderWidth: 1, borderColor: colors.line,
+  },
+  searchInput: { flex: 1, fontSize: 14, color: colors.ink },
+  clearBtn: { padding: 4 },
   addBtn: {
-    width: 36, height: 36, borderRadius: 10,
-    backgroundColor: '#007AFF', alignItems: 'center', justifyContent: 'center',
+    width: 48, height: 48, borderRadius: radius.md,
+    backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center',
   },
-  countText: { fontSize: 12, color: '#999', paddingHorizontal: 16, paddingVertical: 6 },
+  countText: {
+    fontSize: 14, fontWeight: '700', color: colors.textSecondary,
+    paddingHorizontal: pagePadding, paddingTop: 12, paddingBottom: 10,
+  },
   roleTabs: {
     flexDirection: 'row', gap: 8,
-    paddingHorizontal: 16, paddingTop: 10,
-    backgroundColor: 'white',
+    paddingHorizontal: pagePadding, paddingTop: 12,
   },
   roleTab: {
-    flex: 1, paddingVertical: 7, borderRadius: 10,
-    borderWidth: 1, borderColor: '#e4e6ea',
-    alignItems: 'center', backgroundColor: 'white',
+    flex: 1, height: 40, borderRadius: radius.pill,
+    borderWidth: 1, borderColor: colors.line,
+    alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface,
   },
-  roleTabActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
-  roleTabText: { fontSize: 13, fontWeight: '600', color: '#666' },
-  roleTabTextActive: { color: 'white' },
-  row: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: 'white', paddingHorizontal: 16, paddingVertical: 12, gap: 12,
-  },
+  roleTabActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  roleTabText: { fontSize: 14, fontWeight: '700', color: colors.ink },
+  roleTabTextActive: { color: colors.white },
+  list: { paddingHorizontal: pagePadding, paddingBottom: 24, flexGrow: 1 },
+
+  card: { ...card, padding: 16, marginBottom: 12 },
+  cardTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   avatar: {
-    width: 44, height: 44, borderRadius: 22,
+    width: 48, height: 48, borderRadius: 24,
     alignItems: 'center', justifyContent: 'center',
   },
-  avatarText: { fontSize: 18, fontWeight: '700', color: 'white' },
-  rowInfo: { flex: 1, gap: 3 },
-  name: { fontSize: 15, fontWeight: '600', color: '#1a1a1a' },
-  username: { fontSize: 12, color: '#888' },
-  tagRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
-  statusBadge: {
-    paddingHorizontal: 8, paddingVertical: 2,
-    borderRadius: 6, borderWidth: 1,
-  },
-  statusText: { fontSize: 11, fontWeight: '600' },
-  riderBadge: {
-    paddingHorizontal: 8, paddingVertical: 2,
-    borderRadius: 6, backgroundColor: '#32ADE615', borderWidth: 1, borderColor: '#32ADE640',
-  },
-  riderText: { fontSize: 11, color: '#32ADE6', fontWeight: '600' },
-  separator: { height: 1, backgroundColor: '#f5f5f5' },
-  emptyText: { fontSize: 15, color: '#aaa' },
+  avatarText: { fontSize: 20, fontWeight: '800' },
+  cardInfo: { flex: 1, gap: 2 },
+  name: { fontSize: 16, fontWeight: '800', color: colors.ink },
+  username: { fontSize: 14, color: colors.textSecondary },
+  phoneRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10 },
+  phoneText: { flex: 1, fontSize: 14, color: colors.textSecondary },
+  pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
 });
 
+const inline = StyleSheet.create({
+  box: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    marginHorizontal: pagePadding, marginTop: 12, padding: 12,
+    backgroundColor: colors.dangerBg, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.dangerLine,
+  },
+  textCol: { flex: 1, gap: 2 },
+  title: { fontSize: 14, fontWeight: '800', color: colors.danger },
+  text: { fontSize: 14, color: colors.ink },
+  btn: {
+    height: 40, paddingHorizontal: 14, borderRadius: radius.pill,
+    backgroundColor: colors.danger, alignItems: 'center', justifyContent: 'center',
+  },
+  btnText: { fontSize: 14, fontWeight: '800', color: colors.white },
+});
+
+/** A failed refresh while good data is still on screen: say why, offer a retry. */
+function InlineError({ title, message, onRetry }: { title: string; message: string; onRetry: () => void }) {
+  return (
+    <View style={inline.box}>
+      <Ionicons name="alert-circle" size={22} color={colors.danger} />
+      <View style={inline.textCol}>
+        <Text style={inline.title}>{title}</Text>
+        <Text style={inline.text}>{friendlyError(message)}</Text>
+      </View>
+      <TouchableOpacity style={inline.btn} onPress={onRetry} accessibilityLabel="Try again">
+        <Text style={inline.btnText}>Retry</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+/** Role and availability words for a person, shared by the card and the detail sheet. */
+function StaffPills({ staff, workStatus, accountActive }: {
+  staff: AdminStaff; workStatus: string; accountActive: boolean;
+}) {
+  const look = statusLook(workStatus);
+  return (
+    <>
+      {staff.is_rider
+        ? <StatusPill label="Rider" tone="info" icon="bicycle-outline" />
+        : <StatusPill label="Staff" tone="primary" icon="briefcase-outline" />}
+      <StatusPill label={workStatus} tone={look.tone} />
+      {staff.is_rider && (
+        staff.is_available
+          ? <StatusPill label="Available" tone="success" icon="radio-button-on" />
+          : <StatusPill label="Unavailable" tone="neutral" icon="radio-button-off" />
+      )}
+      {!accountActive && <StatusPill label="Account disabled" tone="danger" icon="lock-closed-outline" />}
+    </>
+  );
+}
+
 const addModal = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  overlay: { flex: 1, backgroundColor: 'rgba(10,31,68,0.45)', justifyContent: 'flex-end' },
   sheet: {
-    backgroundColor: 'white', borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    backgroundColor: colors.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl,
     padding: 20, paddingBottom: 36, maxHeight: '92%',
   },
   header: {
     flexDirection: 'row', justifyContent: 'space-between',
     alignItems: 'center', marginBottom: 16,
   },
-  title: { fontSize: 18, fontWeight: '700', color: '#1a1a1a' },
+  title: { fontSize: 20, fontWeight: '800', color: colors.ink },
   closeBtn: {
-    width: 32, height: 32, borderRadius: 16,
-    backgroundColor: '#f0f0f0', alignItems: 'center', justifyContent: 'center',
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: colors.lineSoft, alignItems: 'center', justifyContent: 'center',
   },
   twoCol: { flexDirection: 'row', gap: 10 },
-  label: { fontSize: 13, fontWeight: '600', color: '#444', marginBottom: 5, marginTop: 12 },
-  required: { color: '#FF3B30' },
+  label: { fontSize: 14, fontWeight: '700', color: colors.textSecondary, marginBottom: 6, marginTop: 14 },
+  required: { color: colors.danger },
   input: {
-    borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 8,
-    padding: 11, fontSize: 14, color: '#000', backgroundColor: '#fafafa',
+    height: 48, borderWidth: 1, borderColor: colors.line, borderRadius: radius.md,
+    paddingHorizontal: 14, fontSize: 16, color: colors.ink, backgroundColor: colors.surfaceTint,
   },
   passwordRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   eyeBtn: {
-    width: 44, height: 44, borderRadius: 8,
-    backgroundColor: '#f0f0f0', alignItems: 'center', justifyContent: 'center',
+    width: 48, height: 48, borderRadius: radius.md,
+    backgroundColor: colors.lineSoft, alignItems: 'center', justifyContent: 'center',
   },
   toggle: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    marginTop: 14, paddingVertical: 10, paddingHorizontal: 14,
-    backgroundColor: '#f7f8fa', borderRadius: 10, borderWidth: 1, borderColor: '#e0e0e0',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+    marginTop: 16, paddingVertical: 12, paddingHorizontal: 14,
+    backgroundColor: colors.surfaceTint, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line,
   },
-  toggleLabel: { fontSize: 14, fontWeight: '600', color: '#1a1a1a' },
-  toggleSub: { fontSize: 12, color: '#888', marginTop: 1 },
-  statusPicker: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginTop: 6 },
+  toggleLabel: { fontSize: 14, fontWeight: '800', color: colors.ink },
+  toggleSub: { fontSize: 12, color: colors.muted, marginTop: 1 },
+  statusPicker: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginTop: 2 },
   statusChip: {
-    paddingHorizontal: 12, paddingVertical: 6,
-    borderRadius: 14, borderWidth: 1, borderColor: '#e0e0e0',
-    backgroundColor: 'white',
+    height: 40, paddingHorizontal: 14, justifyContent: 'center',
+    borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line,
+    backgroundColor: colors.surface,
   },
-  statusChipActive: { borderColor: 'transparent' },
-  statusChipText: { fontSize: 12, fontWeight: '600' },
+  statusChipText: { fontSize: 14, fontWeight: '700' },
   errorBox: {
-    marginTop: 10, backgroundColor: '#FF3B3010', borderRadius: 8,
-    padding: 10, borderWidth: 1, borderColor: '#FF3B3030',
+    marginTop: 12, backgroundColor: colors.dangerBg, borderRadius: radius.md,
+    padding: 12, borderWidth: 1, borderColor: colors.dangerLine,
   },
-  errorText: { fontSize: 13, color: '#FF3B30' },
+  errorText: { fontSize: 14, color: colors.danger },
   submitBtn: {
-    marginTop: 16, backgroundColor: '#007AFF', borderRadius: 12,
-    paddingVertical: 14, flexDirection: 'row',
-    alignItems: 'center', justifyContent: 'center', gap: 8,
+    marginTop: 16, height: 52, backgroundColor: colors.primary, borderRadius: radius.md,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
   },
-  submitText: { color: 'white', fontSize: 15, fontWeight: '700' },
+  submitText: { color: colors.white, fontSize: 16, fontWeight: '800' },
 });
 
 // ─── Detail / Edit modal ──────────────────────────────────────────────────────
 
 const detailModal = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  overlay: { flex: 1, backgroundColor: 'rgba(10,31,68,0.45)', justifyContent: 'flex-end' },
   sheet: {
-    backgroundColor: 'white', borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    backgroundColor: colors.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl,
     padding: 20, paddingBottom: 10, maxHeight: '94%',
   },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
   avatar: {
-    width: 50, height: 50, borderRadius: 25,
+    width: 52, height: 52, borderRadius: 26,
     alignItems: 'center', justifyContent: 'center',
   },
-  avatarText: { fontSize: 22, fontWeight: '700' },
-  name: { fontSize: 18, fontWeight: '700', color: '#1a1a1a' },
-  username: { fontSize: 13, color: '#888', marginTop: 1 },
+  avatarText: { fontSize: 24, fontWeight: '800' },
+  name: { fontSize: 20, fontWeight: '800', color: colors.ink },
+  username: { fontSize: 14, color: colors.textSecondary, marginTop: 1 },
   closeBtn: {
-    width: 34, height: 34, borderRadius: 17,
-    backgroundColor: '#f0f0f0', alignItems: 'center', justifyContent: 'center',
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: colors.lineSoft, alignItems: 'center', justifyContent: 'center',
   },
+  pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 },
   twoCol: { flexDirection: 'row', gap: 10 },
-  label: { fontSize: 13, fontWeight: '600', color: '#444', marginBottom: 5, marginTop: 12 },
-  sectionLabel: {
-    fontSize: 11, fontWeight: '700', color: '#999', letterSpacing: 0.6,
-    marginTop: 20, marginBottom: 10, borderTopWidth: 1, borderTopColor: '#f0f0f0', paddingTop: 16,
+  label: { fontSize: 14, fontWeight: '700', color: colors.textSecondary, marginBottom: 6, marginTop: 12 },
+  section: {
+    marginTop: 16, padding: 16, borderRadius: radius.lg,
+    backgroundColor: colors.surfaceTint, borderWidth: 1, borderColor: colors.line,
   },
+  sectionTitle: { fontSize: 16, fontWeight: '800', color: colors.ink },
   input: {
-    borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 8,
-    padding: 11, fontSize: 14, color: '#000', backgroundColor: '#fafafa',
+    height: 48, borderWidth: 1, borderColor: colors.line, borderRadius: radius.md,
+    paddingHorizontal: 14, fontSize: 16, color: colors.ink, backgroundColor: colors.surface,
   },
   infoCard: {
-    backgroundColor: '#f7f8fa', borderRadius: 12, padding: 14, gap: 8,
-    borderWidth: 1, borderColor: '#e8e8e8',
+    backgroundColor: colors.surfaceTint, borderRadius: radius.lg, padding: 16, gap: 10,
+    borderWidth: 1, borderColor: colors.line,
   },
-  infoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  infoLabel: { fontSize: 12, color: '#999', fontWeight: '500' },
-  infoValue: { fontSize: 13, color: '#333', fontWeight: '600', flex: 1, textAlign: 'right' },
-  statusPicker: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginBottom: 14 },
+  infoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 },
+  infoLabel: { fontSize: 14, color: colors.muted, fontWeight: '600' },
+  infoValue: { fontSize: 14, color: colors.ink, fontWeight: '700', flex: 1, textAlign: 'right' },
+  statusPicker: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginTop: 12, marginBottom: 12 },
   statusChip: {
-    paddingHorizontal: 12, paddingVertical: 6,
-    borderRadius: 14, borderWidth: 1, borderColor: '#e0e0e0', backgroundColor: 'white',
+    height: 40, paddingHorizontal: 14, justifyContent: 'center',
+    borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface,
   },
-  statusChipText: { fontSize: 12, fontWeight: '600' },
+  statusChipText: { fontSize: 14, fontWeight: '700' },
   toggle: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: 10, paddingHorizontal: 14,
-    backgroundColor: '#f7f8fa', borderRadius: 10, borderWidth: 1, borderColor: '#e0e0e0',
-    marginBottom: 2,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+    paddingVertical: 12, paddingHorizontal: 14, marginTop: 12,
+    backgroundColor: colors.surface, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line,
   },
-  toggleLabel: { fontSize: 14, fontWeight: '600', color: '#1a1a1a' },
-  toggleSub: { fontSize: 12, color: '#888', marginTop: 1 },
-  pwRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  toggleLabel: { fontSize: 14, fontWeight: '800', color: colors.ink },
+  toggleSub: { fontSize: 12, color: colors.muted, marginTop: 1 },
+  pwRow: { flexDirection: 'row', gap: 8, alignItems: 'center', marginTop: 12 },
   eyeBtn: {
-    width: 44, height: 44, borderRadius: 8,
-    backgroundColor: '#f0f0f0', alignItems: 'center', justifyContent: 'center',
+    width: 48, height: 48, borderRadius: radius.md,
+    backgroundColor: colors.lineSoft, alignItems: 'center', justifyContent: 'center',
   },
   genBtn: {
-    marginTop: 10, paddingVertical: 11, borderRadius: 10,
-    backgroundColor: '#FF950015', borderWidth: 1, borderColor: '#FF950040',
-    alignItems: 'center',
+    marginTop: 10, height: 48, borderRadius: radius.md,
+    backgroundColor: colors.surface, borderWidth: 1.5, borderColor: colors.primary,
+    alignItems: 'center', justifyContent: 'center',
   },
-  genBtnText: { fontSize: 13, fontWeight: '700', color: '#FF9500' },
+  genBtnText: { fontSize: 14, fontWeight: '800', color: colors.primary },
   resetBtn: {
-    marginTop: 8, paddingVertical: 11, borderRadius: 10,
-    backgroundColor: '#FF3B3015', borderWidth: 1, borderColor: '#FF3B3040',
-    alignItems: 'center',
+    marginTop: 10, height: 48, borderRadius: radius.md,
+    backgroundColor: colors.danger, alignItems: 'center', justifyContent: 'center',
   },
-  resetBtnText: { fontSize: 13, fontWeight: '700', color: '#FF3B30' },
+  resetBtnText: { fontSize: 14, fontWeight: '800', color: colors.white },
   saveBtn: {
-    marginTop: 18, marginBottom: 20,
-    backgroundColor: '#007AFF', borderRadius: 12,
-    paddingVertical: 14, alignItems: 'center',
+    marginTop: 16, height: 52,
+    backgroundColor: colors.primary, borderRadius: radius.md,
+    alignItems: 'center', justifyContent: 'center',
   },
-  saveBtnText: { color: 'white', fontSize: 15, fontWeight: '700' },
+  saveBtnText: { color: colors.white, fontSize: 16, fontWeight: '800' },
 });
 
 // ─── Add Staff Modal ──────────────────────────────────────────────────────────
@@ -261,9 +325,7 @@ function AddStaffModal({
       onCreated();
       onClose();
     } catch (e: any) {
-      let msg = 'Failed to create staff.';
-      try { const p = JSON.parse(e.message); msg = Object.values(p).flat().join(' '); } catch {}
-      setError(msg);
+      setError(failureReason(e, 'Failed to create staff'));
     } finally { setSaving(false); }
   };
 
@@ -273,53 +335,53 @@ function AddStaffModal({
         <View style={addModal.sheet}>
           <View style={addModal.header}>
             <Text style={addModal.title}>Add Staff Member</Text>
-            <TouchableOpacity onPress={() => { reset(); onClose(); }} style={addModal.closeBtn}>
-              <Ionicons name="close" size={20} color="#555" />
+            <TouchableOpacity onPress={() => { reset(); onClose(); }} style={addModal.closeBtn} accessibilityLabel="Close">
+              <Ionicons name="close" size={20} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
 
-          <KeyboardAwareScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <SheetScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             {/* Name */}
             <View style={addModal.twoCol}>
               <View style={{ flex: 1 }}>
                 <Text style={addModal.label}>First Name</Text>
-                <TextInput style={addModal.input} value={form.first_name} onChangeText={set('first_name')} placeholder="Ali" placeholderTextColor="#000" />
+                <TextInput style={addModal.input} value={form.first_name} onChangeText={set('first_name')} placeholder="Ali" placeholderTextColor={colors.muted} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={addModal.label}>Last Name</Text>
-                <TextInput style={addModal.input} value={form.last_name} onChangeText={set('last_name')} placeholder="Hassan" placeholderTextColor="#000" />
+                <TextInput style={addModal.input} value={form.last_name} onChangeText={set('last_name')} placeholder="Hassan" placeholderTextColor={colors.muted} />
               </View>
             </View>
 
             <Text style={addModal.label}>Username <Text style={addModal.required}>*</Text></Text>
-            <TextInput style={addModal.input} value={form.username} onChangeText={set('username')} placeholder="ali.staff" placeholderTextColor="#000" autoCapitalize="none" autoCorrect={false} />
+            <TextInput style={addModal.input} value={form.username} onChangeText={set('username')} placeholder="ali.staff" placeholderTextColor={colors.muted} autoCapitalize="none" autoCorrect={false} />
 
             <Text style={addModal.label}>Phone</Text>
-            <TextInput style={addModal.input} value={form.phone_number} onChangeText={set('phone_number')} placeholder="03xx-xxxxxxx" placeholderTextColor="#000" keyboardType="phone-pad" />
+            <TextInput style={addModal.input} value={form.phone_number} onChangeText={set('phone_number')} placeholder="03xx-xxxxxxx" placeholderTextColor={colors.muted} keyboardType="phone-pad" />
 
             <View style={addModal.twoCol}>
               <View style={{ flex: 1 }}>
                 <Text style={addModal.label}>Department</Text>
-                <TextInput style={addModal.input} value={form.department} onChangeText={set('department')} placeholder="Operations" placeholderTextColor="#000" />
+                <TextInput style={addModal.input} value={form.department} onChangeText={set('department')} placeholder="Operations" placeholderTextColor={colors.muted} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={addModal.label}>Designation</Text>
-                <TextInput style={addModal.input} value={form.designation} onChangeText={set('designation')} placeholder="Manager" placeholderTextColor="#000" />
+                <TextInput style={addModal.input} value={form.designation} onChangeText={set('designation')} placeholder="Manager" placeholderTextColor={colors.muted} />
               </View>
             </View>
 
             <Text style={addModal.label}>Working Status</Text>
             <View style={addModal.statusPicker}>
               {STATUSES.map(s => {
-                const color = STATUS_COLORS[s] ?? '#888';
+                const look = statusLook(s);
                 const active = form.working_status === s;
                 return (
                   <TouchableOpacity
                     key={s}
-                    style={[addModal.statusChip, active && { backgroundColor: color + '20', borderColor: color }]}
+                    style={[addModal.statusChip, active && { backgroundColor: look.bg, borderColor: look.fg }]}
                     onPress={() => set('working_status')(s)}
                   >
-                    <Text style={[addModal.statusChipText, { color: active ? color : '#888' }]}>{s}</Text>
+                    <Text style={[addModal.statusChipText, { color: active ? colors.ink : colors.textSecondary }]}>{s}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -327,15 +389,15 @@ function AddStaffModal({
 
             {/* Rider toggle */}
             <View style={addModal.toggle}>
-              <View>
+              <View style={{ flex: 1 }}>
                 <Text style={addModal.toggleLabel}>Is Rider</Text>
                 <Text style={addModal.toggleSub}>Can be assigned to deliveries</Text>
               </View>
               <Switch
                 value={form.is_rider}
                 onValueChange={v => set('is_rider')(v)}
-                trackColor={{ false: '#e0e0e0', true: '#32ADE640' }}
-                thumbColor={form.is_rider ? '#32ADE6' : '#ccc'}
+                trackColor={{ false: colors.line, true: colors.info + '40' }}
+                thumbColor={form.is_rider ? colors.info : colors.muted}
               />
             </View>
 
@@ -344,11 +406,11 @@ function AddStaffModal({
               <View style={addModal.twoCol}>
                 <View style={{ flex: 1 }}>
                   <Text style={addModal.label}>Vehicle Type</Text>
-                  <TextInput style={addModal.input} value={form.vehicle_type} onChangeText={set('vehicle_type')} placeholder="Bike, Motorcycle" placeholderTextColor="#000" />
+                  <TextInput style={addModal.input} value={form.vehicle_type} onChangeText={set('vehicle_type')} placeholder="Bike, Motorcycle" placeholderTextColor={colors.muted} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={addModal.label}>Vehicle No.</Text>
-                  <TextInput style={addModal.input} value={form.vehicle_number} onChangeText={set('vehicle_number')} placeholder="ABC-1234" placeholderTextColor="#000" />
+                  <TextInput style={addModal.input} value={form.vehicle_number} onChangeText={set('vehicle_number')} placeholder="ABC-1234" placeholderTextColor={colors.muted} />
                 </View>
               </View>
             )}
@@ -358,11 +420,11 @@ function AddStaffModal({
               <TextInput
                 style={[addModal.input, { flex: 1 }]}
                 value={form.password} onChangeText={set('password')}
-                placeholder="Min. 6 characters" placeholderTextColor="#000"
+                placeholder="Min. 6 characters" placeholderTextColor={colors.muted}
                 secureTextEntry={!showPw}
               />
               <TouchableOpacity onPress={() => setShowPw(v => !v)} style={addModal.eyeBtn}>
-                <Ionicons name={showPw ? 'eye-off' : 'eye'} size={18} color="#888" />
+                <Ionicons name={showPw ? 'eye-off' : 'eye'} size={18} color={colors.muted} />
               </TouchableOpacity>
             </View>
 
@@ -378,16 +440,16 @@ function AddStaffModal({
               disabled={saving}
             >
               {saving
-                ? <ActivityIndicator size="small" color="white" />
+                ? <ActivityIndicator size="small" color={colors.white} />
                 : (
                   <>
-                    <Ionicons name="person-add" size={18} color="white" />
+                    <Ionicons name="person-add" size={18} color={colors.white} />
                     <Text style={addModal.submitText}>Register Staff</Text>
                   </>
                 )
               }
             </TouchableOpacity>
-          </KeyboardAwareScrollView>
+          </SheetScrollView>
         </View>
       </View>
     </Modal>
@@ -440,7 +502,7 @@ function StaffDetailModal({
   if (!staff) return null;
 
   const fullName = staff.full_name || staff.username;
-  const color = STATUS_COLORS[workStatus] ?? '#888';
+  const look = statusLook(workStatus);
 
   const save = async () => {
     setSaving(true);
@@ -460,7 +522,7 @@ function StaffDetailModal({
       onUpdated();
       onClose();
     } catch (e: any) {
-      Alert.alert('Error', e.message || 'Failed to update.');
+      Alert.alert('Error', failureReason(e, 'Failed to update'));
     } finally { setSaving(false); }
   };
 
@@ -483,7 +545,7 @@ function StaffDetailModal({
             setNewPw('');
             Alert.alert('Done', 'Password has been reset.');
           } catch (e: any) {
-            Alert.alert('Error', e.message || 'Failed.');
+            Alert.alert('Error', failureReason(e, 'Failed to reset the password'));
           } finally { setPwSaving(false); }
         },
       },
@@ -504,7 +566,7 @@ function StaffDetailModal({
             const res = await adminService.generateTempPassword(staff.user_id);
             Alert.alert('Temporary Password', `New password: ${res.new_password}\n\nShare this with the staff member.`);
           } catch (e: any) {
-            Alert.alert('Error', e.message || 'Failed.');
+            Alert.alert('Error', failureReason(e, 'Failed to generate a password'));
           } finally { setPwSaving(false); }
         },
       },
@@ -517,19 +579,27 @@ function StaffDetailModal({
         <View style={detailModal.sheet}>
           {/* Header */}
           <View style={detailModal.header}>
-            <View style={[detailModal.avatar, { backgroundColor: color + '25' }]}>
-              <Text style={[detailModal.avatarText, { color }]}>{fullName.charAt(0).toUpperCase()}</Text>
+            <View style={[detailModal.avatar, { backgroundColor: look.bg }]}>
+              <Text style={[detailModal.avatarText, { color: look.fg }]}>{fullName.charAt(0).toUpperCase()}</Text>
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={detailModal.name}>{fullName}</Text>
+              <Text style={detailModal.name} numberOfLines={1}>{fullName}</Text>
               <Text style={detailModal.username}>@{staff.username}</Text>
             </View>
-            <TouchableOpacity onPress={onClose} style={detailModal.closeBtn}>
-              <Ionicons name="close" size={20} color="#555" />
+            <TouchableOpacity onPress={onClose} style={detailModal.closeBtn} accessibilityLabel="Close">
+              <Ionicons name="close" size={20} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
 
-          <KeyboardAwareScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <View style={detailModal.pillRow}>
+            <StaffPills
+              staff={{ ...staff, is_rider: isRider }}
+              workStatus={workStatus}
+              accountActive={isActive}
+            />
+          </View>
+
+          <SheetScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
 
             {/* Account info */}
             <View style={detailModal.infoCard}>
@@ -549,98 +619,102 @@ function StaffDetailModal({
               ) : null}
               <View style={detailModal.infoRow}>
                 <Text style={detailModal.infoLabel}>Account Status</Text>
-                <Text style={[detailModal.infoValue, { color: isActive ? '#34C759' : '#FF3B30' }]}>
+                <Text style={[detailModal.infoValue, { color: isActive ? colors.success : colors.danger }]}>
                   {isActive ? 'Active' : 'Disabled'}
                 </Text>
               </View>
             </View>
 
             {/* Edit fields */}
-            <Text style={detailModal.sectionLabel}>PROFILE</Text>
+            <View style={detailModal.section}>
+              <Text style={detailModal.sectionTitle}>Profile</Text>
 
-            <View style={detailModal.twoCol}>
-              <View style={{ flex: 1 }}>
-                <Text style={detailModal.label}>First Name</Text>
-                <TextInput style={detailModal.input} value={firstName} onChangeText={setFirstName} placeholder="First name" placeholderTextColor="#000" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={detailModal.label}>Last Name</Text>
-                <TextInput style={detailModal.input} value={lastName} onChangeText={setLastName} placeholder="Last name" placeholderTextColor="#000" />
-              </View>
-            </View>
-
-            <Text style={detailModal.label}>Phone</Text>
-            <TextInput style={detailModal.input} value={phone} onChangeText={setPhone} placeholder="03xx-xxxxxxx" placeholderTextColor="#000" keyboardType="phone-pad" />
-
-            <View style={detailModal.twoCol}>
-              <View style={{ flex: 1 }}>
-                <Text style={detailModal.label}>Department</Text>
-                <TextInput style={detailModal.input} value={department} onChangeText={setDepartment} placeholder="Operations" placeholderTextColor="#000" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={detailModal.label}>Designation</Text>
-                <TextInput style={detailModal.input} value={designation} onChangeText={setDesignation} placeholder="Manager" placeholderTextColor="#000" />
-              </View>
-            </View>
-
-            <Text style={detailModal.sectionLabel}>STATUS</Text>
-
-            {/* Account active toggle */}
-            <View style={[detailModal.toggle, { marginBottom: 10 }]}>
-              <View>
-                <Text style={detailModal.toggleLabel}>Account Active</Text>
-                <Text style={detailModal.toggleSub}>Allow this staff member to log in</Text>
-              </View>
-              <Switch
-                value={isActive}
-                onValueChange={setIsActive}
-                trackColor={{ false: '#FF3B3040', true: '#34C75940' }}
-                thumbColor={isActive ? '#34C759' : '#FF3B30'}
-              />
-            </View>
-
-            <View style={detailModal.statusPicker}>
-              {STATUSES.map(s => {
-                const c = STATUS_COLORS[s] ?? '#888';
-                const active = workStatus === s;
-                return (
-                  <TouchableOpacity
-                    key={s}
-                    style={[detailModal.statusChip, active && { backgroundColor: c + '20', borderColor: c }]}
-                    onPress={() => setWorkStatus(s)}
-                  >
-                    <Text style={[detailModal.statusChipText, { color: active ? c : '#888' }]}>{s}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            {/* Rider toggle */}
-            <View style={detailModal.toggle}>
-              <View>
-                <Text style={detailModal.toggleLabel}>Is Rider</Text>
-                <Text style={detailModal.toggleSub}>Can be assigned to deliveries</Text>
-              </View>
-              <Switch
-                value={isRider}
-                onValueChange={setIsRider}
-                trackColor={{ false: '#e0e0e0', true: '#32ADE640' }}
-                thumbColor={isRider ? '#32ADE6' : '#ccc'}
-              />
-            </View>
-
-            {isRider && (
-              <View style={[detailModal.twoCol, { marginTop: 10 }]}>
+              <View style={detailModal.twoCol}>
                 <View style={{ flex: 1 }}>
-                  <Text style={detailModal.label}>Vehicle Type</Text>
-                  <TextInput style={detailModal.input} value={vehicleType} onChangeText={setVehicleType} placeholder="Bike" placeholderTextColor="#000" />
+                  <Text style={detailModal.label}>First Name</Text>
+                  <TextInput style={detailModal.input} value={firstName} onChangeText={setFirstName} placeholder="First name" placeholderTextColor={colors.muted} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={detailModal.label}>Vehicle No.</Text>
-                  <TextInput style={detailModal.input} value={vehicleNumber} onChangeText={setVehicleNumber} placeholder="ABC-1234" placeholderTextColor="#000" />
+                  <Text style={detailModal.label}>Last Name</Text>
+                  <TextInput style={detailModal.input} value={lastName} onChangeText={setLastName} placeholder="Last name" placeholderTextColor={colors.muted} />
                 </View>
               </View>
-            )}
+
+              <Text style={detailModal.label}>Phone</Text>
+              <TextInput style={detailModal.input} value={phone} onChangeText={setPhone} placeholder="03xx-xxxxxxx" placeholderTextColor={colors.muted} keyboardType="phone-pad" />
+
+              <View style={detailModal.twoCol}>
+                <View style={{ flex: 1 }}>
+                  <Text style={detailModal.label}>Department</Text>
+                  <TextInput style={detailModal.input} value={department} onChangeText={setDepartment} placeholder="Operations" placeholderTextColor={colors.muted} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={detailModal.label}>Designation</Text>
+                  <TextInput style={detailModal.input} value={designation} onChangeText={setDesignation} placeholder="Manager" placeholderTextColor={colors.muted} />
+                </View>
+              </View>
+            </View>
+
+            <View style={detailModal.section}>
+              <Text style={detailModal.sectionTitle}>Status</Text>
+
+              {/* Account active toggle */}
+              <View style={detailModal.toggle}>
+                <View style={{ flex: 1 }}>
+                  <Text style={detailModal.toggleLabel}>Account Active</Text>
+                  <Text style={detailModal.toggleSub}>Allow this staff member to log in</Text>
+                </View>
+                <Switch
+                  value={isActive}
+                  onValueChange={setIsActive}
+                  trackColor={{ false: colors.danger + '40', true: colors.success + '40' }}
+                  thumbColor={isActive ? colors.success : colors.danger}
+                />
+              </View>
+
+              <View style={detailModal.statusPicker}>
+                {STATUSES.map(s => {
+                  const c = statusLook(s);
+                  const active = workStatus === s;
+                  return (
+                    <TouchableOpacity
+                      key={s}
+                      style={[detailModal.statusChip, active && { backgroundColor: c.bg, borderColor: c.fg }]}
+                      onPress={() => setWorkStatus(s)}
+                    >
+                      <Text style={[detailModal.statusChipText, { color: active ? colors.ink : colors.textSecondary }]}>{s}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              {/* Rider toggle */}
+              <View style={[detailModal.toggle, { marginTop: 0 }]}>
+                <View style={{ flex: 1 }}>
+                  <Text style={detailModal.toggleLabel}>Is Rider</Text>
+                  <Text style={detailModal.toggleSub}>Can be assigned to deliveries</Text>
+                </View>
+                <Switch
+                  value={isRider}
+                  onValueChange={setIsRider}
+                  trackColor={{ false: colors.line, true: colors.info + '40' }}
+                  thumbColor={isRider ? colors.info : colors.muted}
+                />
+              </View>
+
+              {isRider && (
+                <View style={detailModal.twoCol}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={detailModal.label}>Vehicle Type</Text>
+                    <TextInput style={detailModal.input} value={vehicleType} onChangeText={setVehicleType} placeholder="Bike" placeholderTextColor={colors.muted} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={detailModal.label}>Vehicle No.</Text>
+                    <TextInput style={detailModal.input} value={vehicleNumber} onChangeText={setVehicleNumber} placeholder="ABC-1234" placeholderTextColor={colors.muted} />
+                  </View>
+                </View>
+              )}
+            </View>
 
             <TouchableOpacity
               style={[detailModal.saveBtn, saving && { opacity: 0.5 }]}
@@ -648,46 +722,48 @@ function StaffDetailModal({
               disabled={saving}
             >
               {saving
-                ? <ActivityIndicator size="small" color="white" />
+                ? <ActivityIndicator size="small" color={colors.white} />
                 : <Text style={detailModal.saveBtnText}>Save Changes</Text>
               }
             </TouchableOpacity>
 
             {/* Password reset */}
-            <Text style={detailModal.sectionLabel}>PASSWORD MANAGEMENT</Text>
-            <View style={detailModal.pwRow}>
-              <TextInput
-                style={[detailModal.input, { flex: 1 }]}
-                value={newPw}
-                onChangeText={setNewPw}
-                placeholder="New password (min. 6)"
-                placeholderTextColor="#000"
-                secureTextEntry={!showPw}
-              />
-              <TouchableOpacity onPress={() => setShowPw(v => !v)} style={detailModal.eyeBtn}>
-                <Ionicons name={showPw ? 'eye-off' : 'eye'} size={18} color="#888" />
+            <View style={detailModal.section}>
+              <Text style={detailModal.sectionTitle}>Password management</Text>
+              <View style={detailModal.pwRow}>
+                <TextInput
+                  style={[detailModal.input, { flex: 1 }]}
+                  value={newPw}
+                  onChangeText={setNewPw}
+                  placeholder="New password (min. 6)"
+                  placeholderTextColor={colors.muted}
+                  secureTextEntry={!showPw}
+                />
+                <TouchableOpacity onPress={() => setShowPw(v => !v)} style={detailModal.eyeBtn}>
+                  <Ionicons name={showPw ? 'eye-off' : 'eye'} size={18} color={colors.muted} />
+                </TouchableOpacity>
+              </View>
+              <TouchableOpacity
+                style={[detailModal.resetBtn, pwSaving && { opacity: 0.5 }]}
+                onPress={resetPassword}
+                disabled={pwSaving}
+              >
+                {pwSaving
+                  ? <ActivityIndicator size="small" color={colors.white} />
+                  : <Text style={detailModal.resetBtnText}>Set Password</Text>
+                }
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[detailModal.genBtn, pwSaving && { opacity: 0.5 }]}
+                onPress={generatePassword}
+                disabled={pwSaving}
+              >
+                <Text style={detailModal.genBtnText}>Generate Temporary Password</Text>
               </TouchableOpacity>
             </View>
-            <TouchableOpacity
-              style={[detailModal.resetBtn, pwSaving && { opacity: 0.5 }]}
-              onPress={resetPassword}
-              disabled={pwSaving}
-            >
-              {pwSaving
-                ? <ActivityIndicator size="small" color="#FF3B30" />
-                : <Text style={detailModal.resetBtnText}>Set Password</Text>
-              }
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[detailModal.genBtn, pwSaving && { opacity: 0.5 }]}
-              onPress={generatePassword}
-              disabled={pwSaving}
-            >
-              <Text style={detailModal.genBtnText}>Generate Temporary Password</Text>
-            </TouchableOpacity>
 
             <View style={{ height: 36 }} />
-          </KeyboardAwareScrollView>
+          </SheetScrollView>
         </View>
       </View>
     </Modal>
@@ -701,6 +777,7 @@ export const AdminStaffScreen: React.FC = () => {
   const [staff, setStaff] = useState<AdminStaff[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [role, setRole] = useState<StaffRoleFilter>(route.params?.role ?? 'all');
   const [selected, setSelected] = useState<AdminStaff | null>(null);
@@ -708,8 +785,9 @@ export const AdminStaffScreen: React.FC = () => {
 
   const load = useCallback(async (isRefresh = false) => {
     if (!isRefresh) setLoading(true);
+    setError(null);
     try { setStaff(await adminService.getStaff()); }
-    catch { /* silent */ }
+    catch (e: any) { setError(e?.message || 'Could not load staff.'); }
     finally { setLoading(false); setRefreshing(false); }
   }, []);
 
@@ -732,52 +810,59 @@ export const AdminStaffScreen: React.FC = () => {
 
   const renderItem = ({ item }: { item: AdminStaff }) => {
     const fullName = item.full_name || item.username;
-    const color = STATUS_COLORS[item.working_status] ?? '#888';
+    const look = statusLook(item.working_status);
     return (
-      <TouchableOpacity style={styles.row} onPress={() => setSelected(item)}>
-        <View style={[styles.avatar, { backgroundColor: color + '25' }]}>
-          <Text style={[styles.avatarText, { color }]}>{fullName.charAt(0).toUpperCase()}</Text>
-        </View>
-        <View style={styles.rowInfo}>
-          <Text style={styles.name}>{fullName}</Text>
-          <Text style={styles.username}>@{item.username}</Text>
-          <View style={styles.tagRow}>
-            <View style={[styles.statusBadge, { backgroundColor: color + '15', borderColor: color + '40' }]}>
-              <Text style={[styles.statusText, { color }]}>{item.working_status}</Text>
-            </View>
-            {item.is_rider && (
-              <View style={styles.riderBadge}>
-                <Text style={styles.riderText}>Rider</Text>
-              </View>
-            )}
+      <TouchableOpacity style={styles.card} onPress={() => setSelected(item)} activeOpacity={0.85}>
+        <View style={styles.cardTop}>
+          <View style={[styles.avatar, { backgroundColor: look.bg }]}>
+            <Text style={[styles.avatarText, { color: look.fg }]}>{fullName.charAt(0).toUpperCase()}</Text>
           </View>
+          <View style={styles.cardInfo}>
+            <Text style={styles.name} numberOfLines={1}>{fullName}</Text>
+            <Text style={styles.username} numberOfLines={1}>@{item.username}</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.muted} />
         </View>
-        {item.phone_number && (
-          <Text style={{ fontSize: 12, color: '#aaa' }}>{item.phone_number}</Text>
-        )}
-        <Ionicons name="chevron-forward" size={16} color="#ccc" />
+
+        {item.phone_number ? (
+          <View style={styles.phoneRow}>
+            <Ionicons name="call-outline" size={16} color={colors.muted} />
+            <Text style={styles.phoneText} numberOfLines={1}>{item.phone_number}</Text>
+          </View>
+        ) : null}
+
+        <View style={styles.pillRow}>
+          <StaffPills staff={item} workStatus={item.working_status} accountActive={item.is_active} />
+        </View>
       </TouchableOpacity>
     );
   };
 
   return (
     <View style={styles.container}>
-      <View style={styles.searchBar}>
-        <Ionicons name="search" size={16} color="#888" />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search by name, username, phone…"
-          value={search}
-          onChangeText={setSearch}
-          placeholderTextColor="#000"
-        />
-        {search.length > 0 && (
-          <TouchableOpacity onPress={() => setSearch('')}>
-            <Ionicons name="close-circle" size={16} color="#888" />
-          </TouchableOpacity>
-        )}
-        <TouchableOpacity style={styles.addBtn} onPress={() => setAddOpen(true)}>
-          <Ionicons name="person-add" size={18} color="white" />
+      <View style={styles.topRow}>
+        <View style={styles.searchBox}>
+          <Ionicons name="search" size={18} color={colors.muted} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search by name, username, phone…"
+            value={search}
+            onChangeText={setSearch}
+            placeholderTextColor={colors.muted}
+          />
+          {search.length > 0 && (
+            <TouchableOpacity
+              onPress={() => setSearch('')}
+              style={styles.clearBtn}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              accessibilityLabel="Clear search"
+            >
+              <Ionicons name="close-circle" size={18} color={colors.muted} />
+            </TouchableOpacity>
+          )}
+        </View>
+        <TouchableOpacity style={styles.addBtn} onPress={() => setAddOpen(true)} accessibilityLabel="Add staff member">
+          <Ionicons name="person-add" size={20} color={colors.white} />
         </TouchableOpacity>
       </View>
 
@@ -798,27 +883,45 @@ export const AdminStaffScreen: React.FC = () => {
         })}
       </View>
 
-      <Text style={styles.countText}>{filtered.length} {noun}</Text>
+      {!(error && staff.length === 0) && (
+        <Text style={styles.countText}>{filtered.length} {noun}</Text>
+      )}
 
       {loading ? (
         <LoadingScreen message="Loading staff…" />
+      ) : error && staff.length === 0 ? (
+        <ErrorState title="Could not load staff" message={error} onRetry={() => load()} />
       ) : (
-        <FlatList
-          data={filtered}
-          keyExtractor={s => String(s.id)}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} />
-          }
-          renderItem={renderItem}
-          ItemSeparatorComponent={() => <View style={styles.separator} />}
-          ListEmptyComponent={
-            <View style={styles.center}>
-              <Ionicons name={role === 'riders' ? 'bicycle-outline' : 'people-outline'} size={48} color="#ccc" />
-              <Text style={styles.emptyText}>No {noun} found</Text>
-            </View>
-          }
-          contentContainerStyle={filtered.length === 0 ? { flex: 1 } : { paddingBottom: 24 }}
-        />
+        <>
+          {/* A failed refresh keeps the last good list and says why. */}
+          {error ? (
+            <InlineError title="Could not refresh staff" message={error} onRetry={() => load(true)} />
+          ) : null}
+          <FlatList
+            data={filtered}
+            keyExtractor={s => String(s.id)}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={() => { setRefreshing(true); load(true); }}
+                colors={[colors.primary]}
+                tintColor={colors.primary}
+              />
+            }
+            renderItem={renderItem}
+            ListEmptyComponent={
+              <EmptyState
+                icon={role === 'riders' ? 'bicycle-outline' : 'people-outline'}
+                title={`No ${noun} found`}
+                text={search
+                  ? 'Try a different name, username or phone number.'
+                  : 'Use the add button above to register someone.'}
+              />
+            }
+            contentContainerStyle={styles.list}
+            keyboardShouldPersistTaps="handled"
+          />
+        </>
       )}
 
       <StaffDetailModal

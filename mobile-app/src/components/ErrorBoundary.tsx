@@ -1,3 +1,4 @@
+import { colors } from '../theme';
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -46,7 +47,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
     return (
       <View style={styles.container}>
         <View style={styles.iconWrap}>
-          <Ionicons name="warning" size={34} color="#FF9500" />
+          <Ionicons name="warning" size={34} color={colors.warning} />
         </View>
         <Text style={styles.title}>Something went wrong</Text>
         <Text style={styles.body}>
@@ -79,27 +80,27 @@ export class ErrorBoundary extends React.Component<Props, State> {
 const styles = StyleSheet.create({
   container: {
     flex: 1, alignItems: 'center', justifyContent: 'center',
-    padding: 32, backgroundColor: '#F4F6F8',
+    padding: 32, backgroundColor: colors.bg,
   },
   iconWrap: {
     width: 68, height: 68, borderRadius: 34, backgroundColor: '#FFF4E0',
     alignItems: 'center', justifyContent: 'center', marginBottom: 18,
   },
-  title: { fontSize: 19, fontWeight: '800', color: '#1a2530' },
+  title: { fontSize: 19, fontWeight: '800', color: colors.ink },
   body: {
-    fontSize: 14, color: '#5b6b7c', textAlign: 'center',
+    fontSize: 14, color: colors.textSecondary, textAlign: 'center',
     lineHeight: 20, marginTop: 8,
   },
   detail: {
     maxHeight: 140, alignSelf: 'stretch', marginTop: 18,
-    borderRadius: 10, backgroundColor: '#FFF7F7',
-    borderWidth: 1, borderColor: '#F3C2C2',
+    borderRadius: 14, backgroundColor: colors.dangerBg,
+    borderWidth: 1, borderColor: colors.dangerLine,
   },
   detailInner: { padding: 12 },
-  detailText: { fontSize: 12, color: '#D93025', lineHeight: 17 },
+  detailText: { fontSize: 12, color: colors.danger, lineHeight: 17 },
   button: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    backgroundColor: '#0A84FF', borderRadius: 12,
+    backgroundColor: colors.primary, borderRadius: 16,
     paddingVertical: 14, paddingHorizontal: 28, marginTop: 22,
   },
   buttonText: { color: '#fff', fontSize: 15, fontWeight: '700' },

@@ -1,11 +1,15 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
   TextInput, ActivityIndicator, Alert, RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { colors, radius, space, fontSize, card, pagePadding } from '../../theme';
+import { ErrorState, EmptyState, StatusPill, friendlyError } from '../../components/ui';
 import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
 import { FieldError } from '../../components/FormField';
+import { isoDate, parseIsoDate } from '../../utils/dateRange';
+import { CalendarModal } from '../../components/CalendarModal';
 import {
   adminService,
   PlantRecord,
@@ -16,36 +20,81 @@ import {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/** The local calendar day. toISOString() would give yesterday's date in the small hours east of UTC. */
 function today() {
-  return new Date().toISOString().split('T')[0];
+  return isoDate(new Date());
+}
+
+/** The number alone, for tiles that show the currency as a caption. */
+function fmtNum(val: string | number | undefined | null) {
+  if (val == null) return '—';
+  const n = parseFloat(String(val));
+  return isNaN(n) ? '—' : n.toLocaleString('en-PK', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 }
 
 function fmt(val: string | number | undefined | null) {
-  if (val == null) return '—';
-  const n = parseFloat(String(val));
-  return isNaN(n) ? '—' : `PKR ${n.toLocaleString('en-PK', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  const n = fmtNum(val);
+  return n === '—' ? n : `PKR ${n}`;
 }
 
-// ─── Summary cards ────────────────────────────────────────────────────────────
+const capitalise = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
 
-function SummaryCard({ label, value, color }: { label: string; value: string; color: string }) {
+/** A failed refresh keeps the last good data on screen, so the reason sits above it. */
+function ErrorBanner({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
-    <View style={[sc.card, { borderLeftColor: color }]}>
-      <Text style={sc.value}>{value}</Text>
+    <View style={eb.box}>
+      <Ionicons name="cloud-offline-outline" size={20} color={colors.danger} />
+      <Text style={eb.text}>{friendlyError(message)}</Text>
+      <TouchableOpacity onPress={onRetry} accessibilityLabel="Try again">
+        <Text style={eb.retry}>Retry</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+const eb = StyleSheet.create({
+  box: {
+    flexDirection: 'row', alignItems: 'center', gap: space.sm, marginBottom: space.md, padding: space.md,
+    backgroundColor: colors.dangerBg, borderRadius: radius.md, borderWidth: 1, borderColor: colors.dangerLine,
+  },
+  text: { flex: 1, fontSize: fontSize.sm, color: colors.danger, lineHeight: 19 },
+  retry: { fontSize: fontSize.sm, fontWeight: '800', color: colors.danger, paddingHorizontal: space.sm, paddingVertical: space.sm },
+});
+
+// ─── Summary tiles ────────────────────────────────────────────────────────────
+
+const SUMMARY_TONES = {
+  primary: { fg: colors.primary, bg: colors.primaryTint },
+  info: { fg: colors.info, bg: colors.infoBg },
+  success: { fg: colors.success, bg: colors.successBg },
+  danger: { fg: colors.danger, bg: colors.dangerBg },
+} as const;
+
+function SummaryCard({
+  label, value, tone, icon,
+}: {
+  label: string;
+  value: string;
+  tone: keyof typeof SUMMARY_TONES;
+  icon: keyof typeof Ionicons.glyphMap;
+}) {
+  const t = SUMMARY_TONES[tone];
+  return (
+    <View style={sc.tile}>
+      <View style={[sc.iconWrap, { backgroundColor: t.bg }]}>
+        <Ionicons name={icon} size={18} color={t.fg} />
+      </View>
+      <Text style={sc.value} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{value}</Text>
       <Text style={sc.label}>{label}</Text>
     </View>
   );
 }
 
 const sc = StyleSheet.create({
-  card: {
-    flex: 1, backgroundColor: 'white', borderRadius: 12,
-    padding: 12, borderLeftWidth: 3,
-    elevation: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05, shadowRadius: 3,
-  },
-  value: { fontSize: 18, fontWeight: '800', color: '#1a1a1a' },
-  label: { fontSize: 11, color: '#888', marginTop: 2 },
+  tile: { ...card, flexGrow: 1, flexBasis: '45%', padding: space.lg, gap: 2 },
+  iconWrap: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginBottom: space.sm },
+  value: { fontSize: fontSize.xl, fontWeight: '800', color: colors.ink, letterSpacing: -0.3 },
+  label: { fontSize: fontSize.xs, fontWeight: '700', color: colors.muted },
 });
 
 // ─── Ledger tab ───────────────────────────────────────────────────────────────
@@ -55,10 +104,18 @@ function LedgerTab() {
   const [summary, setSummary] = useState<PlantSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState(today());
+  const [showCalendar, setShowCalendar] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [bottleTypes, setBottleTypes] = useState<PricedType[]>([]);
   const [customerTypes, setCustomerTypes] = useState<PricedType[]>([]);
+  // Typing a date fires a load per keystroke; a late answer for an old date must
+  // not overwrite the current one.
+  const requestId = useRef(0);
+  // The day the figures on screen belong to, so a failed load for a different
+  // day does not leave the old day's records standing under the new date.
+  const loadedDay = useRef('');
 
   // Form state
   const [house, setHouse] = useState('');
@@ -68,29 +125,54 @@ function LedgerTab() {
   const [submitting, setSubmitting] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<{ house?: string; bottles?: string }>({});
 
+  // The date is typed by hand. A half-typed date makes the server reject the
+  // request, so nothing is fetched until it is a whole, real date.
+  const day = selectedDate.trim();
+  const dayOk = !!parseIsoDate(day);
+
   const load = useCallback(async () => {
+    const id = ++requestId.current;
+    if (!dayOk) {
+      setError(null);
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+    setError(null);
     try {
+      // The bottle and customer types are only a convenience; they must not
+      // take the whole ledger down with them.
       const [recs, sum, bt, ct] = await Promise.all([
-        adminService.getPlantRecords({ date: selectedDate }),
-        adminService.getPlantSummary({ date: selectedDate }),
-        adminService.getBottleTypes(),
-        adminService.getCustomerTypes(),
+        adminService.getPlantRecords({ date: day }),
+        adminService.getPlantSummary({ date: day }),
+        adminService.getBottleTypes().catch(() => [] as PricedType[]),
+        adminService.getCustomerTypes().catch(() => [] as PricedType[]),
       ]);
+      if (id !== requestId.current) return;
+      loadedDay.current = day;
       setRecords(recs);
       setSummary(sum);
       setBottleTypes(bt.filter(b => b.is_active));
       setCustomerTypes(ct.filter(c => c.is_active));
-    } catch {
-      Alert.alert('Error', 'Failed to load ledger data.');
+    } catch (e: any) {
+      if (id !== requestId.current) return;
+      if (loadedDay.current !== day) { setRecords([]); setSummary(null); }
+      setError(e?.message || 'Could not load ledger data.');
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (id === requestId.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, [selectedDate]);
+  }, [day, dayOk]);
 
   useEffect(() => { load(); }, [load]);
 
   const handleAdd = async () => {
+    if (!dayOk) {
+      Alert.alert('Check the date', 'Type the date as YYYY-MM-DD in the box at the top first.');
+      return;
+    }
     // On the fields themselves — a dialog listing the field names still leaves
     // the operator matching those names back to boxes.
     const missing: { house?: string; bottles?: string } = {};
@@ -102,7 +184,7 @@ function LedgerTab() {
     setSubmitting(true);
     try {
       await adminService.createPlantRecord({
-        date: selectedDate,
+        date: day,
         house: house.trim(),
         bottles: parseInt(bottles, 10),
         paid_amount: paidAmount ? parseFloat(paidAmount) : 0,
@@ -112,7 +194,7 @@ function LedgerTab() {
       setShowForm(false);
       load();
     } catch (e: any) {
-      Alert.alert('Error', e.message || 'Failed to add record.');
+      Alert.alert('Error', `Could not add the record: ${friendlyError(e?.message)}`);
     } finally {
       setSubmitting(false);
     }
@@ -128,43 +210,58 @@ function LedgerTab() {
         text: 'Delete', style: 'destructive',
         onPress: async () => {
           try { await adminService.deletePlantRecord(id); load(); }
-          catch { Alert.alert('Error', 'Failed to delete.'); }
+          catch (e: any) { Alert.alert('Error', `Failed to delete: ${friendlyError(e?.message)}`); }
         },
       },
     ]);
   };
 
+  const failedWithNothing = dayOk && !!error && !summary && records.length === 0;
+
   return (
     <KeyboardAwareScrollView
       style={{ flex: 1 }}
-      contentContainerStyle={{ paddingBottom: 32 }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
+      contentContainerStyle={lt.content}
+      extraBottomSpace={24}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} colors={[colors.primary]} tintColor={colors.primary} />}
     >
       {/* Date picker row */}
-      <View style={lt.dateRow}>
-        <Ionicons name="calendar-outline" size={16} color="#007AFF" />
-        <TextInput
-          style={lt.dateInput}
-          value={selectedDate}
-          onChangeText={setSelectedDate}
-          placeholder="YYYY-MM-DD"
-          placeholderTextColor="#000"
-        />
-      </View>
+      <TouchableOpacity
+        style={lt.dateRow}
+        onPress={() => setShowCalendar(true)}
+        activeOpacity={0.7}
+        accessibilityLabel="Open calendar to pick date"
+      >
+        <Ionicons name="calendar" size={20} color={colors.primary} />
+        <Text style={lt.dateInput}>{selectedDate}</Text>
+        <View style={lt.calendarPill}>
+          <Text style={lt.calendarPillText}>Change</Text>
+        </View>
+      </TouchableOpacity>
+
+      <CalendarModal
+        visible={showCalendar}
+        onClose={() => setShowCalendar(false)}
+        selectedDate={selectedDate}
+        onSelectDate={(d) => setSelectedDate(d)}
+        title="Plant Deliveries Date"
+      />
+
+      {!!error && !failedWithNothing && <ErrorBanner message={error} onRetry={() => { setLoading(true); load(); }} />}
 
       {/* Summary */}
-      {summary && (
-        <View style={lt.summaryRow}>
-          <SummaryCard label="Records" value={String(summary.records)} color="#007AFF" />
-          <SummaryCard label="Bottles" value={String(summary.bottles)} color="#34C759" />
-          <SummaryCard label="Revenue" value={fmt(summary.amount)} color="#FF9500" />
-          <SummaryCard label="Pending" value={fmt(summary.pending)} color="#FF3B30" />
+      {dayOk && summary && (
+        <View style={lt.summaryGrid}>
+          <SummaryCard label="Records" value={String(summary.records)} tone="primary" icon="document-text" />
+          <SummaryCard label="Bottles" value={String(summary.bottles)} tone="info" icon="water" />
+          <SummaryCard label="Revenue (PKR)" value={fmtNum(summary.amount)} tone="success" icon="cash" />
+          <SummaryCard label="Pending (PKR)" value={fmtNum(summary.pending)} tone="danger" icon="time" />
         </View>
       )}
 
       {/* Add record button */}
       <TouchableOpacity style={lt.addBtn} onPress={() => setShowForm(v => !v)}>
-        <Ionicons name={showForm ? 'close' : 'add'} size={18} color="white" />
+        <Ionicons name={showForm ? 'close' : 'add'} size={20} color={colors.white} />
         <Text style={lt.addBtnText}>{showForm ? 'Cancel' : 'Add Record'}</Text>
       </TouchableOpacity>
 
@@ -175,7 +272,7 @@ function LedgerTab() {
           <TextInput
             style={[lt.input, !!fieldErrors.house && lt.inputInvalid]}
             placeholder="House / Address *"
-            placeholderTextColor="#000"
+            placeholderTextColor={colors.muted}
             value={house}
             onChangeText={(v) => {
               setHouse(v);
@@ -186,7 +283,7 @@ function LedgerTab() {
           <TextInput
             style={[lt.input, !!fieldErrors.bottles && lt.inputInvalid]}
             placeholder="Bottles *"
-            placeholderTextColor="#000"
+            placeholderTextColor={colors.muted}
             value={bottles}
             onChangeText={(v) => {
               setBottles(v);
@@ -195,15 +292,15 @@ function LedgerTab() {
             keyboardType="number-pad"
           />
           <FieldError message={fieldErrors.bottles} />
-          <TextInput style={lt.input} placeholder="Amount Received (PKR)" placeholderTextColor="#000" value={paidAmount} onChangeText={setPaidAmount} keyboardType="decimal-pad" />
-          <TextInput style={lt.input} placeholder="Notes (optional)" placeholderTextColor="#000" value={notes} onChangeText={setNotes} />
+          <TextInput style={lt.input} placeholder="Amount Received (PKR)" placeholderTextColor={colors.muted} value={paidAmount} onChangeText={setPaidAmount} keyboardType="decimal-pad" />
+          <TextInput style={lt.input} placeholder="Notes (optional)" placeholderTextColor={colors.muted} value={notes} onChangeText={setNotes} />
           <TouchableOpacity
             style={[lt.submitBtn, submitting && { opacity: 0.5 }]}
             onPress={handleAdd}
             disabled={submitting}
           >
             {submitting
-              ? <ActivityIndicator size="small" color="white" />
+              ? <ActivityIndicator size="small" color={colors.white} />
               : <Text style={lt.submitText}>Save Record</Text>
             }
           </TouchableOpacity>
@@ -211,29 +308,44 @@ function LedgerTab() {
       )}
 
       {/* Records list */}
-      {loading ? (
-        <ActivityIndicator size="large" color="#007AFF" style={{ marginTop: 32 }} />
+      {!dayOk ? (
+        <EmptyState
+          icon="calendar-outline"
+          title="Enter a date"
+          text="Type the day as YYYY-MM-DD, for example 2026-03-28, to see its deliveries."
+        />
+      ) : loading ? (
+        <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 32 }} />
+      ) : failedWithNothing ? (
+        <ErrorState title="Could not load the ledger" message={error} onRetry={() => { setLoading(true); load(); }} />
       ) : records.length === 0 ? (
-        <View style={lt.empty}>
-          <Ionicons name="water-outline" size={36} color="#ddd" />
-          <Text style={lt.emptyText}>No records for {selectedDate}</Text>
-        </View>
+        <EmptyState
+          icon="water-outline"
+          title={`No records for ${day}`}
+          text="Deliveries recorded for this date will appear here. Tap Add Record to log one."
+        />
       ) : (
         <View style={lt.listWrap}>
           {records.map((r) => (
             <View key={r.id} style={lt.recordCard}>
-              <View style={{ flex: 1 }}>
-                <Text style={lt.house}>{r.house}</Text>
+              <View style={lt.recordInfo}>
+                <Text style={lt.house} numberOfLines={2}>{r.house}</Text>
                 <Text style={lt.meta}>
-                  {r.bottles} bottles · {fmt(r.amount)}
+                  {r.bottles} bottles
                   {r.bottle_type_name ? ` · ${r.bottle_type_name}` : ''}
                 </Text>
-                <View style={[lt.statusBadge, r.paid ? lt.paid : r.payment_status === 'partial' ? lt.partial : lt.unpaid]}>
-                  <Text style={lt.statusText}>{r.payment_status.toUpperCase()}</Text>
-                </View>
+                <StatusPill
+                  label={capitalise(r.payment_status || '')}
+                  tone={r.paid ? 'success' : r.payment_status === 'partial' ? 'warning' : 'danger'}
+                  style={lt.statusPill}
+                />
               </View>
-              <TouchableOpacity onPress={() => handleDelete(r.id)} style={lt.deleteBtn}>
-                <Ionicons name="trash-outline" size={16} color="#FF3B30" />
+              <View style={lt.amountBox}>
+                <Text style={lt.amount}>{fmtNum(r.amount)}</Text>
+                <Text style={lt.amountUnit}>PKR</Text>
+              </View>
+              <TouchableOpacity onPress={() => handleDelete(r.id)} style={lt.deleteBtn} accessibilityLabel={`Delete record for ${r.house}`}>
+                <Ionicons name="trash-outline" size={20} color={colors.danger} />
               </TouchableOpacity>
             </View>
           ))}
@@ -244,29 +356,48 @@ function LedgerTab() {
 }
 
 const lt = StyleSheet.create({
-  dateRow: { flexDirection: 'row', alignItems: 'center', gap: 8, margin: 16, padding: 12, backgroundColor: 'white', borderRadius: 12, borderWidth: 1, borderColor: '#e0e0e0' },
-  dateInput: { flex: 1, fontSize: 14, color: '#000' },
-  summaryRow: { flexDirection: 'row', gap: 8, marginHorizontal: 16, marginBottom: 12 },
-  addBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginHorizontal: 16, marginBottom: 12, backgroundColor: '#007AFF', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 16 },
-  addBtnText: { color: 'white', fontWeight: '700', fontSize: 14 },
-  form: { marginHorizontal: 16, marginBottom: 12, backgroundColor: 'white', borderRadius: 14, padding: 16, gap: 10, elevation: 1 },
-  formTitle: { fontSize: 15, fontWeight: '700', color: '#1a1a1a', marginBottom: 4 },
-  inputInvalid: { borderColor: '#D93025', backgroundColor: '#FFF7F7' },
-  input: { borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: '#000' },
-  submitBtn: { backgroundColor: '#34C759', borderRadius: 10, paddingVertical: 12, alignItems: 'center', marginTop: 4 },
-  submitText: { color: 'white', fontWeight: '700', fontSize: 14 },
-  listWrap: { marginHorizontal: 16, gap: 8 },
-  recordCard: { backgroundColor: 'white', borderRadius: 12, padding: 14, flexDirection: 'row', alignItems: 'center', elevation: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3 },
-  house: { fontSize: 14, fontWeight: '600', color: '#1a1a1a' },
-  meta: { fontSize: 12, color: '#888', marginTop: 2 },
-  statusBadge: { marginTop: 6, alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
-  statusText: { fontSize: 10, fontWeight: '700' },
-  paid: { backgroundColor: '#34C75920' },
-  partial: { backgroundColor: '#FF950020' },
-  unpaid: { backgroundColor: '#FF3B3020' },
-  deleteBtn: { padding: 8 },
-  empty: { alignItems: 'center', marginTop: 48, gap: 8 },
-  emptyText: { color: '#bbb', fontSize: 14 },
+  content: { paddingHorizontal: pagePadding, paddingTop: space.md },
+  dateRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10, height: 50, paddingHorizontal: 14, marginBottom: space.md,
+    backgroundColor: colors.surface, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line,
+  },
+  dateInput: { flex: 1, fontSize: fontSize.md, fontWeight: '700', color: colors.ink },
+  calendarPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: radius.pill,
+    backgroundColor: colors.primaryTint,
+  },
+  calendarPillText: {
+    fontSize: fontSize.xs,
+    fontWeight: '700',
+    color: colors.primaryDark,
+  },
+  summaryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: space.md, marginBottom: space.md },
+  addBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: space.md,
+    height: 50, backgroundColor: colors.primary, borderRadius: radius.md,
+  },
+  addBtnText: { color: colors.white, fontWeight: '800', fontSize: fontSize.md },
+  form: { ...card, marginBottom: space.md, padding: space.lg, gap: 10 },
+  formTitle: { fontSize: fontSize.md, fontWeight: '800', color: colors.ink, marginBottom: 2 },
+  inputInvalid: { borderColor: colors.danger, backgroundColor: colors.dangerBg },
+  input: {
+    height: 48, borderWidth: 1, borderColor: colors.line, borderRadius: radius.md,
+    paddingHorizontal: 14, fontSize: fontSize.sm, color: colors.ink, backgroundColor: colors.surfaceTint,
+  },
+  submitBtn: { height: 50, backgroundColor: colors.primary, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center', marginTop: 4 },
+  submitText: { color: colors.white, fontWeight: '800', fontSize: fontSize.md },
+  listWrap: { gap: space.md },
+  recordCard: { ...card, padding: space.lg, flexDirection: 'row', alignItems: 'center', gap: space.md },
+  recordInfo: { flex: 1, gap: 3 },
+  house: { fontSize: fontSize.md, fontWeight: '700', color: colors.ink },
+  meta: { fontSize: fontSize.sm, color: colors.muted },
+  statusPill: { marginTop: 4 },
+  amountBox: { alignItems: 'flex-end' },
+  amount: { fontSize: fontSize.lg, fontWeight: '800', color: colors.ink, letterSpacing: -0.3 },
+  amountUnit: { fontSize: fontSize.xs, fontWeight: '700', color: colors.muted },
+  deleteBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.dangerBg },
 });
 
 // ─── Analytics tab ────────────────────────────────────────────────────────────
@@ -275,13 +406,15 @@ function AnalyticsTab() {
   const [data, setData] = useState<PlantAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    setError(null);
     try {
       const res = await adminService.getPlantAnalytics();
       setData(res);
-    } catch {
-      Alert.alert('Error', 'Failed to load analytics.');
+    } catch (e: any) {
+      setError(e?.message || 'Could not load analytics.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -290,36 +423,48 @@ function AnalyticsTab() {
 
   useEffect(() => { load(); }, [load]);
 
-  if (loading) return <ActivityIndicator size="large" color="#007AFF" style={{ marginTop: 64 }} />;
-  if (!data) return null;
+  const retry = () => { setLoading(true); load(); };
+
+  if (loading) return <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 64 }} />;
+  if (!data) {
+    return error ? <ErrorState title="Could not load analytics" message={error} onRetry={retry} /> : null;
+  }
 
   const maxBottles = Math.max(...data.daily.map(d => d.bottles || 0), 1);
 
   return (
     <ScrollView
-      contentContainerStyle={{ padding: 16, paddingBottom: 32 }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
+      contentContainerStyle={at.content}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} colors={[colors.primary]} tintColor={colors.primary} />}
     >
+      {!!error && <ErrorBanner message={error} onRetry={retry} />}
+
       <Text style={at.sectionTitle}>Last 30 Days</Text>
 
       {/* Totals */}
-      <View style={at.totalRow}>
-        <SummaryCard label="Records" value={String(data.totals.records)} color="#007AFF" />
-        <SummaryCard label="Bottles" value={String(data.totals.bottles)} color="#34C759" />
+      <View style={at.totalGrid}>
+        <SummaryCard label="Records" value={String(data.totals.records)} tone="primary" icon="document-text" />
+        <SummaryCard label="Bottles" value={String(data.totals.bottles)} tone="info" icon="water" />
+        <SummaryCard label="Revenue (PKR)" value={fmtNum(data.totals.amount)} tone="success" icon="cash" />
+        <SummaryCard label="Pending (PKR)" value={fmtNum(data.totals.pending)} tone="danger" icon="time" />
       </View>
-      <View style={[at.totalRow, { marginTop: 8 }]}>
-        <SummaryCard label="Revenue" value={fmt(data.totals.amount)} color="#FF9500" />
-        <SummaryCard label="Pending" value={fmt(data.totals.pending)} color="#FF3B30" />
-      </View>
+
+      {data.daily.length === 0 && data.top_houses.length === 0 && (
+        <EmptyState
+          icon="bar-chart-outline"
+          title="No deliveries yet"
+          text="Daily deliveries and your top houses will show here once records are added."
+        />
+      )}
 
       {/* Daily bar chart */}
       {data.daily.length > 0 && (
-        <View style={at.chartSection}>
-          <Text style={at.sectionTitle}>Daily Deliveries</Text>
+        <View style={at.chartCard}>
+          <Text style={at.cardTitle}>Daily Deliveries</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             <View style={at.chartWrap}>
               {data.daily.map((d) => {
-                const heightPct = (d.bottles / maxBottles) * 80;
+                const heightPct = (d.bottles / maxBottles) * 90;
                 return (
                   <View key={d.date} style={at.barCol}>
                     <Text style={at.barVal}>{d.bottles}</Text>
@@ -338,10 +483,14 @@ function AnalyticsTab() {
         <View style={at.topSection}>
           <Text style={at.sectionTitle}>Top Houses</Text>
           {data.top_houses.map((h, i) => (
-            <View key={h.house} style={at.houseRow}>
-              <Text style={at.houseRank}>#{i + 1}</Text>
-              <Text style={at.houseName} numberOfLines={1}>{h.house}</Text>
-              <Text style={at.houseBottles}>{h.bottles} btl</Text>
+            <View key={h.house} style={at.houseCard}>
+              <View style={at.rankBadge}>
+                <Text style={at.houseRank}>#{i + 1}</Text>
+              </View>
+              <View style={at.houseInfo}>
+                <Text style={at.houseName} numberOfLines={1}>{h.house}</Text>
+                <Text style={at.houseBottles}>{h.bottles} bottles</Text>
+              </View>
               <Text style={at.houseAmt}>{fmt(h.amount)}</Text>
             </View>
           ))}
@@ -352,20 +501,24 @@ function AnalyticsTab() {
 }
 
 const at = StyleSheet.create({
-  sectionTitle: { fontSize: 13, fontWeight: '700', color: '#555', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 10 },
-  totalRow: { flexDirection: 'row', gap: 10 },
-  chartSection: { marginTop: 20 },
+  content: { paddingHorizontal: pagePadding, paddingTop: space.md, paddingBottom: space.xxl },
+  sectionTitle: { fontSize: fontSize.md, fontWeight: '800', color: colors.ink, marginBottom: space.md },
+  totalGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: space.md },
+  chartCard: { ...card, marginTop: space.lg, padding: space.lg },
+  cardTitle: { fontSize: fontSize.md, fontWeight: '800', color: colors.ink, marginBottom: space.md },
   chartWrap: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, paddingBottom: 4 },
-  barCol: { alignItems: 'center', width: 36 },
-  barVal: { fontSize: 10, color: '#888', marginBottom: 2 },
-  bar: { width: 24, backgroundColor: '#007AFF40', borderRadius: 4 },
-  barDate: { fontSize: 9, color: '#bbb', marginTop: 4 },
-  topSection: { marginTop: 20 },
-  houseRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#f5f5f5' },
-  houseRank: { fontSize: 12, fontWeight: '700', color: '#007AFF', width: 24 },
-  houseName: { flex: 1, fontSize: 13, color: '#333' },
-  houseBottles: { fontSize: 12, color: '#888', width: 50, textAlign: 'right' },
-  houseAmt: { fontSize: 12, fontWeight: '600', color: '#1a1a1a', width: 80, textAlign: 'right' },
+  barCol: { alignItems: 'center', width: 38 },
+  barVal: { fontSize: fontSize.xs, fontWeight: '700', color: colors.textSecondary, marginBottom: 2 },
+  bar: { width: 24, backgroundColor: colors.primary, borderRadius: 8 },
+  barDate: { fontSize: fontSize.xs, color: colors.muted, marginTop: 4 },
+  topSection: { marginTop: space.xl },
+  houseCard: { ...card, flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.md, marginBottom: space.md },
+  rankBadge: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.primaryTint, alignItems: 'center', justifyContent: 'center' },
+  houseRank: { fontSize: fontSize.sm, fontWeight: '800', color: colors.primaryDark },
+  houseInfo: { flex: 1, gap: 2 },
+  houseName: { fontSize: fontSize.md, fontWeight: '700', color: colors.ink },
+  houseBottles: { fontSize: fontSize.sm, color: colors.muted },
+  houseAmt: { fontSize: fontSize.md, fontWeight: '800', color: colors.ink },
 });
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
@@ -387,8 +540,8 @@ export const AdminPlantScreen: React.FC = () => {
           >
             <Ionicons
               name={t === 'ledger' ? 'list' : 'bar-chart'}
-              size={15}
-              color={activeTab === t ? '#007AFF' : '#aaa'}
+              size={16}
+              color={activeTab === t ? colors.white : colors.muted}
             />
             <Text style={[styles.tabText, activeTab === t && styles.tabTextActive]}>
               {t === 'ledger' ? 'Ledger' : 'Analytics'}
@@ -403,10 +556,13 @@ export const AdminPlantScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
-  tabBar: { flexDirection: 'row', backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#eee' },
-  tab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12 },
-  tabActive: { borderBottomWidth: 2, borderBottomColor: '#007AFF' },
-  tabText: { fontSize: 14, fontWeight: '600', color: '#aaa' },
-  tabTextActive: { color: '#007AFF' },
+  container: { flex: 1, backgroundColor: colors.bg },
+  tabBar: { flexDirection: 'row', gap: space.sm, paddingHorizontal: pagePadding, paddingTop: space.xs },
+  tab: {
+    flex: 1, height: 40, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line,
+  },
+  tabActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  tabText: { fontSize: fontSize.sm, fontWeight: '700', color: colors.ink },
+  tabTextActive: { color: colors.white },
 });

@@ -1,3 +1,4 @@
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import React, { forwardRef, useCallback, useEffect, useRef, useState } from 'react';
 import {
   Dimensions,
@@ -81,7 +82,14 @@ export const KeyboardAwareScrollView = forwardRef<ScrollView, Props>(
 
           input.measureInWindow((_x, y, _w, h) => {
             if (!Number.isFinite(y) || !Number.isFinite(h)) return;
-            const keyboardTop = Dimensions.get('window').height - height;
+            // The keyboard reports where its top edge is. Subtracting its height from
+            // the window height was wrong on Android with edge-to-edge, where the
+            // window and the keyboard disagree about the navigation bar, and the
+            // last field of a form stayed behind the keys.
+            const reportedTop = event.endCoordinates.screenY;
+            const keyboardTop = Number.isFinite(reportedTop) && reportedTop > 0
+              ? reportedTop
+              : Dimensions.get('window').height - height;
             // How far the field's bottom edge sits below the keyboard's top.
             const overlap = y + h + extraBottomSpace - keyboardTop;
             if (overlap > 0) {
@@ -127,3 +135,16 @@ export const KeyboardAwareScrollView = forwardRef<ScrollView, Props>(
     );
   },
 );
+
+/**
+ * For a sheet inside a <Modal>. A Modal is its own window, so the stack's
+ * bottom padding does not reach it and the last button slides under the
+ * navigation bar. This adds that inset to the scroll's bottom space.
+ */
+export const SheetScrollView = forwardRef<ScrollView, Props>(function SheetScrollView(
+  { extraBottomSpace = 24, ...rest },
+  ref,
+) {
+  const insets = useSafeAreaInsets();
+  return <KeyboardAwareScrollView ref={ref} {...rest} extraBottomSpace={extraBottomSpace + insets.bottom} />;
+});

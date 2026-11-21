@@ -1,3 +1,4 @@
+import { colors } from '../theme';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Animated,
@@ -84,7 +85,7 @@ export const FloatingContactButton = () => {
     (async () => {
       let start: Position = {
         x: width - SIZE - EDGE_MARGIN,
-        y: height - SIZE - insets.bottom - 96,
+        y: height - SIZE - insets.bottom - 168, // clears the floating tab bar and the cart bar
       };
       try {
         const saved = await AsyncStorage.getItem(STORAGE_KEY);
@@ -252,13 +253,13 @@ export const FloatingContactButton = () => {
                 <Text style={styles.rowText}>
                   {t('contact_whatsapp', 'Contact us on WhatsApp')}
                 </Text>
-                <Ionicons name="chevron-forward" size={18} color="#ccc" />
+                <Ionicons name="chevron-forward" size={18} color={colors.muted} />
               </TouchableOpacity>
             )}
 
             {!!phone && (
               <TouchableOpacity style={styles.row} onPress={() => { setMenuOpen(false); dial(); }}>
-                <Ionicons name="call" size={22} color="#0A84FF" />
+                <Ionicons name="call" size={22} color={colors.primary} />
                 <Text style={styles.rowText}>{t('contact_call', 'Call us')}</Text>
                 <Text style={styles.rowMeta}>{phone}</Text>
               </TouchableOpacity>
@@ -271,11 +272,11 @@ export const FloatingContactButton = () => {
                 navigation.navigate('Complaints');
               }}
             >
-              <Ionicons name="chatbubbles-outline" size={22} color="#333" />
+              <Ionicons name="chatbubbles-outline" size={22} color={colors.ink} />
               <Text style={styles.rowText}>
                 {t('support_complaints', 'Support & Complaints')}
               </Text>
-              <Ionicons name="chevron-forward" size={18} color="#ccc" />
+              <Ionicons name="chevron-forward" size={18} color={colors.muted} />
             </TouchableOpacity>
 
             <Text style={styles.hint}>
@@ -321,8 +322,8 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: '#fff',
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
     paddingHorizontal: 20,
     paddingTop: 10,
     paddingBottom: 28,
@@ -332,28 +333,28 @@ const styles = StyleSheet.create({
     width: 40,
     height: 4,
     borderRadius: 2,
-    backgroundColor: '#e0e0e0',
+    backgroundColor: colors.lineSoft,
     marginBottom: 14,
   },
-  cardTitle: { fontSize: 18, fontWeight: '700', color: '#1a1a1a' },
-  cardSubtitle: { fontSize: 13, color: '#888', marginTop: 2, marginBottom: 10 },
+  cardTitle: { fontSize: 18, fontWeight: '700', color: colors.ink },
+  cardSubtitle: { fontSize: 13, color: colors.muted, marginTop: 2, marginBottom: 10 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
     paddingVertical: 15,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#eee',
+    borderBottomColor: colors.line,
   },
-  rowText: { flex: 1, fontSize: 15, color: '#333', fontWeight: '500' },
-  rowMeta: { fontSize: 13, color: '#999' },
-  hint: { fontSize: 12, color: '#aaa', marginTop: 14, textAlign: 'center' },
+  rowText: { flex: 1, fontSize: 15, color: colors.ink, fontWeight: '500' },
+  rowMeta: { fontSize: 13, color: colors.muted },
+  hint: { fontSize: 12, color: colors.muted, marginTop: 14, textAlign: 'center' },
   close: {
     marginTop: 14,
     paddingVertical: 13,
-    borderRadius: 10,
-    backgroundColor: '#f2f2f2',
+    borderRadius: 14,
+    backgroundColor: colors.bg,
     alignItems: 'center',
   },
-  closeText: { fontSize: 15, fontWeight: '600', color: '#444' },
+  closeText: { fontSize: 15, fontWeight: '600', color: colors.textSecondary },
 });

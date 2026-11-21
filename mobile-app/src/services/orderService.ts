@@ -1,5 +1,5 @@
 import { API_URL } from '../constants/config';
-import { getAuthToken } from './authService';
+import { getAuthToken, authedFetch } from './authService';
 import { CartItem } from '../types/cart';
 
 export interface OrderItem {
@@ -108,14 +108,10 @@ export const createOrder = async (orderData: CreateOrderPayload) => {
 export const getOrders = async () => {
   const token = await getAuthToken();
   try {
-    const response = await fetch(`${API_URL}/orders/`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-    });
+    const response = await authedFetch(`${API_URL}/orders/`);
 
     if (!response.ok) {
-      throw new Error('Failed to fetch orders');
+      throw new Error(`Failed to fetch orders (error ${response.status})`);
     }
 
     return await response.json();
@@ -129,14 +125,10 @@ export const getOrders = async () => {
 export const getDeliveryOrders = async () => {
   const token = await getAuthToken();
   try {
-    const response = await fetch(`${API_URL}/orders/delivery/orders/`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-    });
+    const response = await authedFetch(`${API_URL}/orders/delivery/orders/`);
 
     if (!response.ok) {
-      throw new Error('Failed to fetch delivery orders');
+      throw new Error(`Failed to fetch delivery orders (error ${response.status})`);
     }
 
     const data = await response.json();
@@ -158,9 +150,7 @@ export const getDeliveryOrders = async () => {
  */
 export const getDeliveryOrder = async (orderId: number) => {
   const token = await getAuthToken();
-  const response = await fetch(`${API_URL}/orders/delivery/orders/${orderId}/`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const response = await authedFetch(`${API_URL}/orders/delivery/orders/${orderId}/`);
   if (!response.ok) throw new Error(`Failed to fetch order ${orderId}`);
   return response.json();
 };
@@ -216,14 +206,10 @@ export const updateOrderStatus = async (orderId: number, status: string, additio
 export const getDeliveryStats = async () => {
   const token = await getAuthToken();
   try {
-    const response = await fetch(`${API_URL}/orders/delivery/stats/`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-    });
+    const response = await authedFetch(`${API_URL}/orders/delivery/stats/`);
 
     if (!response.ok) {
-      throw new Error('Failed to fetch delivery stats');
+      throw new Error(`Failed to fetch delivery stats (error ${response.status})`);
     }
 
     return await response.json();
@@ -246,7 +232,7 @@ export const updateAvailability = async (isAvailable: boolean) => {
     });
 
     if (!response.ok) {
-      throw new Error('Failed to update availability');
+      throw new Error(`Failed to update availability (error ${response.status})`);
     }
 
     return await response.json();
@@ -259,14 +245,10 @@ export const updateAvailability = async (isAvailable: boolean) => {
 export const getDeliveryStatuses = async (): Promise<DeliveryStatus[]> => {
   const token = await getAuthToken();
   try {
-    const response = await fetch(`${API_URL}/orders/delivery/statuses/`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-    });
+    const response = await authedFetch(`${API_URL}/orders/delivery/statuses/`);
 
     if (!response.ok) {
-      throw new Error('Failed to fetch delivery statuses');
+      throw new Error(`Failed to fetch delivery statuses (error ${response.status})`);
     }
 
     const data = await response.json();

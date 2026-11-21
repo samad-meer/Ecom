@@ -59,7 +59,7 @@ const isAccessExpired = (token: string, skewSeconds = 60): boolean => {
  * refresh token). On failure the session is cleared. Returns the new access
  * token, or null if the user must log in again.
  */
-export const refreshAccessToken = async (): Promise<string | null> => {
+const doRefresh = async (): Promise<string | null> => {
   const refresh = await AsyncStorage.getItem(REFRESH_KEY);
   if (!refresh) return null;
   try {
@@ -82,6 +82,48 @@ export const refreshAccessToken = async (): Promise<string | null> => {
     console.error('Token refresh failed:', error);
     return null;
   }
+};
+
+let refreshing: Promise<string | null> | null = null;
+
+/**
+ * Refresh, but only once at a time. The refresh token rotates on use, so two
+ * screens refreshing together would burn each other's token and sign the user
+ * out. Everyone who asks while one is in flight gets that same answer.
+ */
+export const refreshAccessToken = (): Promise<string | null> => {
+  if (!refreshing) {
+    refreshing = doRefresh().finally(() => { refreshing = null; });
+  }
+  return refreshing;
+};
+
+/**
+ * fetch with the login attached. A token can be refused by the server even
+ * though its own expiry has not passed (the signing key changed, or it was
+ * revoked), and the screens then all fail at once. So a 401 refreshes the
+ * token and tries once more before giving up.
+ */
+export const authedFetch = async (url: string, init: RequestInit = {}): Promise<Response> => {
+  const send = (token: string | null) => fetch(url, {
+    ...init,
+    headers: { ...(init.headers || {}), Authorization: `Bearer ${token}` },
+  });
+  let token = await getAuthToken();
+  let res = await send(token);
+  if (res.status === 401) {
+    const fresh = await refreshAccessToken();
+    if (fresh) { token = fresh; res = await send(fresh); }
+  }
+  // The shared host now and then answers a request with a 500 or 502 that
+  // works a second later. Reads are safe to repeat; writes are never retried.
+  const method = (init.method || 'GET').toUpperCase();
+  for (const wait of method === 'GET' ? [600, 1500] : []) {
+    if (res.status < 500) break;
+    await new Promise((resolve) => setTimeout(resolve, wait));
+    res = await send(token);
+  }
+  return res;
 };
 
 /**

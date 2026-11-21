@@ -5,7 +5,9 @@ import {
 } from 'react-native';
 import { useFocusEffect, useRoute, RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import { colors, radius, space, fontSize, shadow, card, pagePadding } from '../../theme';
 import { LoadingScreen } from '../../components/LoadingScreen';
+import { EmptyState, ErrorState, StatusPill, Tone, friendlyError } from '../../components/ui';
 import { RiderMapView, RiderMapMarker } from '../../components/RiderMapView';
 import { IS_MAPS_CONFIGURED } from '../../constants/mapsConfig';
 import {
@@ -28,16 +30,30 @@ const OFFLINE_AFTER_MINUTES = 60;
 
 type Freshness = 'live' | 'stale' | 'offline';
 
+/** Map pins and the dots on the summary tiles. */
 const FRESHNESS_COLORS: Record<Freshness, string> = {
-  live: '#34C759',
-  stale: '#FF9500',
-  offline: '#8E8E93',
+  live: colors.success,
+  stale: colors.warning,
+  offline: colors.muted,
 };
 
 const FRESHNESS_LABELS: Record<Freshness, string> = {
-  live: 'LIVE',
-  stale: 'STALE',
-  offline: 'OFFLINE',
+  live: 'Live',
+  stale: 'Stale',
+  offline: 'Offline',
+};
+
+const FRESHNESS_TONES: Record<Freshness, Tone> = {
+  live: 'success',
+  stale: 'warning',
+  offline: 'neutral',
+};
+
+/** Initial-letter avatar: soft fill with a readable letter on it. */
+const AVATAR_LOOK: Record<Freshness, { bg: string; fg: string }> = {
+  live: { bg: colors.successBg, fg: colors.success },
+  stale: { bg: colors.warningBg, fg: colors.warningText },
+  offline: { bg: colors.lineSoft, fg: colors.textSecondary },
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -75,22 +91,28 @@ function freshnessOf(rider: RiderLocation, staleAfterMinutes: number): Freshness
 
 function SummaryCard({ label, value, color }: { label: string; value: string; color: string }) {
   return (
-    <View style={[sc.card, { borderLeftColor: color }]}>
+    <View style={sc.card}>
       <Text style={sc.value}>{value}</Text>
-      <Text style={sc.label}>{label}</Text>
+      <View style={sc.labelRow}>
+        <View style={[sc.dot, { backgroundColor: color }]} />
+        <Text style={sc.label} numberOfLines={1}>{label}</Text>
+      </View>
     </View>
   );
 }
 
 const sc = StyleSheet.create({
   card: {
-    flex: 1, backgroundColor: 'white', borderRadius: 12,
-    padding: 12, borderLeftWidth: 3,
-    elevation: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05, shadowRadius: 3,
+    ...card,
+    flex: 1,
+    borderRadius: radius.lg,
+    paddingVertical: space.md,
+    paddingHorizontal: space.md,
   },
-  value: { fontSize: 18, fontWeight: '800', color: '#1a1a1a' },
-  label: { fontSize: 11, color: '#888', marginTop: 2 },
+  value: { fontSize: fontSize.lg, fontWeight: '800', color: colors.ink },
+  labelRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  label: { flexShrink: 1, fontSize: fontSize.xs, color: colors.muted },
 });
 
 // ─── Rider row ────────────────────────────────────────────────────────────────
@@ -106,54 +128,57 @@ function RiderRow({
   selected: boolean;
   onPress: () => void;
 }) {
-  const color = FRESHNESS_COLORS[freshness];
+  const look = AVATAR_LOOK[freshness];
   return (
-    <TouchableOpacity style={[row.row, selected && row.rowSelected]} onPress={onPress}>
-      <View style={[row.avatar, { backgroundColor: color + '20' }]}>
-        <Text style={[row.avatarText, { color }]}>
+    <TouchableOpacity
+      style={[row.card, selected && row.cardSelected]}
+      onPress={onPress}
+      activeOpacity={0.8}
+    >
+      <View style={[row.avatar, { backgroundColor: look.bg }]}>
+        <Text style={[row.avatarText, { color: look.fg }]}>
           {(rider.name || rider.username).charAt(0).toUpperCase()}
         </Text>
       </View>
       <View style={row.info}>
-        <Text style={row.name}>{rider.name || rider.username}</Text>
-        <Text style={row.sub}>
+        <Text style={row.name} numberOfLines={1}>{rider.name || rider.username}</Text>
+        <Text style={row.sub} numberOfLines={1}>
           {agoLabel(rider.minutes_ago)}
           {rider.vehicle_number ? ` · ${rider.vehicle_number}` : ''}
         </Text>
-        <View style={row.chipRow}>
-          <View style={[row.chip, { backgroundColor: color + '20' }]}>
-            <Text style={[row.chipText, { color }]}>{FRESHNESS_LABELS[freshness]}</Text>
-          </View>
+        <View style={row.pillRow}>
+          <StatusPill label={FRESHNESS_LABELS[freshness]} tone={FRESHNESS_TONES[freshness]} />
           {rider.active_orders > 0 && (
-            <View style={row.chip}>
-              <Text style={row.chipText}>
-                {rider.active_orders} ORDER{rider.active_orders === 1 ? '' : 'S'}
-              </Text>
-            </View>
+            <StatusPill
+              label={`${rider.active_orders} order${rider.active_orders === 1 ? '' : 's'}`}
+              tone="info"
+            />
           )}
-          {rider.is_moving && (
-            <View style={[row.chip, { backgroundColor: '#007AFF20' }]}>
-              <Text style={[row.chipText, { color: '#007AFF' }]}>MOVING</Text>
-            </View>
-          )}
+          {rider.is_moving && <StatusPill label="Moving" tone="primary" icon="navigate" />}
         </View>
       </View>
-      <Ionicons name="chevron-forward" size={16} color="#ccc" />
+      <Ionicons name="chevron-forward" size={18} color={colors.muted} />
     </TouchableOpacity>
   );
 }
 
 const row = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: 'white', paddingHorizontal: 16, paddingVertical: 13 },
-  rowSelected: { backgroundColor: '#F2F8FF' },
-  avatar: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
-  avatarText: { fontSize: 17, fontWeight: '700' },
+  card: {
+    ...card,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    padding: space.lg,
+    marginBottom: space.md,
+    borderWidth: 1.5,
+  },
+  cardSelected: { backgroundColor: colors.primaryTint, borderColor: colors.primary },
+  avatar: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
+  avatarText: { fontSize: fontSize.md, fontWeight: '800' },
   info: { flex: 1, gap: 2 },
-  name: { fontSize: 15, fontWeight: '600', color: '#1a1a1a' },
-  sub: { fontSize: 12, color: '#888' },
-  chipRow: { flexDirection: 'row', gap: 6, marginTop: 4 },
-  chip: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, backgroundColor: '#f0f0f0' },
-  chipText: { fontSize: 10, fontWeight: '700', color: '#777' },
+  name: { fontSize: fontSize.md, fontWeight: '800', color: colors.ink },
+  sub: { fontSize: fontSize.sm, color: colors.muted },
+  pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 },
 });
 
 // ─── Selected rider card ──────────────────────────────────────────────────────
@@ -176,6 +201,7 @@ function RiderCard({
   onClose: () => void;
 }) {
   const color = FRESHNESS_COLORS[freshness];
+  const look = AVATAR_LOOK[freshness];
 
   const call = () => {
     if (!rider.phone) {
@@ -188,100 +214,125 @@ function RiderCard({
   };
 
   return (
-    <View style={card.card}>
-      <View style={card.header}>
-        <View style={[card.avatar, { backgroundColor: color + '20' }]}>
-          <Text style={[card.avatarText, { color }]}>
+    <View style={panel.card}>
+      <View style={panel.header}>
+        <View style={[panel.avatar, { backgroundColor: look.bg }]}>
+          <Text style={[panel.avatarText, { color: look.fg }]}>
             {(rider.name || rider.username).charAt(0).toUpperCase()}
           </Text>
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={card.name}>{rider.name || rider.username}</Text>
-          <Text style={card.sub}>
+          <Text style={panel.name} numberOfLines={1}>{rider.name || rider.username}</Text>
+          <Text style={panel.sub} numberOfLines={1}>
             {rider.vehicle_number || `@${rider.username}`} · {rider.is_available ? 'Available' : 'Busy'}
           </Text>
         </View>
-        <TouchableOpacity onPress={onClose} style={card.closeBtn}>
-          <Ionicons name="close" size={18} color="#aaa" />
+        <StatusPill label={FRESHNESS_LABELS[freshness]} tone={FRESHNESS_TONES[freshness]} />
+        <TouchableOpacity onPress={onClose} style={panel.closeBtn} accessibilityLabel="Close rider details">
+          <Ionicons name="close" size={20} color={colors.muted} />
         </TouchableOpacity>
       </View>
 
-      <View style={card.statRow}>
-        <View style={card.stat}>
-          <Text style={[card.statValue, { color }]}>{agoLabel(rider.minutes_ago)}</Text>
-          <Text style={card.statLabel}>Last seen</Text>
+      <View style={panel.statRow}>
+        <View style={panel.stat}>
+          <Text
+            style={[panel.statValue, { color }]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.85}
+          >
+            {agoLabel(rider.minutes_ago)}
+          </Text>
+          <Text style={panel.statLabel}>Last seen</Text>
         </View>
-        <View style={card.stat}>
-          <Text style={card.statValue}>{rider.active_orders}</Text>
-          <Text style={card.statLabel}>Active orders</Text>
+        <View style={panel.stat}>
+          <Text style={panel.statValue}>{rider.active_orders}</Text>
+          <Text style={panel.statLabel}>Active orders</Text>
         </View>
-        <View style={card.stat}>
-          <Text style={card.statValue}>{fmt(rider.speed_kmh, ' km/h')}</Text>
-          <Text style={card.statLabel}>Speed</Text>
+        <View style={panel.stat}>
+          <Text style={panel.statValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
+            {fmt(rider.speed_kmh, ' km/h')}
+          </Text>
+          <Text style={panel.statLabel}>Speed</Text>
         </View>
-        <View style={card.stat}>
-          <Text style={card.statValue}>{fmt(rider.battery_level, '%')}</Text>
-          <Text style={card.statLabel}>Battery</Text>
+        <View style={panel.stat}>
+          <Text style={panel.statValue}>{fmt(rider.battery_level, '%')}</Text>
+          <Text style={panel.statLabel}>Battery</Text>
         </View>
       </View>
 
-      <Text style={card.meta}>
+      <Text style={panel.meta}>
         Accuracy {fmt(rider.accuracy_m, ' m')} · {rider.latitude.toFixed(5)}, {rider.longitude.toFixed(5)}
       </Text>
 
-      <View style={card.actionBar}>
-        <TouchableOpacity style={[card.actionBtn, card.callBtn]} onPress={call}>
-          <Ionicons name="call" size={16} color="white" />
-          <Text style={card.actionText}>{rider.phone || 'No phone'}</Text>
+      <View style={panel.actionBar}>
+        <TouchableOpacity style={[panel.actionBtn, panel.callBtn]} onPress={call}>
+          <Ionicons name="call" size={18} color={colors.white} />
+          <Text style={panel.actionText} numberOfLines={1}>{rider.phone || 'No phone'}</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[card.actionBtn, showTrail ? card.trailBtnOn : card.trailBtnOff]}
+          style={[
+            panel.actionBtn,
+            showTrail ? panel.trailBtnOn : panel.trailBtnOff,
+            !IS_MAPS_CONFIGURED && panel.disabled,
+          ]}
           onPress={onToggleTrail}
           disabled={!IS_MAPS_CONFIGURED}
         >
           {trailLoading ? (
-            <ActivityIndicator size="small" color={showTrail ? 'white' : '#007AFF'} />
+            <ActivityIndicator size="small" color={showTrail ? colors.white : colors.primary} />
           ) : (
-            <Ionicons name="git-branch" size={16} color={showTrail ? 'white' : '#007AFF'} />
+            <Ionicons name="git-branch" size={18} color={showTrail ? colors.white : colors.primary} />
           )}
-          <Text style={[card.actionText, !showTrail && { color: '#007AFF' }]}>
+          <Text style={[panel.actionText, !showTrail && { color: colors.primary }]} numberOfLines={1}>
             {showTrail ? `Route · ${trailCount} pts` : "Today's route"}
           </Text>
         </TouchableOpacity>
       </View>
 
       {!IS_MAPS_CONFIGURED && (
-        <Text style={card.note}>The route needs a map to draw on — add a Maps key to use it.</Text>
+        <Text style={panel.note}>The route needs a map to draw on — add a Maps key to use it.</Text>
       )}
     </View>
   );
 }
 
-const card = StyleSheet.create({
+const panel = StyleSheet.create({
   card: {
-    backgroundColor: 'white', borderTopWidth: 1, borderTopColor: '#eee',
-    padding: 16, gap: 12,
-    elevation: 8, shadowColor: '#000', shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.08, shadowRadius: 8,
+    ...card,
+    ...shadow.float,
+    marginHorizontal: pagePadding,
+    marginTop: space.sm,
+    marginBottom: space.md,
+    padding: space.lg,
+    gap: space.md,
   },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  avatar: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
-  avatarText: { fontSize: 17, fontWeight: '700' },
-  name: { fontSize: 16, fontWeight: '700', color: '#1a1a1a' },
-  sub: { fontSize: 12, color: '#888', marginTop: 2 },
-  closeBtn: { padding: 6 },
-  statRow: { flexDirection: 'row', gap: 8 },
-  stat: { flex: 1, backgroundColor: '#f7f8fa', borderRadius: 10, paddingVertical: 8, alignItems: 'center' },
-  statValue: { fontSize: 13, fontWeight: '700', color: '#1a1a1a' },
-  statLabel: { fontSize: 10, color: '#888', marginTop: 2 },
-  meta: { fontSize: 11, color: '#aaa' },
+  header: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  avatar: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
+  avatarText: { fontSize: fontSize.md, fontWeight: '800' },
+  name: { fontSize: fontSize.md, fontWeight: '800', color: colors.ink },
+  sub: { fontSize: fontSize.xs, color: colors.muted, marginTop: 2 },
+  closeBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', marginRight: -space.sm },
+  statRow: { flexDirection: 'row', gap: space.sm },
+  stat: {
+    flex: 1, backgroundColor: colors.surfaceTint, borderRadius: radius.sm,
+    borderWidth: 1, borderColor: colors.line,
+    paddingVertical: 10, paddingHorizontal: 4, alignItems: 'center',
+  },
+  statValue: { fontSize: fontSize.sm, fontWeight: '800', color: colors.ink },
+  statLabel: { fontSize: fontSize.xs, color: colors.muted, marginTop: 2 },
+  meta: { fontSize: fontSize.xs, color: colors.muted },
   actionBar: { flexDirection: 'row', gap: 10 },
-  actionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, borderRadius: 10 },
-  callBtn: { backgroundColor: '#34C759' },
-  trailBtnOn: { backgroundColor: '#007AFF' },
-  trailBtnOff: { backgroundColor: '#007AFF15', borderWidth: 1, borderColor: '#007AFF40' },
-  actionText: { fontSize: 13, fontWeight: '700', color: 'white' },
-  note: { fontSize: 11, color: '#FF9500' },
+  actionBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 6, height: 46, paddingHorizontal: space.sm, borderRadius: radius.md,
+  },
+  callBtn: { backgroundColor: colors.success },
+  trailBtnOn: { backgroundColor: colors.primary },
+  trailBtnOff: { backgroundColor: colors.surface, borderWidth: 1.5, borderColor: colors.primary },
+  disabled: { opacity: 0.5 },
+  actionText: { flexShrink: 1, fontSize: fontSize.sm, fontWeight: '800', color: colors.white },
+  note: { fontSize: fontSize.xs, color: colors.warningText },
 });
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
@@ -295,6 +346,7 @@ export const AdminRiderMapScreen: React.FC = () => {
   const [config, setConfig] = useState<TrackingConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   // Without a key the map tab can only ever show a placeholder, so open on the
   // list instead of a dead end.
   const [tab, setTab] = useState<Tab>(IS_MAPS_CONFIGURED ? 'map' : 'list');
@@ -310,9 +362,11 @@ export const AdminRiderMapScreen: React.FC = () => {
     try {
       const data = await adminService.getRiderLocations({ limit: 500 });
       setRiders(data.results || []);
-    } catch {
+      setError(null);
+    } catch (e: any) {
       // Keep whatever is on screen — one dropped poll must not blank the map
-      // and lose the dispatcher's place.
+      // and lose the dispatcher's place. The reason is shown above it instead.
+      setError(friendlyError(e?.message));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -346,10 +400,10 @@ export const AdminRiderMapScreen: React.FC = () => {
     adminService
       .getRiderTrail(selectedId, { date: today(), limit: 2000 })
       .then((data) => { if (!cancelled) setTrail(data.results || []); })
-      .catch(() => {
+      .catch((e: any) => {
         if (cancelled) return;
         setTrail([]);
-        Alert.alert('Error', 'Failed to load the rider trail.');
+        Alert.alert('Error', `Failed to load the rider trail: ${friendlyError(e?.message)}`);
       })
       .finally(() => { if (!cancelled) setTrailLoading(false); });
 
@@ -400,16 +454,31 @@ export const AdminRiderMapScreen: React.FC = () => {
   const renderContent = () => {
     if (loading && riders.length === 0) return <LoadingScreen message="Loading rider positions…" />;
 
+    // Nothing to fall back on, so the failure takes the place of the content.
+    if (error && riders.length === 0) {
+      return (
+        <View style={styles.stateWrap}>
+          <ErrorState
+            title="Could not load rider positions"
+            message={error}
+            onRetry={() => load()}
+          />
+        </View>
+      );
+    }
+
     if (tab === 'map') {
       return (
-        <RiderMapView
-          style={{ flex: 1 }}
-          markers={markers}
-          trail={showTrail ? trailPath : []}
-          selectedId={selectedId}
-          onSelectRider={select}
-          onDeselect={clearSelection}
-        />
+        <View style={styles.mapFrame}>
+          <RiderMapView
+            style={{ flex: 1 }}
+            markers={markers}
+            trail={showTrail ? trailPath : []}
+            selectedId={selectedId}
+            onSelectRider={select}
+            onDeselect={clearSelection}
+          />
+        </View>
       );
     }
 
@@ -425,23 +494,27 @@ export const AdminRiderMapScreen: React.FC = () => {
             onPress={() => select(item.rider_id)}
           />
         )}
-        ItemSeparatorComponent={() => <View style={styles.separator} />}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => { setRefreshing(true); load(true); }}
+            colors={[colors.primary]}
+            tintColor={colors.primary}
+          />
         }
         ListEmptyComponent={
-          <View style={styles.empty}>
-            <Ionicons name="bicycle-outline" size={48} color="#ccc" />
-            <Text style={styles.emptyText}>No rider has reported a position yet</Text>
-            <Text style={styles.emptyHint}>
-              Riders appear here once they sign in and allow location sharing.
-            </Text>
-          </View>
+          <EmptyState
+            icon="bicycle-outline"
+            title="No rider has reported a position yet"
+            text="Riders appear here once they sign in and allow location sharing."
+          />
         }
-        contentContainerStyle={riders.length === 0 ? { flex: 1 } : { paddingBottom: 24 }}
+        contentContainerStyle={riders.length === 0 ? styles.listEmpty : styles.list}
       />
     );
   };
+
+  const showSummary = !(error && riders.length === 0);
 
   return (
     <View style={styles.container}>
@@ -454,14 +527,14 @@ export const AdminRiderMapScreen: React.FC = () => {
         >
           <Ionicons
             name="map-outline"
-            size={15}
-            color={tab === 'map' ? '#007AFF' : IS_MAPS_CONFIGURED ? '#aaa' : '#ddd'}
+            size={18}
+            color={tab === 'map' ? colors.white : IS_MAPS_CONFIGURED ? colors.muted : colors.disabled}
           />
           <Text
             style={[
               styles.tabText,
               tab === 'map' && styles.tabTextActive,
-              !IS_MAPS_CONFIGURED && { color: '#ddd' },
+              !IS_MAPS_CONFIGURED && { color: colors.disabled },
             ]}
           >
             Map
@@ -471,26 +544,42 @@ export const AdminRiderMapScreen: React.FC = () => {
           style={[styles.tab, tab === 'list' && styles.tabActive]}
           onPress={() => setTab('list')}
         >
-          <Ionicons name="list" size={15} color={tab === 'list' ? '#007AFF' : '#aaa'} />
+          <Ionicons name="list" size={18} color={tab === 'list' ? colors.white : colors.muted} />
           <Text style={[styles.tabText, tab === 'list' && styles.tabTextActive]}>List</Text>
         </TouchableOpacity>
       </View>
 
       {!IS_MAPS_CONFIGURED && (
         <View style={styles.banner}>
-          <Ionicons name="information-circle-outline" size={16} color="#FF9500" />
+          <Ionicons name="information-circle-outline" size={18} color={colors.warning} />
           <Text style={styles.bannerText}>
             Map key not configured — showing the rider list. Set GOOGLE_MAPS_API_KEY and rebuild.
           </Text>
         </View>
       )}
 
-      <View style={styles.summaryRow}>
-        <SummaryCard label="Riders" value={String(riders.length)} color="#007AFF" />
-        <SummaryCard label="Live" value={String(counts.live)} color={FRESHNESS_COLORS.live} />
-        <SummaryCard label="Stale" value={String(counts.stale)} color={FRESHNESS_COLORS.stale} />
-        <SummaryCard label="Offline" value={String(counts.offline)} color={FRESHNESS_COLORS.offline} />
-      </View>
+      {showSummary && (
+        <View style={styles.summaryRow}>
+          <SummaryCard label="Riders" value={String(riders.length)} color={colors.primary} />
+          <SummaryCard label="Live" value={String(counts.live)} color={FRESHNESS_COLORS.live} />
+          <SummaryCard label="Stale" value={String(counts.stale)} color={FRESHNESS_COLORS.stale} />
+          <SummaryCard label="Offline" value={String(counts.offline)} color={FRESHNESS_COLORS.offline} />
+        </View>
+      )}
+
+      {/* A failed poll keeps the last known positions and says why here. */}
+      {!!error && riders.length > 0 && (
+        <View style={styles.errorBanner}>
+          <Ionicons name="alert-circle" size={20} color={colors.danger} />
+          <View style={styles.errorBannerBody}>
+            <Text style={styles.errorBannerTitle}>Showing the last known positions</Text>
+            <Text style={styles.errorBannerText}>{error}</Text>
+          </View>
+          <TouchableOpacity onPress={() => load()} style={styles.errorRetry}>
+            <Text style={styles.errorRetryText}>Try again</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       <View style={styles.content}>{renderContent()}</View>
 
@@ -510,18 +599,76 @@ export const AdminRiderMapScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
-  tabBar: { flexDirection: 'row', backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#eee' },
-  tab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12 },
-  tabActive: { borderBottomWidth: 2, borderBottomColor: '#007AFF' },
-  tabText: { fontSize: 14, fontWeight: '600', color: '#aaa' },
-  tabTextActive: { color: '#007AFF' },
-  banner: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#FF950015', paddingHorizontal: 16, paddingVertical: 10 },
-  bannerText: { flex: 1, fontSize: 12, color: '#B36A00', lineHeight: 17 },
-  summaryRow: { flexDirection: 'row', gap: 8, marginHorizontal: 16, marginVertical: 12 },
+  container: { flex: 1, backgroundColor: colors.bg },
+  // Pill toggle on the page itself, like the filters on the other admin screens.
+  tabBar: {
+    flexDirection: 'row',
+    gap: space.sm,
+    paddingHorizontal: pagePadding,
+    paddingTop: space.sm,
+  },
+  tab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    height: 40,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.surface,
+  },
+  tabActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  tabText: { fontSize: fontSize.sm, fontWeight: '700', color: colors.ink },
+  tabTextActive: { color: colors.white },
+  banner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: pagePadding,
+    marginTop: space.md,
+    padding: space.md,
+    backgroundColor: colors.warningBg,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.warningLine,
+  },
+  bannerText: { flex: 1, fontSize: fontSize.xs, color: colors.warningText, lineHeight: 17 },
+  summaryRow: { flexDirection: 'row', gap: space.sm, marginHorizontal: pagePadding, marginVertical: space.md },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginHorizontal: pagePadding,
+    marginBottom: space.md,
+    padding: space.md,
+    backgroundColor: colors.dangerBg,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.dangerLine,
+  },
+  errorBannerBody: { flex: 1 },
+  errorBannerTitle: { fontSize: fontSize.sm, fontWeight: '800', color: colors.danger },
+  errorBannerText: { fontSize: fontSize.xs, color: colors.danger, lineHeight: 17, marginTop: 2 },
+  errorRetry: { minHeight: 40, paddingHorizontal: space.sm, justifyContent: 'center' },
+  errorRetryText: { fontSize: fontSize.sm, fontWeight: '800', color: colors.primary },
   content: { flex: 1 },
-  separator: { height: 1, backgroundColor: '#f5f5f5' },
-  empty: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 10, paddingHorizontal: 32 },
-  emptyText: { fontSize: 15, color: '#aaa' },
-  emptyHint: { fontSize: 12, color: '#bbb', textAlign: 'center', lineHeight: 17 },
+  // A native map is not reliably clipped by a rounded parent on Android
+  // (overflow: hidden can leave square corners or blank the map). So the map
+  // stays square and the roundness belongs to the frame around it: with 6px of
+  // padding the map's corners sit inside the frame's 20px arc, so nothing pokes out.
+  mapFrame: {
+    flex: 1,
+    marginHorizontal: pagePadding,
+    marginBottom: space.md,
+    padding: 6,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  stateWrap: { flex: 1, justifyContent: 'center' },
+  list: { paddingHorizontal: pagePadding, paddingBottom: space.xxl },
+  listEmpty: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: pagePadding },
 });

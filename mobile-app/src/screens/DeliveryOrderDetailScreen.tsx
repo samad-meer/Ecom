@@ -1,6 +1,7 @@
+import { colors, radius, shadow } from '../theme';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet,
+  View, Text, TextInput, TouchableOpacity, StyleSheet, Keyboard, Platform,
 } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,7 +10,7 @@ import { useDialog } from '../components/AppDialog';
 import { startRiderTracking } from '../services/locationService';
 import { OrderLocationMap } from '../components/OrderLocationMap';
 import { KeyboardAwareScrollView } from '../components/KeyboardAwareScrollView';
-import { canWhatsApp, openWhatsApp } from '../utils/whatsapp';
+import { canWhatsApp, openWhatsApp, orderDispatchMessage } from '../utils/whatsapp';
 import { callNumber, canCall } from '../utils/phone';
 
 interface RouteParams {
@@ -18,10 +19,10 @@ interface RouteParams {
 
 type PaymentMode = 'none' | 'cash' | 'online';
 
-const PAYMENT_OPTIONS: { key: PaymentMode; label: string; icon: string; color: string; bg: string }[] = [
-  { key: 'none',   label: 'No Payment',    icon: 'remove-circle-outline', color: '#999',    bg: '#f5f5f5' },
-  { key: 'cash',   label: 'Cash',          icon: 'cash-outline',          color: '#2ecc71', bg: '#eafaf1' },
-  { key: 'online', label: 'Online / Transfer', icon: 'phone-portrait-outline', color: '#007AFF', bg: '#e8f0fe' },
+const PAYMENT_OPTIONS: { key: PaymentMode; label: string; sub: string; icon: string; color: string; bg: string }[] = [
+  { key: 'cash',   label: 'Cash',   sub: 'received',          icon: 'cash-outline',            color: colors.success, bg: colors.successBg },
+  { key: 'online', label: 'Online', sub: 'office will check', icon: 'phone-portrait-outline',  color: colors.primaryDark, bg: colors.primaryTint },
+  { key: 'none',   label: 'None',   sub: 'no payment',        icon: 'remove-circle-outline',   color: colors.textSecondary, bg: colors.lineSoft },
 ];
 
 const CLAIM_LABELS: Record<string, string> = {
@@ -113,6 +114,26 @@ export const DeliveryOrderDetailScreen: React.FC = () => {
   }, [isSubmitted, order]);
   const [loading, setLoading] = useState(false);
 
+  // The pinned footer steps aside while the keypad is up. Whether the window
+  // resizes for the keypad varies by device, and a footer riding above it would
+  // sit on top of the field being typed into. Dragging the form dismisses the
+  // keypad (see KeyboardAwareScrollView), which brings the footer straight back.
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  useEffect(() => {
+    const show = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      () => setKeyboardOpen(true),
+    );
+    const hide = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => setKeyboardOpen(false),
+    );
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+
   /**
    * Submitting completes the delivery and cannot be undone from the app, so it
    * is always confirmed first — with the payment spelled out, because that is
@@ -177,11 +198,12 @@ The office can see it now. You cannot change it from here.`,
   };
 
   return (
+    <View style={styles.screen}>
     <KeyboardAwareScrollView style={styles.container} extraBottomSpace={32}>
       {/* ── Address hero ─────────────────────────────────────────── */}
       <View style={styles.addressCard}>
         <View style={styles.addressIconWrap}>
-          <Ionicons name="location" size={22} color="#fff" />
+          <Ionicons name="location" size={22} color={colors.white} />
         </View>
         <View style={styles.addressBody}>
           <View style={styles.addressLabelRow}>
@@ -217,7 +239,7 @@ The office can see it now. You cannot change it from here.`,
           <Text style={styles.orderAmount}>PKR {order.total_price}</Text>
         </View>
         <Text style={styles.customerText}>
-          <Ionicons name="person-outline" size={13} color="#999" /> {customerName}
+          <Ionicons name="person-outline" size={13} color={colors.muted} /> {customerName}
         </Text>
       </View>
 
@@ -247,7 +269,7 @@ The office can see it now. You cannot change it from here.`,
                 accessibilityRole="button"
                 accessibilityLabel={`Call ${customerName}`}
               >
-                <Ionicons name="call" size={17} color="#fff" />
+                <Ionicons name="call" size={17} color={colors.white} />
                 <Text style={styles.contactBtnText}>Call</Text>
               </TouchableOpacity>
             )}
@@ -256,14 +278,22 @@ The office can see it now. You cannot change it from here.`,
                 style={[styles.contactBtn, styles.waBtn]}
                 onPress={() => openWhatsApp(
                   customerPhone,
-                  `Hello ${customerName}, I am on my way with your order #${order.id}.`,
+                  orderDispatchMessage({
+                    customerName,
+                    orderId: order.id,
+                    items: order.items,
+                    orderTotal,
+                    previousBalance: previousDue,
+                    isPaid: order.is_paid,
+                    shippingAddress: order.shipping_address,
+                  }),
                 )}
                 activeOpacity={0.85}
                 accessibilityRole="button"
                 accessibilityLabel={`WhatsApp ${customerName}`}
               >
-                <Ionicons name="logo-whatsapp" size={17} color="#fff" />
-                <Text style={styles.contactBtnText}>WhatsApp</Text>
+                <Ionicons name="logo-whatsapp" size={17} color={colors.ink} />
+                <Text style={[styles.contactBtnText, styles.waText]}>WhatsApp</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -295,6 +325,24 @@ The office can see it now. You cannot change it from here.`,
       {/* ── Delivery form ─────────────────────────────────────────── */}
       <View style={styles.formCard}>
         <Text style={styles.sectionTitle}>Delivery Details</Text>
+
+        {/* The one number a rider needs at the door, shown large. */}
+        {!isSubmitted && (
+          <View style={styles.collectTile}>
+            <View style={styles.collectCircle} />
+            <Text style={styles.collectLabel}>COLLECT</Text>
+            <Text style={styles.collectAmount} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
+              PKR {totalDue.toLocaleString('en-PK')}
+            </Text>
+            <Text style={styles.collectSub}>
+              {previousDue > 0
+                ? `This order ${orderTotal.toLocaleString('en-PK')} + earlier ${previousDue.toLocaleString('en-PK')}`
+                : previousDue < 0
+                  ? `This order ${orderTotal.toLocaleString('en-PK')} − credit ${Math.abs(previousDue).toLocaleString('en-PK')}`
+                  : `This order ${orderTotal.toLocaleString('en-PK')}`}
+            </Text>
+          </View>
+        )}
 
         {/* Locked warning */}
         {isSubmitted ? (
@@ -329,7 +377,7 @@ The office can see it now. You cannot change it from here.`,
         {/* Payment mode */}
         {!isSubmitted && (
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Payment Received</Text>
+            <Text style={styles.label}>How did they pay?</Text>
             <View style={styles.paymentRow}>
               {PAYMENT_OPTIONS.map((opt) => {
                 const active = paymentMode === opt.key;
@@ -342,10 +390,11 @@ The office can see it now. You cannot change it from here.`,
                     ]}
                     onPress={() => setPaymentMode(opt.key)}
                   >
-                    <Ionicons name={opt.icon as any} size={20} color={active ? opt.color : '#aaa'} />
-                    <Text style={[styles.paymentLabel, active && { color: opt.color, fontWeight: '700' }]}>
+                    <Ionicons name={opt.icon as any} size={24} color={active ? opt.color : colors.muted} />
+                    <Text style={[styles.paymentLabel, active && { color: opt.color, fontWeight: '800' }]}>
                       {opt.label}
                     </Text>
+                    <Text style={styles.paymentSub}>{opt.sub}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -379,7 +428,7 @@ The office can see it now. You cannot change it from here.`,
               onChangeText={setAmount}
               keyboardType="decimal-pad"
               placeholder="Enter amount"
-              placeholderTextColor="#000"
+              placeholderTextColor={colors.muted}
               // Re-editing an amount replaces it rather than appending.
               selectTextOnFocus
             />
@@ -438,7 +487,7 @@ The office can see it now. You cannot change it from here.`,
             onChangeText={setNotes}
             editable={!isSubmitted}
             placeholder="Left with the guard · Customer not home · Paid in cash"
-            placeholderTextColor="#000"
+            placeholderTextColor={colors.muted}
             multiline
             numberOfLines={3}
             maxLength={500}
@@ -449,149 +498,180 @@ The office can see it now. You cannot change it from here.`,
         {/* No submit once delivered — the server rejects every write to a
             completed delivery, so offering the button would only produce an
             error the rider can do nothing about. */}
-        {!isSubmitted && (
-          <TouchableOpacity
-            style={[
-              styles.submitButton,
-              styles.deliverButton,
-              loading && styles.submitButtonDisabled,
-            ]}
-            onPress={confirmSubmit}
-            disabled={loading}
-          >
-            {!loading && <Ionicons name="checkmark-circle" size={19} color="#fff" />}
-            <Text style={styles.submitButtonText}>
-              {loading ? 'Submitting…' : 'Mark as Delivered'}
-            </Text>
-          </TouchableOpacity>
-        )}
       </View>
     </KeyboardAwareScrollView>
+
+    {/* Pinned to the bottom, always in reach of a thumb. */}
+    {!isSubmitted && !keyboardOpen && (
+      <View style={styles.footer}>
+        <TouchableOpacity
+          style={[
+            styles.submitButton,
+            styles.deliverButton,
+            loading && styles.submitButtonDisabled,
+          ]}
+          onPress={confirmSubmit}
+          disabled={loading}
+        >
+          {!loading && <Ionicons name="checkmark-circle" size={22} color={colors.white} />}
+          <Text style={styles.submitButtonText}>
+            {loading ? 'Submitting…' : 'Mark as Delivered'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    )}
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f0f4f8' },
+  screen: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1, backgroundColor: colors.bg },
+
+  collectTile: {
+    backgroundColor: colors.primary, borderRadius: radius.xl, padding: 20, marginBottom: 18,
+    overflow: 'hidden', ...shadow.card,
+  },
+  collectCircle: {
+    position: 'absolute', right: -40, top: -50, width: 170, height: 170, borderRadius: 85,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+  },
+  collectLabel: { fontSize: 12, fontWeight: '800', letterSpacing: 1.2, color: 'rgba(255,255,255,0.92)' },
+  collectAmount: { fontSize: 42, fontWeight: '800', color: colors.white, letterSpacing: -1, marginTop: 2 },
+  collectSub: { fontSize: 14, color: 'rgba(255,255,255,0.92)', marginTop: 2 },
+
+  footer: {
+    paddingHorizontal: 16, paddingTop: 12, paddingBottom: 14,
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl,
+    ...shadow.float,
+  },
 
   // Address hero
   addressCard: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: '#007AFF',
+    backgroundColor: colors.primary,
     margin: 16,
-    marginBottom: 8,
-    borderRadius: 14,
-    padding: 16,
+    marginBottom: 10,
+    borderRadius: radius.xl,
+    padding: 18,
     gap: 12,
-    elevation: 3,
-    shadowColor: '#007AFF',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
+    ...shadow.card,
   },
   addressIconWrap: {
-    width: 40, height: 40, borderRadius: 20,
+    width: 40, height: 40, borderRadius: 24,
     backgroundColor: 'rgba(255,255,255,0.2)',
     justifyContent: 'center', alignItems: 'center',
     marginTop: 2,
   },
   addressBody: { flex: 1 },
   addressLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
-  addressLabel: { fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.7)', textTransform: 'uppercase', letterSpacing: 0.8 },
+  addressLabel: { fontSize: 12, fontWeight: '700', color: 'rgba(255,255,255,0.92)', textTransform: 'uppercase', letterSpacing: 0.8 },
+  // Solid white: white text on a see-through white chip over blue is only ~3:1.
   labelChip: {
-    backgroundColor: 'rgba(255,255,255,0.22)', borderRadius: 20,
-    paddingHorizontal: 8, paddingVertical: 2,
+    backgroundColor: colors.white, borderRadius: 24,
+    paddingHorizontal: 10, paddingVertical: 3, flexShrink: 1,
   },
-  labelChipText: { fontSize: 11, fontWeight: '700', color: '#fff' },
-  addressText: { fontSize: 16, fontWeight: '700', color: '#fff', lineHeight: 22 },
+  labelChipText: { fontSize: 12, fontWeight: '800', color: colors.primaryDark },
+  addressText: { fontSize: 20, fontWeight: '800', color: colors.white, lineHeight: 26 },
 
   // Cards
-  card: { backgroundColor: '#fff', marginHorizontal: 16, marginBottom: 8, borderRadius: 12, padding: 16, elevation: 1 },
-  formCard: { backgroundColor: '#fff', marginHorizontal: 16, marginBottom: 24, borderRadius: 12, padding: 16, elevation: 1 },
+  card: {
+    backgroundColor: colors.surface, marginHorizontal: 16, marginBottom: 10, borderRadius: radius.xl - 4, padding: 18,
+    borderWidth: 1, borderColor: colors.line, ...shadow.card,
+  },
+  formCard: {
+    backgroundColor: colors.surface, marginHorizontal: 16, marginBottom: 24, borderRadius: radius.xl - 4, padding: 18,
+    borderWidth: 1, borderColor: colors.line, ...shadow.card,
+  },
 
   orderHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
-  orderId: { fontSize: 18, fontWeight: 'bold', color: '#333' },
-  orderAmount: { fontSize: 18, fontWeight: 'bold', color: '#2ecc71' },
-  customerText: { fontSize: 13, color: '#888', marginTop: 2 },
+  orderId: { fontSize: 18, fontWeight: 'bold', color: colors.ink },
+  orderAmount: { fontSize: 20, fontWeight: '800', color: colors.ink },
+  customerText: { fontSize: 13, color: colors.muted, marginTop: 2 },
 
   // ── Customer contact ──────────────────────────────────────────────────────
   contactRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 4 },
   contactBody: { flex: 1 },
-  contactName: { fontSize: 15, fontWeight: '700', color: '#1a2530' },
+  contactName: { fontSize: 15, fontWeight: '700', color: colors.ink },
   // Tabular figures so a rider reading a number aloud does not lose their place.
   contactPhone: {
-    fontSize: 15, color: '#374857', marginTop: 3,
+    fontSize: 15, color: colors.textSecondary, marginTop: 3,
     letterSpacing: 0.4, fontVariant: ['tabular-nums'],
   },
-  contactPhoneMissing: { fontSize: 13, color: '#a0a8b0', letterSpacing: 0 },
+  contactPhoneMissing: { fontSize: 13, color: colors.muted, letterSpacing: 0 },
   contactActions: { flexDirection: 'row', gap: 10, marginTop: 14 },
   contactBtn: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 7, paddingVertical: 12, borderRadius: 11,
+    gap: 7, paddingVertical: 14, borderRadius: radius.md,
   },
-  callBtn: { backgroundColor: '#0A84FF' },
-  waBtn: { backgroundColor: '#25D366' },
-  contactBtnText: { color: '#fff', fontSize: 14.5, fontWeight: '700' },
-  contactHint: { fontSize: 12.5, color: '#8a929b', marginTop: 10, lineHeight: 17 },
+  callBtn: { backgroundColor: colors.primary },
+  waBtn: { backgroundColor: colors.whatsapp },
+  waText: { color: colors.ink },
+  contactBtnText: { color: colors.white, fontSize: 15, fontWeight: '800' },
+  contactHint: { fontSize: 12.5, color: colors.muted, marginTop: 10, lineHeight: 17 },
 
-  sectionTitle: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 14 },
+  sectionTitle: { fontSize: 16, fontWeight: 'bold', color: colors.ink, marginBottom: 14 },
 
   productRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6 },
-  productText: { fontSize: 14, color: '#444', flex: 1 },
-  productPrice: { fontSize: 14, fontWeight: '600', color: '#333' },
-  divider: { height: 1, backgroundColor: '#eee', marginVertical: 8 },
-  totalLabel: { fontSize: 15, fontWeight: '600', color: '#333' },
-  totalValue: { fontSize: 15, fontWeight: 'bold', color: '#007AFF' },
+  productText: { fontSize: 14, color: colors.textSecondary, flex: 1 },
+  productPrice: { fontSize: 14, fontWeight: '600', color: colors.ink },
+  divider: { height: 1, backgroundColor: colors.lineSoft, marginVertical: 8 },
+  totalLabel: { fontSize: 15, fontWeight: '600', color: colors.ink },
+  totalValue: { fontSize: 15, fontWeight: 'bold', color: colors.primary },
 
   inputGroup: { marginBottom: 18 },
   dueBox: {
-    marginTop: 10, backgroundColor: '#f7f9fc', borderRadius: 10,
-    borderWidth: 1, borderColor: '#e4e9ee', padding: 12, gap: 6,
+    marginTop: 10, backgroundColor: colors.bg, borderRadius: 14,
+    borderWidth: 1, borderColor: colors.line, padding: 12, gap: 6,
   },
   dueRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  dueLabel: { fontSize: 13, color: '#5b6672' },
-  dueValue: { fontSize: 13, color: '#1a2530', fontWeight: '600' },
-  dueTotalRow: { borderTopWidth: 1, borderTopColor: '#e4e9ee', paddingTop: 7, marginTop: 1 },
-  dueTotalLabel: { fontSize: 14, color: '#1a2530', fontWeight: '700' },
-  dueTotalValue: { fontSize: 15, color: '#0A84FF', fontWeight: '800' },
+  dueLabel: { fontSize: 13, color: colors.textSecondary, flex: 1, marginRight: 8 },
+  dueValue: { fontSize: 13, color: colors.ink, fontWeight: '600' },
+  dueTotalRow: { borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 7, marginTop: 1 },
+  dueTotalLabel: { fontSize: 14, color: colors.ink, fontWeight: '700' },
+  dueTotalValue: { fontSize: 15, color: colors.primaryDark, fontWeight: '800' },
   fullAmountBtn: {
     alignSelf: 'flex-start', marginTop: 4,
-    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8,
-    backgroundColor: '#eaf2ff', borderWidth: 1, borderColor: '#b9d4ff',
+    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12,
+    backgroundColor: colors.primaryTint, borderWidth: 1, borderColor: colors.primarySoft,
   },
-  fullAmountText: { fontSize: 13, fontWeight: '700', color: '#0A84FF' },
-  label: { fontSize: 14, fontWeight: '600', color: '#444', marginBottom: 8 },
-  hint: { fontSize: 12, color: '#8a929b', marginBottom: 8, lineHeight: 17 },
-  hintBelow: { fontSize: 12, color: '#8a929b', marginTop: 8, lineHeight: 17 },
-  input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 10, padding: 12, fontSize: 16, backgroundColor: '#fafafa', color: '#000' },
+  fullAmountText: { fontSize: 13, fontWeight: '700', color: colors.primaryDark },
+  label: { fontSize: 14, fontWeight: '600', color: colors.textSecondary, marginBottom: 8 },
+  hint: { fontSize: 12, color: colors.muted, marginBottom: 8, lineHeight: 17 },
+  hintBelow: { fontSize: 12, color: colors.muted, marginTop: 8, lineHeight: 17 },
+  input: { borderWidth: 1, borderColor: colors.line, borderRadius: 14, padding: 12, fontSize: 16, backgroundColor: colors.surfaceTint, color: colors.ink },
   textArea: { height: 80, textAlignVertical: 'top' },
-  inputReadOnly: { backgroundColor: '#f0f0f0', color: '#000', borderColor: 'transparent' },
+  inputReadOnly: { backgroundColor: colors.lineSoft, color: colors.ink, borderColor: 'transparent' },
 
   // Payment options
   paymentRow: { flexDirection: 'row', gap: 8 },
   paymentOption: {
-    flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 12,
-    borderWidth: 1, borderColor: '#ddd', backgroundColor: '#fafafa', gap: 6,
+    flex: 1, alignItems: 'center', paddingVertical: 16, paddingHorizontal: 4, borderRadius: radius.lg,
+    borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surfaceTint, gap: 4,
   },
-  paymentLabel: { fontSize: 11, fontWeight: '600', color: '#888', textAlign: 'center' },
+  paymentLabel: { fontSize: 17, fontWeight: '700', color: colors.ink, textAlign: 'center' },
+  paymentSub: { fontSize: 12, color: colors.muted, textAlign: 'center' },
 
-  lockedStatus: { backgroundColor: '#e9ecef', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#ced4da' },
-  lockedStatusText: { fontSize: 15, color: '#495057', fontWeight: '600' },
+  lockedStatus: { backgroundColor: colors.lineSoft, padding: 12, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line },
+  lockedStatusText: { fontSize: 15, color: colors.ink, fontWeight: '600' },
 
   warningBox: {
-    backgroundColor: '#fff8e1', borderWidth: 1, borderColor: '#ffc107',
-    borderRadius: 10, padding: 12, marginBottom: 16, flexDirection: 'row', alignItems: 'flex-start', gap: 10,
+    backgroundColor: colors.warningBg, borderWidth: 1, borderColor: colors.warningLine,
+    borderRadius: radius.lg, padding: 12, marginBottom: 16, flexDirection: 'row', alignItems: 'flex-start', gap: 10,
   },
   warningIcon: { fontSize: 22 },
-  warningTitle: { fontSize: 13, fontWeight: 'bold', color: '#856404', marginBottom: 2 },
-  warningText: { fontSize: 12, color: '#856404', lineHeight: 17 },
+  warningTitle: { fontSize: 13, fontWeight: 'bold', color: colors.warningText, marginBottom: 2 },
+  warningText: { fontSize: 12, color: colors.warningText, lineHeight: 17 },
 
   submitButton: {
-    backgroundColor: '#007AFF', paddingVertical: 16, borderRadius: 10,
+    backgroundColor: colors.primary, height: 58, borderRadius: radius.md + 2,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 8, marginTop: 4,
+    gap: 8,
   },
-  deliverButton: { backgroundColor: '#2ecc71' },
-  submitButtonDisabled: { backgroundColor: '#a0c4ff' },
-  submitButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  deliverButton: { backgroundColor: colors.success },
+  // Keeps the green and the white label readable while the request is in flight.
+  submitButtonDisabled: { opacity: 0.7 },
+  submitButtonText: { color: colors.white, fontSize: 18, fontWeight: '800' },
 });

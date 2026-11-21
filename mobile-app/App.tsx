@@ -1,6 +1,7 @@
+import { colors, radius, shadow } from './src/theme';
 import React, { useContext } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { TouchableOpacity, Text, StyleSheet, View, ActivityIndicator } from 'react-native';
@@ -38,6 +39,7 @@ import { AdminPlantScreen } from './src/screens/admin/AdminPlantScreen';
 import { AdminLedgerScreen } from './src/screens/admin/AdminLedgerScreen';
 import { AdminShopScreen } from './src/screens/admin/AdminShopScreen';
 import { AdminRiderMapScreen } from './src/screens/admin/AdminRiderMapScreen';
+import { AdminPaymentClaimsScreen } from './src/screens/admin/AdminPaymentClaimsScreen';
 
 import { RootStackParamList, MainTabParamList, AdminTabParamList } from './src/types/navigation';
 import { CartProvider, useCart } from './src/context/CartContext';
@@ -46,6 +48,8 @@ import { LanguageProvider } from './src/context/LanguageContext';
 import { FloatingContactButton } from './src/components/FloatingContactButton';
 import { RiderLocationGate } from './src/components/RiderLocationGate';
 import { DialogProvider } from './src/components/AppDialog';
+import { AdminHeader } from './src/components/AdminHeader';
+import { BrandProvider, useBrand } from './src/context/BrandContext';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -53,47 +57,58 @@ const AdminTab = createBottomTabNavigator<AdminTabParamList>();
 
 // ─── Brand constants ──────────────────────────────────────────────────────────
 
-const BRAND_BLUE = '#0A84FF';
-const BRAND_DARK = '#0D1B2A';
+const BRAND_BLUE = colors.primary;
+const BRAND_DARK = colors.ink;
 
 // ─── Brand logo title ─────────────────────────────────────────────────────────
 
-const BrandTitle = ({ roleLabel }: { roleLabel?: string }) => (
-  <View style={brand.titleRow}>
-    <View style={brand.iconWrap}>
-      <Ionicons name="water" size={15} color="#fff" />
-    </View>
-    <Text style={brand.titleText}>
-      Century<Text style={{ color: BRAND_BLUE }}> Sip</Text>
-    </Text>
-    {roleLabel ? (
-      <View style={brand.roleBadge}>
-        <Text style={brand.roleText}>{roleLabel}</Text>
+/** Splits a name so its last word can take the brand colour ("Century" + "Sip"). */
+const splitBrand = (name: string): [string, string] => {
+  const i = name.trim().lastIndexOf(' ');
+  return i === -1 ? [name.trim(), ''] : [name.slice(0, i), name.slice(i)];
+};
+
+const BrandTitle = ({ roleLabel }: { roleLabel?: string }) => {
+  const { name } = useBrand();
+  const [head, tail] = splitBrand(name);
+  return (
+    <View style={brand.titleRow}>
+      <View style={brand.iconWrap}>
+        <Ionicons name="water" size={15} color="#fff" />
       </View>
-    ) : null}
-  </View>
-);
+      <Text style={brand.titleText} numberOfLines={1}>
+        {head}<Text style={{ color: BRAND_BLUE }}>{tail}</Text>
+      </Text>
+      {roleLabel ? (
+        <View style={brand.roleBadge}>
+          <Text style={brand.roleText}>{roleLabel}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+};
 
 const brand = StyleSheet.create({
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   iconWrap: {
-    width: 28, height: 28, borderRadius: 8,
+    width: 30, height: 30, borderRadius: 12,
     backgroundColor: BRAND_BLUE,
     justifyContent: 'center', alignItems: 'center',
   },
   titleText: { fontSize: 18, fontWeight: '800', color: BRAND_DARK },
+  // The sunny accent: a rider or admin sees at a glance which role they are in.
   roleBadge: {
-    backgroundColor: '#E8F4FF', borderRadius: 6,
-    paddingHorizontal: 8, paddingVertical: 2, marginLeft: 4,
+    backgroundColor: colors.sun, borderRadius: radius.pill,
+    paddingHorizontal: 10, paddingVertical: 3, marginLeft: 4,
   },
-  roleText: { fontSize: 11, fontWeight: '700', color: BRAND_BLUE, textTransform: 'uppercase', letterSpacing: 0.5 },
+  roleText: { fontSize: 12, fontWeight: '800', color: colors.ink, textTransform: 'uppercase', letterSpacing: 0.5 },
 });
 
 // ─── Shared header options ────────────────────────────────────────────────────
 
 const headerOptions = (roleLabel?: string) => ({
-  headerStyle: { backgroundColor: '#fff' } as any,
-  headerShadowVisible: true,
+  headerStyle: { backgroundColor: colors.bg } as any,
+  headerShadowVisible: false,
   headerTintColor: BRAND_BLUE,
   headerTitle: () => <BrandTitle roleLabel={roleLabel} />,
 });
@@ -104,8 +119,8 @@ const HeaderRight = ({ navigation }: { navigation: any }) => {
   const { getCartCount } = useCart();
   const count = getCartCount();
   return (
-    <TouchableOpacity onPress={() => navigation.navigate('Cart')} style={styles.cartButton}>
-      <Ionicons name="cart-outline" size={24} color={BRAND_BLUE} />
+    <TouchableOpacity onPress={() => navigation.navigate('Cart')} style={styles.cartButton} accessibilityLabel="Open cart">
+      <Ionicons name="cart-outline" size={22} color={colors.ink} />
       {count > 0 && (
         <View style={styles.badge}>
           <Text style={styles.badgeText}>{count}</Text>
@@ -117,20 +132,86 @@ const HeaderRight = ({ navigation }: { navigation: any }) => {
 
 // ─── Splash loading screen ────────────────────────────────────────────────────
 
-const SplashScreen = () => (
-  <SafeAreaProvider>
-    <View style={styles.splash}>
-      <View style={styles.splashLogoWrap}>
-        <Ionicons name="water" size={56} color="#fff" />
+const SplashScreen = () => {
+  const { name } = useBrand();
+  const [head, tail] = splitBrand(name);
+  return (
+    <SafeAreaProvider>
+      <View style={styles.splash}>
+        <View style={styles.splashLogoWrap}>
+          <Ionicons name="water" size={56} color={colors.primary} />
+        </View>
+        <Text style={styles.splashTitle} numberOfLines={1} adjustsFontSizeToFit>
+          {head}<Text style={{ color: colors.sun }}>{tail}</Text>
+        </Text>
+        <Text style={styles.splashTagline}>Pure water. Fast delivery.</Text>
+        <ActivityIndicator color={colors.white} size="large" style={{ marginTop: 48 }} />
       </View>
-      <Text style={styles.splashTitle}>
-        Century<Text style={{ color: '#90CAFF' }}> Sip</Text>
-      </Text>
-      <Text style={styles.splashTagline}>Pure water. Fast delivery.</Text>
-      <ActivityIndicator color="rgba(255,255,255,0.6)" size="large" style={{ marginTop: 48 }} />
-    </View>
-  </SafeAreaProvider>
+    </SafeAreaProvider>
+  );
+};
+
+// ─── Floating tab bar ─────────────────────────────────────────────────────────
+// A navy pill that floats above the page. The tab you are on becomes a sunny
+// yellow pill with its name; the others are crisp icons. With five tabs
+// (admin) there is no room for names, so the active tab is a clean circular
+// yellow badge with a bold, high-contrast icon.
+
+type IconPair = [keyof typeof Ionicons.glyphMap, keyof typeof Ionicons.glyphMap];
+
+const TabPill = ({ icon, label, focused, showLabel }: {
+  icon: IconPair; label: string; focused: boolean; showLabel: boolean;
+}) => (
+  <View
+    style={[
+      showLabel ? tabStyles.itemWithLabel : tabStyles.itemIconOnly,
+      focused && (showLabel ? tabStyles.itemActiveWithLabel : tabStyles.itemActiveIconOnly),
+    ]}
+    accessibilityLabel={label}
+  >
+    <Ionicons
+      name={focused ? icon[0] : icon[1]}
+      size={24}
+      color={focused ? colors.ink : 'rgba(255, 255, 255, 0.75)'}
+    />
+    {focused && showLabel ? <Text style={tabStyles.label} numberOfLines={1}>{label}</Text> : null}
+  </View>
 );
+
+/** Bar style shared by both tab sets. The bar sits in the layout (not on top of
+ *  it), so no screen needs extra bottom padding to stay clear of it. */
+const useFloatingTabBar = () => {
+  const insets = useSafeAreaInsets();
+  return {
+    backgroundColor: colors.ink,
+    borderTopWidth: 0,
+    height: 64,
+    paddingTop: 0,
+    paddingBottom: 0,
+    marginTop: 8,
+    marginHorizontal: 18,
+    marginBottom: Math.max(insets.bottom, 12),
+    borderRadius: 32,
+    ...shadow.float,
+  } as const;
+};
+
+const tabStyles = StyleSheet.create({
+  itemWithLabel: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    height: 44, minWidth: 44, paddingHorizontal: 12, borderRadius: radius.pill, gap: 6,
+  },
+  itemActiveWithLabel: { backgroundColor: colors.sun, paddingHorizontal: 16 },
+  itemIconOnly: {
+    width: 44, height: 44, borderRadius: 22,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  itemActiveIconOnly: {
+    backgroundColor: colors.sun,
+    ...shadow.card,
+  },
+  label: { color: colors.ink, fontSize: 13, fontWeight: '800' },
+});
 
 // ─── Customer / Rider tabs ────────────────────────────────────────────────────
 
@@ -138,22 +219,25 @@ const MainTabs = () => {
   const { user } = useContext(AuthContext);
   const isDeliveryBoy = user?.user_type === 'delivery_boy';
   const roleLabel = isDeliveryBoy ? 'Rider' : undefined;
+  const tabBarStyle = useFloatingTabBar();
 
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
-        tabBarIcon: ({ focused, color, size }) => {
-          let iconName: keyof typeof Ionicons.glyphMap = 'home';
-          if (route.name === 'Home') iconName = focused ? 'storefront' : 'storefront-outline';
-          else if (route.name === 'Orders') iconName = focused ? (isDeliveryBoy ? 'bicycle' : 'receipt') : (isDeliveryBoy ? 'bicycle-outline' : 'receipt-outline');
-          else if (route.name === 'RiderPayment') iconName = focused ? 'qr-code' : 'qr-code-outline';
-          else if (route.name === 'Profile') iconName = focused ? 'person-circle' : 'person-circle-outline';
-          return <Ionicons name={iconName} size={size} color={color} />;
+        tabBarIcon: ({ focused }) => {
+          let icon: IconPair = ['home', 'home-outline'];
+          let label = 'Home';
+          if (route.name === 'Home') { icon = ['storefront', 'storefront-outline']; label = 'Shop'; }
+          else if (route.name === 'Orders') {
+            icon = isDeliveryBoy ? ['bicycle', 'bicycle-outline'] : ['receipt', 'receipt-outline'];
+            label = isDeliveryBoy ? 'Deliveries' : 'Orders';
+          } else if (route.name === 'RiderPayment') { icon = ['qr-code', 'qr-code-outline']; label = 'Pay'; }
+          else if (route.name === 'Profile') { icon = ['person-circle', 'person-circle-outline']; label = 'Profile'; }
+          return <TabPill icon={icon} label={label} focused={focused} showLabel />;
         },
-        tabBarActiveTintColor: BRAND_BLUE,
-        tabBarInactiveTintColor: '#aaa',
-        tabBarStyle: styles.tabBar,
-        tabBarLabelStyle: styles.tabLabel,
+        tabBarShowLabel: false,
+        tabBarLabelPosition: 'beside-icon',
+        tabBarStyle,
         ...headerOptions(roleLabel),
       })}
     >
@@ -184,7 +268,7 @@ const MainTabs = () => {
       <Tab.Screen
         name="Profile"
         component={ProfileScreen}
-        options={{ tabBarLabel: 'Profile' }}
+        options={{ tabBarLabel: 'Profile', headerShown: false }}
       />
     </Tab.Navigator>
   );
@@ -192,36 +276,52 @@ const MainTabs = () => {
 
 // ─── Admin tabs ───────────────────────────────────────────────────────────────
 
-const AdminTabs = () => (
+const AdminTabs = () => {
+  const tabBarStyle = useFloatingTabBar();
+  return (
   <AdminTab.Navigator
     screenOptions={({ route }) => ({
-      tabBarIcon: ({ focused, color, size }) => {
-        const icons: Record<string, [keyof typeof Ionicons.glyphMap, keyof typeof Ionicons.glyphMap]> = {
-          Dashboard:      ['grid',       'grid-outline'],
-          AdminOrders:    ['receipt',    'receipt-outline'],
-          AdminCustomers: ['people',     'people-outline'],
-          AdminManage:    ['construct',  'construct-outline'],
-          Profile:        ['person-circle', 'person-circle-outline'],
+      tabBarIcon: ({ focused }) => {
+        const icons: Record<string, [IconPair, string]> = {
+          Dashboard:      [['stats-chart', 'stats-chart-outline'], 'Dashboard'],
+          AdminOrders:    [['receipt', 'receipt-outline'], 'Orders'],
+          AdminCustomers: [['people', 'people-outline'], 'Customers'],
+          AdminManage:    [['construct', 'construct-outline'], 'Manage'],
+          Profile:        [['person-circle', 'person-circle-outline'], 'Profile'],
         };
-        const [active, inactive] = icons[route.name] || ['ellipse', 'ellipse-outline'];
-        return <Ionicons name={focused ? active : inactive} size={size} color={color} />;
+        const [icon, label] = icons[route.name] || [['ellipse', 'ellipse-outline'] as IconPair, route.name];
+        return <TabPill icon={icon} label={label} focused={focused} showLabel={false} />;
       },
-      tabBarActiveTintColor: BRAND_BLUE,
-      tabBarInactiveTintColor: '#aaa',
-      tabBarStyle: styles.tabBar,
-      tabBarLabelStyle: styles.tabLabel,
+      tabBarShowLabel: false,
+      tabBarLabelPosition: 'beside-icon',
+      tabBarStyle,
       ...headerOptions('Admin'),
+      header: ({ navigation }) => <AdminHeader navigation={navigation} />,
     })}
   >
     <AdminTab.Screen name="Dashboard"      component={AdminDashboardScreen}  options={{ tabBarLabel: 'Dashboard' }} />
     <AdminTab.Screen name="AdminOrders"    component={AdminOrdersScreen}     options={{ tabBarLabel: 'Orders' }} />
     <AdminTab.Screen name="AdminCustomers" component={AdminCustomersScreen}  options={{ tabBarLabel: 'Customers' }} />
     <AdminTab.Screen name="AdminManage"    component={AdminManageScreen}     options={{ tabBarLabel: 'Manage' }} />
-    <AdminTab.Screen name="Profile"        component={ProfileScreen}         options={{ tabBarLabel: 'Profile' }} />
+    <AdminTab.Screen name="Profile"        component={ProfileScreen}         options={{ tabBarLabel: 'Profile', headerShown: false }} />
   </AdminTab.Navigator>
-);
+  );
+};
 
 // ─── App content ──────────────────────────────────────────────────────────────
+
+const navTheme = {
+  ...DefaultTheme,
+  colors: {
+    ...DefaultTheme.colors,
+    primary: colors.primary,
+    background: colors.bg,
+    card: colors.bg,
+    text: colors.ink,
+    border: colors.line,
+    notification: colors.danger,
+  },
+};
 
 const AppContent = () => {
   const { user, isBootstrapping } = useContext(AuthContext);
@@ -246,7 +346,7 @@ const AppContent = () => {
   } as const;
 
   const tree = (
-    <NavigationContainer>
+    <NavigationContainer theme={navTheme}>
       <Stack.Navigator
         screenOptions={{ ...headerOptions(), contentStyle: screenContentStyle }}
       >
@@ -293,6 +393,7 @@ const AppContent = () => {
                 <Stack.Screen name="AdminLedger"        component={AdminLedgerScreen}        options={{ headerTitle: 'Customer Ledger' }} />
                 <Stack.Screen name="AdminShop"          component={AdminShopScreen}          options={{ headerTitle: 'Shop Management' }} />
                 <Stack.Screen name="AdminRiderMap"      component={AdminRiderMapScreen}      options={{ headerTitle: 'Live Rider Map' }} />
+                <Stack.Screen name="AdminPaymentClaims" component={AdminPaymentClaimsScreen} options={{ headerTitle: 'Payments to check' }} />
               </>
             )}
 
@@ -327,69 +428,61 @@ export default function App() {
   return (
     <ErrorBoundary>
       <SafeAreaProvider>
-        <AuthProvider>
-          <LanguageProvider>
-            <CartProvider>
-              {/* Inside the providers so a dialog can use auth/language, and
-                  around AppContent so every screen can raise one. */}
-              <DialogProvider>
-                <AppContent />
-              </DialogProvider>
-              <StatusBar style="dark" />
-            </CartProvider>
-          </LanguageProvider>
-        </AuthProvider>
+        <BrandProvider>
+          <AuthProvider>
+            <LanguageProvider>
+              <CartProvider>
+                {/* Inside the providers so a dialog can use auth/language, and
+                    around AppContent so every screen can raise one. */}
+                <DialogProvider>
+                  <AppContent />
+                </DialogProvider>
+                <StatusBar style="dark" />
+              </CartProvider>
+            </LanguageProvider>
+          </AuthProvider>
+        </BrandProvider>
       </SafeAreaProvider>
     </ErrorBoundary>
   );
 }
 
 const styles = StyleSheet.create({
-  // Tab bar — no fixed height; SafeAreaProvider adds bottom inset automatically
-  tabBar: {
-    backgroundColor: '#fff',
-    borderTopWidth: 1,
-    borderTopColor: '#eef0f3',
-    paddingTop: 6,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
+  // Cart: a white rounded square, like the bell and cart buttons on the tiles
+  cartButton: {
+    marginRight: 14, width: 42, height: 42, borderRadius: radius.md,
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line,
+    alignItems: 'center', justifyContent: 'center', position: 'relative',
   },
-  tabLabel: { fontSize: 11, fontWeight: '600' },
-
-  // Cart
-  cartButton: { marginRight: 14, padding: 4, position: 'relative' },
   badge: {
-    position: 'absolute', right: -4, top: -2,
-    backgroundColor: '#FF3B30', borderRadius: 9,
+    position: 'absolute', right: -5, top: -5,
+    backgroundColor: colors.danger, borderRadius: 12,
     minWidth: 18, height: 18,
     justifyContent: 'center', alignItems: 'center',
     paddingHorizontal: 3,
   },
-  badgeText: { color: '#fff', fontSize: 11, fontWeight: '800' },
+  badgeText: { color: '#fff', fontSize: 12, fontWeight: '800' },
 
   // Splash
   splash: {
-    flex: 1, backgroundColor: BRAND_DARK,
+    flex: 1, backgroundColor: colors.primary,
     justifyContent: 'center', alignItems: 'center',
   },
   splashLogoWrap: {
-    width: 100, height: 100, borderRadius: 28,
-    backgroundColor: BRAND_BLUE,
+    width: 100, height: 100, borderRadius: radius.xl,
+    backgroundColor: colors.white,
     justifyContent: 'center', alignItems: 'center',
     marginBottom: 20,
-    shadowColor: BRAND_BLUE,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.5,
-    shadowRadius: 16,
+    shadowColor: colors.ink,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 18,
     elevation: 12,
   },
   splashTitle: {
     fontSize: 36, fontWeight: '900', color: '#fff', letterSpacing: -0.5,
   },
   splashTagline: {
-    fontSize: 15, color: 'rgba(255,255,255,0.5)', marginTop: 8, letterSpacing: 0.3,
+    fontSize: 15, color: 'rgba(255,255,255,0.85)', marginTop: 8, letterSpacing: 0.3,
   },
 });

@@ -1,188 +1,345 @@
-import React, { useState } from 'react';
+import React, { useCallback, useContext, useMemo, useState } from 'react';
 import { View, Text, FlatList, StyleSheet, TextInput, RefreshControl, TouchableOpacity, ScrollView } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { Ionicons } from '@expo/vector-icons';
+import { colors, radius, shadow } from '../theme';
 import { useProducts } from '../hooks/useProducts';
 import { ProductCard } from '../components/ProductCard';
 import { LoadingScreen } from '../components/LoadingScreen';
-import { Product, Category } from '../types/product';
+import { Product } from '../types/product';
 import { RootStackParamList } from '../types/navigation';
-import { Ionicons } from '@expo/vector-icons';
 import { useLanguage } from '../context/LanguageContext';
+import { useCart } from '../context/CartContext';
+import { AuthContext } from '../context/AuthContext';
+import { getOrders, Order } from '../services/orderService';
+import { authService, getAuthToken } from '../services/authService';
+import { friendlyError } from '../components/ui';
+
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+const money = (n: number) => n.toLocaleString('en-PK', { maximumFractionDigits: 0 });
 
 export const HomeScreen: React.FC = () => {
   const { products, categories, selectedCategory, setSelectedCategory, loading, error, refetch } = useProducts();
   const [searchQuery, setSearchQuery] = useState('');
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { t } = useLanguage();
+  const { user } = useContext(AuthContext);
+  const { items, addToCart, updateQuantity, getCartCount, getCartTotal } = useCart();
 
-  const filteredProducts = products.filter(product =>  
-    product.name.toLowerCase().includes(searchQuery.toLowerCase())
+  const [orders, setOrders] = useState<Order[]>([]);
+  // Owed-positive. Null until the server has been asked: a stale or guessed
+  // figure here would tell a customer they are settled when they are not.
+  const [owed, setOwed] = useState<number | null>(null);
+
+  // Re-read on every visit, so "your usual" and the balance are never a day old.
+  useFocusEffect(useCallback(() => {
+    let live = true;
+    (async () => {
+      try {
+        const data = await getOrders();
+        if (live && Array.isArray(data)) setOrders(data);
+      } catch {
+        // No history is fine: the usual order simply does not appear.
+      }
+      try {
+        const token = await getAuthToken();
+        if (!token) return;
+        const profile = await authService.getProfile(token);
+        const stored = Number(profile?.account_balance);
+        // The stored balance is credit-positive, so what is owed is its negative.
+        if (live && profile?.account_balance != null && Number.isFinite(stored)) setOwed(-stored);
+      } catch {
+        if (live) setOwed(null);
+      }
+    })();
+    return () => { live = false; };
+  }, []));
+
+  const quantityOf = (productId: number) => items.find((i) => i.id === productId)?.quantity ?? 0;
+
+  const filteredProducts = products.filter((product) =>
+    product.name.toLowerCase().includes(searchQuery.toLowerCase()),
   );
+
+  // The customer's last real order, limited to what is still on sale.
+  const usual = useMemo(() => {
+    const past = orders
+      .filter((o) => o.status !== 'Cancelled' && Array.isArray(o.items) && o.items.length > 0)
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+    if (!past) return null;
+    const lines = past.items
+      .map((line) => ({
+        product: products.find((p) => p.id === line.product_details?.id && p.is_active),
+        quantity: line.quantity,
+      }))
+      .filter((l): l is { product: Product; quantity: number } => !!l.product);
+    if (lines.length === 0) return null;
+    const total = lines.reduce((sum, l) => sum + Number(l.product.price) * l.quantity, 0);
+    const first = lines[0];
+    const summary = `${first.quantity} × ${first.product.name}` + (lines.length > 1 ? ` + ${lines.length - 1} more` : '');
+    return { lines, total, summary, day: DAYS[new Date(past.created_at).getDay()] };
+  }, [orders, products]);
+
+  const orderAgain = () => {
+    if (!usual) return;
+    usual.lines.forEach((l) => addToCart(l.product, l.quantity));
+    navigation.navigate('Cart');
+  };
 
   const handleProductPress = (product: Product) => {
     navigation.navigate('ProductDetail', { product });
   };
 
-  const renderProduct = ({ item }: { item: Product }) => (
-    <ProductCard product={item} onPress={handleProductPress} />
-  );
-
-  const renderCategory = ({ item }: { item: Category }) => {
-     const isSelected = selectedCategory === item.id;
-     return (
-       <TouchableOpacity 
-         style={[styles.categoryChip, isSelected && styles.selectedCategoryChip]}
-         onPress={() => setSelectedCategory(isSelected ? undefined : item.id)}
-       >
-         {item.icon && <Ionicons name={item.icon as any} size={16} color={isSelected ? '#fff' : '#333'} style={{marginRight: 4}} />}
-         <Text style={[styles.categoryText, isSelected && styles.selectedCategoryText]}>{item.name}</Text>
-       </TouchableOpacity>
-     );
-  };
+  const handleQuantity = (product: Product, quantity: number) => updateQuantity(product.id, quantity);
 
   if (loading && products.length === 0) {
     return <LoadingScreen message="Loading products…" />;
   }
 
-  if (error) {
+  // A failed refresh must not throw away a catalogue that is already on screen
+  // (and the cart bar with it): the full-screen error is only for a first load
+  // that brought nothing. Otherwise the failure shows as a banner in the list.
+  if (error && products.length === 0) {
     return (
       <View style={styles.centerContainer}>
-        <Text style={styles.errorText}>{error}</Text>
-        <Text style={styles.retryText} onPress={refetch}>{t('tap_retry', 'Tap to retry')}</Text>
+        <Text style={styles.errorText}>{friendlyError(error)}</Text>
+        <TouchableOpacity style={styles.retryBtn} onPress={refetch}>
+          <Text style={styles.retryText}>{t('tap_retry', 'Tap to retry')}</Text>
+        </TouchableOpacity>
       </View>
     );
   }
 
-  return (
-    <SafeAreaView style={styles.container} edges={['left', 'right']}>
-      <View style={styles.headerContainer}>
-        <Text style={styles.header}>{t('latest_products', 'Latest Products')}</Text>
+  const name = user?.first_name || user?.username || '';
+  const cartCount = getCartCount();
+
+  const header = (
+    <View>
+      <View style={styles.greetingRow}>
+        <View style={styles.avatar}>
+          <Text style={styles.avatarText}>{(name[0] || 'C').toUpperCase()}</Text>
+        </View>
+        <View style={styles.greetingText}>
+          <Text style={styles.greetingSmall}>Assalam o Alaikum</Text>
+          <Text style={styles.greeting} numberOfLines={1}>{name ? `Hi, ${name}` : 'Welcome'}</Text>
+        </View>
       </View>
-      
-      <View style={styles.searchContainer}>
+
+      {!!error && (
+        <View style={styles.errorBanner}>
+          <Ionicons name="cloud-offline-outline" size={18} color={colors.danger} />
+          <View style={styles.flex}>
+            <Text style={styles.errorBannerText}>{friendlyError(error)}</Text>
+            <TouchableOpacity onPress={refetch} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={styles.errorBannerLink}>{t('tap_retry', 'Tap to retry')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {/* Only when the cart is empty: adding a whole order on top of a half-built
+          cart would double the quantities. */}
+      {usual && cartCount === 0 && (
+        <View style={styles.usualCard}>
+          <View style={styles.usualCircleBig} />
+          <View style={styles.usualDropWrap}>
+            <Ionicons name="water" size={54} color={colors.white} />
+          </View>
+          <Text style={styles.usualLabel}>YOUR USUAL</Text>
+          <Text style={styles.usualSummary} numberOfLines={2}>{usual.summary}</Text>
+          <Text style={styles.usualSub}>PKR {money(usual.total)} · last ordered {usual.day}</Text>
+          <TouchableOpacity style={styles.usualBtn} onPress={orderAgain} accessibilityLabel="Order again">
+            <Text style={styles.usualBtnText}>Order again</Text>
+            <Ionicons name="arrow-forward" size={18} color={colors.primary} />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {owed != null && (
+        <View style={[styles.balanceTile, owed > 0 ? styles.balanceDue : styles.balanceOk]}>
+          <View style={styles.balanceBody}>
+            <Text style={[styles.balanceLabel, owed > 0 ? { color: colors.warningText } : { color: colors.mintText }]}>BALANCE</Text>
+            <Text style={styles.balanceValue}>
+              {owed > 0 ? `PKR ${money(owed)} due` : owed < 0 ? `PKR ${money(-owed)} in credit` : 'PKR 0'}
+            </Text>
+          </View>
+          {owed <= 0 && (
+            <View style={styles.balanceChip}>
+              <Ionicons name="checkmark" size={15} color={colors.success} />
+              <Text style={styles.balanceChipText}>All settled</Text>
+            </View>
+          )}
+        </View>
+      )}
+
+      <View style={styles.searchBox}>
+        <Ionicons name="search" size={18} color={colors.muted} />
         <TextInput
           style={styles.searchInput}
           placeholder={t('search_placeholder', 'Search products...')}
-          placeholderTextColor="#000"
+          placeholderTextColor={colors.muted}
           value={searchQuery}
           onChangeText={setSearchQuery}
         />
       </View>
 
-      <View style={styles.categoriesContainer}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoriesContent}>
-           <TouchableOpacity 
-             style={[styles.categoryChip, selectedCategory === undefined && styles.selectedCategoryChip]}
-             onPress={() => setSelectedCategory(undefined)}
-           >
-             <Text style={[styles.categoryText, selectedCategory === undefined && styles.selectedCategoryText]}>{t('category_all', 'All')}</Text>
-           </TouchableOpacity>
-           {categories.map(cat => (
-             <TouchableOpacity 
-               key={cat.id}
-               style={[styles.categoryChip, selectedCategory === cat.id && styles.selectedCategoryChip]}
-               onPress={() => setSelectedCategory(selectedCategory === cat.id ? undefined : cat.id)}
-             >
-               <Ionicons name={cat.icon as any || 'pricetag'} size={16} color={selectedCategory === cat.id ? '#fff' : '#333'} style={{marginRight: 4}} />
-               <Text style={[styles.categoryText, selectedCategory === cat.id && styles.selectedCategoryText]}>{t(`category_${cat.slug}`, cat.name)}</Text>
-             </TouchableOpacity>
-           ))}
-        </ScrollView>
-      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+        <TouchableOpacity
+          style={[styles.chip, selectedCategory === undefined && styles.chipActive]}
+          onPress={() => setSelectedCategory(undefined)}
+        >
+          <Text style={[styles.chipText, selectedCategory === undefined && styles.chipTextActive]}>{t('category_all', 'All')}</Text>
+        </TouchableOpacity>
+        {categories.map((cat) => {
+          const active = selectedCategory === cat.id;
+          return (
+            <TouchableOpacity
+              key={cat.id}
+              style={[styles.chip, active && styles.chipActive]}
+              onPress={() => setSelectedCategory(active ? undefined : cat.id)}
+            >
+              <Ionicons name={(cat.icon as any) || 'pricetag'} size={16} color={active ? colors.white : colors.ink} style={{ marginRight: 5 }} />
+              <Text style={[styles.chipText, active && styles.chipTextActive]}>{t(`category_${cat.slug}`, cat.name)}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
 
+  return (
+    <View style={styles.container}>
       <FlatList
         data={filteredProducts}
-        renderItem={renderProduct}
+        renderItem={({ item }) => (
+          <ProductCard
+            product={item}
+            quantity={quantityOf(item.id)}
+            onPress={handleProductPress}
+            onAdd={(p) => addToCart(p, 1)}
+            onChangeQuantity={handleQuantity}
+          />
+        )}
         keyExtractor={(item) => item.id.toString()}
-        numColumns={2}
-        contentContainerStyle={styles.listContent}
-        refreshControl={
-          <RefreshControl refreshing={loading} onRefresh={refetch} />
-        }
+        ListHeaderComponent={header}
+        contentContainerStyle={[styles.listContent, cartCount > 0 && { paddingBottom: 92 }]}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={refetch} colors={[colors.primary]} tintColor={colors.primary} />}
         ListEmptyComponent={
-          <View style={styles.centerContainer}>
-            <Text>{t('no_products_found', 'No products found.')}</Text>
+          <View style={styles.emptyBox}>
+            <Ionicons name="water-outline" size={36} color={colors.disabled} />
+            <Text style={styles.emptyText}>{t('no_products_found', 'No products found.')}</Text>
+            {searchQuery ? (
+              <TouchableOpacity onPress={() => setSearchQuery('')}>
+                <Text style={styles.emptyLink}>Clear search</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         }
       />
-    </SafeAreaView>
+
+      {cartCount > 0 && (
+        <TouchableOpacity style={styles.cartBar} onPress={() => navigation.navigate('Cart')} activeOpacity={0.9} accessibilityLabel="View cart">
+          <Text style={styles.cartBarText} numberOfLines={1}>{cartCount} {cartCount === 1 ? 'item' : 'items'} · PKR {money(getCartTotal())}</Text>
+          <View style={styles.cartBarRight}>
+            <Text style={styles.cartBarAction}>View cart</Text>
+            <Ionicons name="arrow-forward" size={18} color={colors.sun} />
+          </View>
+        </TouchableOpacity>
+      )}
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-    paddingTop: 10,
+  container: { flex: 1, backgroundColor: colors.bg },
+  listContent: { paddingHorizontal: 20, paddingBottom: 24 },
+
+  greetingRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: 4, paddingBottom: 16 },
+  avatar: {
+    width: 46, height: 46, borderRadius: radius.md, backgroundColor: colors.primary,
+    alignItems: 'center', justifyContent: 'center',
   },
-  headerContainer: {
-    paddingHorizontal: 16,
-    marginBottom: 10,
+  avatarText: { color: colors.white, fontSize: 19, fontWeight: '800' },
+  greetingText: { flex: 1 },
+  greetingSmall: { fontSize: 13, color: colors.muted },
+  greeting: { fontSize: 24, fontWeight: '800', color: colors.ink, letterSpacing: -0.3 },
+
+  usualCard: {
+    backgroundColor: colors.primary, borderRadius: radius.xl, padding: 20, marginBottom: 12,
+    overflow: 'hidden', ...shadow.card,
   },
-  header: {
-    fontSize: 24,
-    fontWeight: 'bold',
+  usualCircleBig: {
+    position: 'absolute', right: -40, top: -50, width: 170, height: 170, borderRadius: 85,
+    backgroundColor: 'rgba(255,255,255,0.16)',
   },
-  searchContainer: {
-    paddingHorizontal: 16,
-    marginBottom: 10,
+  usualDropWrap: {
+    position: 'absolute', right: 22, top: 20, width: 84, height: 84, borderRadius: 42,
+    backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center',
   },
-  searchInput: {
-    backgroundColor: 'white',
-    padding: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    fontSize: 16,
-    color: '#000',
+  usualLabel: { fontSize: 12, fontWeight: '800', letterSpacing: 1, color: 'rgba(255,255,255,0.92)' },
+  usualSummary: { fontSize: 26, fontWeight: '800', color: colors.white, marginTop: 4, marginRight: 100, lineHeight: 31 },
+  usualSub: { fontSize: 14, color: 'rgba(255,255,255,0.92)', marginTop: 4 },
+  usualBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start',
+    marginTop: 16, height: 44, paddingHorizontal: 20, borderRadius: radius.md, backgroundColor: colors.white,
   },
-  categoriesContainer: {
-    marginBottom: 10,
+  usualBtnText: { fontSize: 15, fontWeight: '800', color: colors.primary },
+
+  balanceTile: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    borderRadius: radius.xl - 4, paddingVertical: 14, paddingHorizontal: 18, marginBottom: 12,
   },
-  categoriesContent: {
-    paddingHorizontal: 16,
+  balanceBody: { flexShrink: 1, marginRight: 8 },
+  balanceOk: { backgroundColor: colors.mint },
+  balanceDue: { backgroundColor: colors.warningBg, borderWidth: 1, borderColor: colors.warningLine },
+  balanceLabel: { fontSize: 12, fontWeight: '800', letterSpacing: 0.8 },
+  balanceValue: { fontSize: 20, fontWeight: '800', color: colors.ink, marginTop: 1 },
+  balanceChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.white,
+    paddingHorizontal: 12, paddingVertical: 7, borderRadius: radius.pill,
   },
-  categoryChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    marginRight: 8,
-    borderWidth: 1,
-    borderColor: '#ddd',
+  balanceChipText: { fontSize: 13, fontWeight: '800', color: colors.success },
+
+  searchBox: {
+    flexDirection: 'row', alignItems: 'center', gap: 10, height: 50, paddingHorizontal: 16,
+    backgroundColor: colors.surface, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.line,
   },
-  selectedCategoryChip: {
-    backgroundColor: '#007AFF',
-    borderColor: '#007AFF',
+  searchInput: { flex: 1, fontSize: 16, color: colors.ink },
+
+  chips: { paddingVertical: 12, gap: 8 },
+  chip: {
+    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, height: 40, borderRadius: radius.pill,
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line,
   },
-  categoryText: {
-    fontSize: 14,
-    color: '#333',
+  chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  chipText: { fontSize: 14, fontWeight: '700', color: colors.ink },
+  chipTextActive: { color: colors.white },
+
+  cartBar: {
+    position: 'absolute', left: 20, right: 20, bottom: 12, height: 56, borderRadius: radius.lg,
+    backgroundColor: colors.ink, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, ...shadow.float,
   },
-  selectedCategoryText: {
-    color: '#fff',
-    fontWeight: 'bold',
+  cartBarText: { flex: 1, color: colors.white, fontSize: 15, fontWeight: '800', marginRight: 8 },
+  cartBarRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  cartBarAction: { color: colors.sun, fontSize: 15, fontWeight: '800' },
+
+  flex: { flex: 1 },
+  errorBanner: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 10, padding: 12, marginBottom: 12,
+    borderRadius: radius.md, backgroundColor: colors.dangerBg, borderWidth: 1, borderColor: colors.dangerLine,
   },
-  listContent: {
-    paddingHorizontal: 8,
-    paddingBottom: 20,
-  },
-  centerContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  errorText: {
-    color: 'red',
-    fontSize: 16,
-    marginBottom: 10,
-  },
-  retryText: {
-    color: 'blue',
-    textDecorationLine: 'underline',
-  },
+  errorBannerText: { fontSize: 14, color: colors.danger, lineHeight: 20 },
+  errorBannerLink: { fontSize: 14, fontWeight: '800', color: colors.primaryDark, marginTop: 6 },
+
+  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, backgroundColor: colors.bg },
+  errorText: { color: colors.danger, fontSize: 16, marginBottom: 12, textAlign: 'center' },
+  retryBtn: { paddingHorizontal: 22, height: 44, borderRadius: radius.md, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  retryText: { color: colors.white, fontWeight: '800', fontSize: 15 },
+  emptyBox: { alignItems: 'center', paddingTop: 36, gap: 8 },
+  emptyText: { fontSize: 15, color: colors.muted },
+  emptyLink: { fontSize: 15, fontWeight: '800', color: colors.primary },
 });

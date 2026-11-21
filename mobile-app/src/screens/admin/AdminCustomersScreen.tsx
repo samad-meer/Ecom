@@ -1,11 +1,13 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { colors, radius, card, pagePadding } from '../../theme';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
   TextInput, ActivityIndicator, RefreshControl, Modal, Alert,
 } from 'react-native';
 import { LoadingScreen } from '../../components/LoadingScreen';
+import { EmptyState, ErrorState, StatusPill, friendlyError, Tone } from '../../components/ui';
 import { Ionicons } from '@expo/vector-icons';
-import { adminService, AdminCustomer, CustomerStats } from '../../services/adminService';
+import { adminService, AdminCustomer, CustomerStats, Receivable } from '../../services/adminService';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../types/navigation';
@@ -15,128 +17,211 @@ import {
   composeAddress, splitAddress,
 } from '../../components/AddressFields';
 import { matchesCustomerSearch } from '../../utils/customerSearch';
+import { useRefetchOnFocus } from '../../hooks/useRefetchOnFocus';
 import { FieldLabel, PasswordRules, isPasswordValid } from '../../components/FormField';
-import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
+import { KeyboardAwareScrollView, SheetScrollView } from '../../components/KeyboardAwareScrollView';
+
+const money = (n: number) => Math.abs(n).toLocaleString('en-PK', { maximumFractionDigits: 0 });
+
+/** An owed-positive balance as the word, pill tone and amount colour to show. */
+const balanceLook = (owed: number): { label: string; tone: Tone; color: string } => {
+  if (owed > 0) return { label: 'Owes', tone: 'danger', color: colors.danger };
+  if (owed < 0) return { label: 'In credit', tone: 'success', color: colors.success };
+  return { label: 'Settled', tone: 'neutral', color: colors.textSecondary };
+};
+
+/** The server sends field errors as JSON; anything else is plain text. */
+const failureReason = (e: any, prefix: string): string => {
+  const raw = e?.message;
+  try {
+    const parsed = JSON.parse(raw);
+    const text = parsed && typeof parsed === 'object' ? Object.values(parsed).flat().join(' ') : '';
+    if (text) return text;
+  } catch { /* plain text, not JSON */ }
+  return `${prefix}: ${friendlyError(raw)}`;
+};
 
 // ─── Styles (declared first so all components below can reference them) ───────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
-  searchBar: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: 'white', padding: 12,
-    borderBottomWidth: 1, borderBottomColor: '#f0f0f0',
+  container: { flex: 1, backgroundColor: colors.bg },
+  topRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: pagePadding, paddingTop: 12,
   },
-  searchInput: { flex: 1, fontSize: 14, color: '#000' },
+  searchBox: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10,
+    height: 48, paddingHorizontal: 14,
+    backgroundColor: colors.surface, borderRadius: radius.lg,
+    borderWidth: 1, borderColor: colors.line,
+  },
+  searchInput: { flex: 1, fontSize: 14, color: colors.ink },
+  clearBtn: { padding: 4 },
   addBtn: {
-    width: 36, height: 36, borderRadius: 10,
-    backgroundColor: '#007AFF', alignItems: 'center', justifyContent: 'center',
+    width: 48, height: 48, borderRadius: radius.md,
+    backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center',
   },
-  countText: { fontSize: 12, color: '#999', paddingHorizontal: 16, paddingVertical: 6 },
-  row: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: 'white', paddingHorizontal: 16, paddingVertical: 12, gap: 12,
+  countText: {
+    fontSize: 14, fontWeight: '700', color: colors.textSecondary,
+    paddingHorizontal: pagePadding, paddingTop: 14, paddingBottom: 10,
   },
+  list: { paddingHorizontal: pagePadding, paddingBottom: 24, flexGrow: 1 },
+
+  card: { ...card, padding: 16, marginBottom: 12 },
+  cardTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   avatar: {
-    width: 42, height: 42, borderRadius: 21,
-    backgroundColor: '#007AFF20', alignItems: 'center', justifyContent: 'center',
+    width: 48, height: 48, borderRadius: 24,
+    backgroundColor: colors.primaryTint, alignItems: 'center', justifyContent: 'center',
   },
-  avatarText: { fontSize: 18, fontWeight: '700', color: '#007AFF' },
-  rowInfo: { flex: 1, gap: 2 },
-  name: { fontSize: 15, fontWeight: '600', color: '#1a1a1a' },
-  username: { fontSize: 12, color: '#888' },
-  sub: { fontSize: 12, color: '#888', marginTop: 1 },
-  separator: { height: 1, backgroundColor: '#f5f5f5' },
-  emptyText: { fontSize: 15, color: '#aaa' },
+  avatarText: { fontSize: 20, fontWeight: '800', color: colors.primary },
+  cardInfo: { flex: 1, gap: 2 },
+  name: { fontSize: 16, fontWeight: '800', color: colors.ink },
+  username: { fontSize: 14, color: colors.textSecondary },
+  detailRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10 },
+  detailText: { flex: 1, fontSize: 14, color: colors.textSecondary },
+  balanceRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+    marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.lineSoft,
+  },
+  amount: { fontSize: 20, fontWeight: '800', letterSpacing: -0.3 },
+  amountUnit: { fontSize: 12, fontWeight: '700', color: colors.muted },
 });
 
+const inline = StyleSheet.create({
+  box: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    marginHorizontal: pagePadding, marginTop: 12, padding: 12,
+    backgroundColor: colors.dangerBg, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.dangerLine,
+  },
+  textCol: { flex: 1, gap: 2 },
+  title: { fontSize: 14, fontWeight: '800', color: colors.danger },
+  text: { fontSize: 14, color: colors.ink },
+  btn: {
+    height: 40, paddingHorizontal: 14, borderRadius: radius.pill,
+    backgroundColor: colors.danger, alignItems: 'center', justifyContent: 'center',
+  },
+  btnText: { fontSize: 14, fontWeight: '800', color: colors.white },
+});
+
+/** A failed refresh while good data is still on screen: say why, offer a retry. */
+function InlineError({
+  title, message, onRetry, flush,
+}: { title: string; message: string; onRetry: () => void; flush?: boolean }) {
+  return (
+    <View style={[inline.box, flush && { marginHorizontal: 0 }]}>
+      <Ionicons name="alert-circle" size={22} color={colors.danger} />
+      <View style={inline.textCol}>
+        <Text style={inline.title}>{title}</Text>
+        <Text style={inline.text}>{friendlyError(message)}</Text>
+      </View>
+      <TouchableOpacity style={inline.btn} onPress={onRetry} accessibilityLabel="Try again">
+        <Text style={inline.btnText}>Retry</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 const addModal = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  overlay: { flex: 1, backgroundColor: 'rgba(10,31,68,0.45)', justifyContent: 'flex-end' },
   sheet: {
-    backgroundColor: 'white', borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    backgroundColor: colors.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl,
     padding: 20, paddingBottom: 36, maxHeight: '90%',
   },
   header: {
     flexDirection: 'row', justifyContent: 'space-between',
     alignItems: 'center', marginBottom: 16,
   },
-  title: { fontSize: 18, fontWeight: '700', color: '#1a1a1a' },
+  title: { fontSize: 20, fontWeight: '800', color: colors.ink },
   closeBtn: {
-    width: 32, height: 32, borderRadius: 16,
-    backgroundColor: '#f0f0f0', alignItems: 'center', justifyContent: 'center',
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: colors.lineSoft, alignItems: 'center', justifyContent: 'center',
   },
   row: { flexDirection: 'row', gap: 10 },
   field: { marginTop: 14 },
-  sectionTitle: { fontSize: 13, fontWeight: '700', color: '#444', marginBottom: 8 },
-  helper: { fontSize: 12, color: '#888', marginTop: 6, lineHeight: 16 },
+  sectionTitle: { fontSize: 16, fontWeight: '800', color: colors.ink, marginBottom: 8 },
+  helper: { fontSize: 12, color: colors.muted, marginTop: 6, lineHeight: 16 },
   input: {
-    borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 8,
-    padding: 11, fontSize: 14, color: '#000', backgroundColor: '#fafafa',
+    height: 48, borderWidth: 1, borderColor: colors.line, borderRadius: radius.md,
+    paddingHorizontal: 14, fontSize: 16, color: colors.ink, backgroundColor: colors.surfaceTint,
   },
   passwordRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   eyeBtn: {
-    width: 44, height: 44, borderRadius: 8,
-    backgroundColor: '#f0f0f0', alignItems: 'center', justifyContent: 'center',
+    width: 48, height: 48, borderRadius: radius.md,
+    backgroundColor: colors.lineSoft, alignItems: 'center', justifyContent: 'center',
   },
   errorBox: {
-    marginTop: 10, backgroundColor: '#FF3B3010', borderRadius: 8,
-    padding: 10, borderWidth: 1, borderColor: '#FF3B3030',
+    marginTop: 12, backgroundColor: colors.dangerBg, borderRadius: radius.md,
+    padding: 12, borderWidth: 1, borderColor: colors.dangerLine,
   },
-  errorText: { fontSize: 13, color: '#FF3B30' },
+  errorText: { fontSize: 14, color: colors.danger },
   submitBtn: {
-    marginTop: 16, backgroundColor: '#007AFF', borderRadius: 12,
-    paddingVertical: 14, flexDirection: 'row',
-    alignItems: 'center', justifyContent: 'center', gap: 8,
+    marginTop: 16, height: 52, backgroundColor: colors.primary, borderRadius: radius.md,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
   },
-  submitText: { color: 'white', fontSize: 15, fontWeight: '700' },
+  submitText: { color: colors.white, fontSize: 16, fontWeight: '800' },
 });
 
 const modal = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  overlay: { flex: 1, backgroundColor: 'rgba(10,31,68,0.45)', justifyContent: 'flex-end' },
   sheet: {
-    backgroundColor: 'white', borderTopLeftRadius: 20, borderTopRightRadius: 20,
-    padding: 20, paddingBottom: 10, maxHeight: '88%',
+    backgroundColor: colors.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl,
+    padding: 20, paddingBottom: 10, maxHeight: '90%',
   },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
   avatar: {
-    width: 50, height: 50, borderRadius: 25,
-    backgroundColor: '#007AFF20', alignItems: 'center', justifyContent: 'center',
+    width: 52, height: 52, borderRadius: 26,
+    backgroundColor: colors.primaryTint, alignItems: 'center', justifyContent: 'center',
   },
-  avatarText: { fontSize: 22, fontWeight: '700', color: '#007AFF' },
-  name: { fontSize: 18, fontWeight: '700', color: '#1a1a1a' },
-  username: { fontSize: 13, color: '#888', marginTop: 1 },
+  avatarText: { fontSize: 24, fontWeight: '800', color: colors.primary },
+  name: { fontSize: 20, fontWeight: '800', color: colors.ink },
+  username: { fontSize: 14, color: colors.textSecondary, marginTop: 1 },
   closeBtn: {
-    width: 34, height: 34, borderRadius: 17,
-    backgroundColor: '#f0f0f0', alignItems: 'center', justifyContent: 'center',
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: colors.lineSoft, alignItems: 'center', justifyContent: 'center',
   },
-  editLabel: { fontSize: 12, fontWeight: '600', color: '#888', marginTop: 10, marginBottom: 4 },
-  inputRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-  input: {
-    flex: 1, borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 8,
-    padding: 10, fontSize: 14, color: '#000', backgroundColor: '#fafafa',
+
+  balanceCard: {
+    borderRadius: radius.lg, borderWidth: 1, padding: 16,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12,
   },
-  saveBtn: {
-    marginTop: 12, backgroundColor: '#007AFF', borderRadius: 10,
-    paddingVertical: 12, alignItems: 'center',
-  },
-  saveBtnText: { color: 'white', fontSize: 14, fontWeight: '700' },
-  divider: { height: 1, backgroundColor: '#f0f0f0', marginVertical: 14 },
-  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  balanceLabel: { fontSize: 14, fontWeight: '700', color: colors.textSecondary, marginBottom: 6 },
+  balanceAmount: { fontSize: 24, fontWeight: '800', letterSpacing: -0.3 },
+  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 10 },
   statCell: {
-    width: '47%', backgroundColor: '#f7f8fa',
-    borderRadius: 12, padding: 14, alignItems: 'center',
+    width: '48%', flexGrow: 1, backgroundColor: colors.surfaceTint,
+    borderRadius: radius.md, borderWidth: 1, borderColor: colors.line,
+    padding: 14, alignItems: 'center',
   },
-  statValue: { fontSize: 20, fontWeight: '700', color: '#1a1a1a' },
-  statLabel: { fontSize: 11, color: '#888', marginTop: 3, textAlign: 'center' },
+  statValue: { fontSize: 20, fontWeight: '800', color: colors.ink },
+  statValueSmall: { fontSize: 16, fontWeight: '800', color: colors.ink, paddingVertical: 2 },
+  statLabel: { fontSize: 12, fontWeight: '700', color: colors.muted, marginTop: 4, textAlign: 'center' },
+
   actionRow: { flexDirection: 'row', gap: 10, marginTop: 16 },
   actionBtn: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 7, paddingVertical: 12, borderRadius: 10, borderWidth: 1,
+    flex: 1, height: 50, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 8, borderRadius: radius.md,
   },
-  ledgerBtn: { borderColor: '#007AFF40', backgroundColor: '#007AFF10' },
-  waBtn: { borderColor: '#25D36640', backgroundColor: '#25D36610' },
-  actionText: { fontSize: 14, fontWeight: '700' },
+  ledgerBtn: { borderWidth: 1.5, borderColor: colors.primary, backgroundColor: colors.surface },
+  waBtn: { backgroundColor: colors.whatsapp },
+  actionText: { fontSize: 14, fontWeight: '800' },
+
+  section: {
+    marginTop: 20, padding: 16, borderRadius: radius.lg,
+    backgroundColor: colors.surfaceTint, borderWidth: 1, borderColor: colors.line,
+  },
+  sectionTitle: { fontSize: 16, fontWeight: '800', color: colors.ink },
+  editLabel: { fontSize: 14, fontWeight: '700', color: colors.textSecondary, marginTop: 12, marginBottom: 6 },
+  inputRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  input: {
+    flex: 1, height: 48, borderWidth: 1, borderColor: colors.line, borderRadius: radius.md,
+    paddingHorizontal: 14, fontSize: 16, color: colors.ink, backgroundColor: colors.surface,
+  },
+  saveBtn: {
+    marginTop: 16, height: 50, backgroundColor: colors.primary, borderRadius: radius.md,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  saveBtnText: { color: colors.white, fontSize: 16, fontWeight: '800' },
 });
 
 // ─── Add Customer Modal ───────────────────────────────────────────────────────
@@ -220,9 +305,7 @@ function AddCustomerModal({
         );
       }
     } catch (e: any) {
-      let msg = 'Failed to create customer.';
-      try { const parsed = JSON.parse(e.message); msg = Object.values(parsed).flat().join(' '); } catch {}
-      setError(msg);
+      setError(failureReason(e, 'Failed to create customer'));
     } finally {
       setSaving(false);
     }
@@ -235,24 +318,24 @@ function AddCustomerModal({
           <View style={addModal.header}>
             <Text style={addModal.title}>Add Customer</Text>
             <TouchableOpacity onPress={() => { reset(); onClose(); }} style={addModal.closeBtn}>
-              <Ionicons name="close" size={20} color="#555" />
+              <Ionicons name="close" size={20} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
 
-          <KeyboardAwareScrollView showsVerticalScrollIndicator={false} extraBottomSpace={28}>
+          <SheetScrollView showsVerticalScrollIndicator={false} extraBottomSpace={28}>
             <View style={addModal.row}>
               <View style={{ flex: 1 }}>
                 <FieldLabel text="First Name" />
                 <TextInput
                   style={addModal.input} value={form.first_name} onChangeText={set('first_name')}
-                  placeholder="Ali" placeholderTextColor="#000"
+                  placeholder="Ali" placeholderTextColor={colors.muted}
                 />
               </View>
               <View style={{ flex: 1 }}>
                 <FieldLabel text="Last Name" />
                 <TextInput
                   style={addModal.input} value={form.last_name} onChangeText={set('last_name')}
-                  placeholder="Hassan" placeholderTextColor="#000"
+                  placeholder="Hassan" placeholderTextColor={colors.muted}
                 />
               </View>
             </View>
@@ -261,7 +344,7 @@ function AddCustomerModal({
               <FieldLabel text="Username" required />
               <TextInput
                 style={addModal.input} value={form.username} onChangeText={set('username')}
-                placeholder="alihassan" placeholderTextColor="#000"
+                placeholder="alihassan" placeholderTextColor={colors.muted}
                 autoCapitalize="none" autoCorrect={false}
               />
             </View>
@@ -270,7 +353,7 @@ function AddCustomerModal({
               <FieldLabel text="Phone" />
               <TextInput
                 style={addModal.input} value={form.phone_number} onChangeText={set('phone_number')}
-                placeholder="03xx-xxxxxxx" placeholderTextColor="#000" keyboardType="phone-pad"
+                placeholder="03xx-xxxxxxx" placeholderTextColor={colors.muted} keyboardType="phone-pad"
               />
             </View>
 
@@ -290,12 +373,12 @@ function AddCustomerModal({
                 <TextInput
                   style={[addModal.input, { flex: 1 }]}
                   value={form.password} onChangeText={set('password')}
-                  placeholder="Leave blank — no sign-in" placeholderTextColor="#000"
+                  placeholder="Leave blank — no sign-in" placeholderTextColor={colors.muted}
                   secureTextEntry={!showPassword}
                   autoCapitalize="none" autoCorrect={false}
                 />
                 <TouchableOpacity onPress={() => setShowPassword(v => !v)} style={addModal.eyeBtn}>
-                  <Ionicons name={showPassword ? 'eye-off' : 'eye'} size={18} color="#888" />
+                  <Ionicons name={showPassword ? 'eye-off' : 'eye'} size={18} color={colors.muted} />
                 </TouchableOpacity>
               </View>
               <Text style={addModal.helper}>
@@ -318,16 +401,16 @@ function AddCustomerModal({
               disabled={saving || passwordUnusable}
             >
               {saving
-                ? <ActivityIndicator size="small" color="white" />
+                ? <ActivityIndicator size="small" color={colors.white} />
                 : (
                   <>
-                    <Ionicons name="person-add" size={18} color="white" />
+                    <Ionicons name="person-add" size={18} color={colors.white} />
                     <Text style={addModal.submitText}>Create Account</Text>
                   </>
                 )
               }
             </TouchableOpacity>
-          </KeyboardAwareScrollView>
+          </SheetScrollView>
         </View>
       </View>
     </Modal>
@@ -346,6 +429,8 @@ function CustomerStatsModal({
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [stats, setStats] = useState<CustomerStats | null>(null);
   const [loading, setLoading] = useState(false);
+  const [statsError, setStatsError] = useState<string | null>(null);
+  const [statsReload, setStatsReload] = useState(0);
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState<AddressParts>(EMPTY_ADDRESS);
   const [addressErrors, setAddressErrors] = useState<Partial<Record<keyof AddressParts, string>>>({});
@@ -368,12 +453,23 @@ function CustomerStatsModal({
         : splitAddress(customer.address),
     );
     setAddressErrors({});
+  }, [customer]);
+
+  // Separate from the form reset above so a retry never wipes unsaved edits.
+  useEffect(() => {
+    if (!customer) return;
+    let live = true;
+    // Drop the previous customer's figures: a failed load must not leave
+    // someone else's balance on screen.
+    setStats(null);
+    setStatsError(null);
     setLoading(true);
     adminService.getCustomerStats(customer.id)
-      .then(setStats)
-      .catch(() => null)
-      .finally(() => setLoading(false));
-  }, [customer]);
+      .then(s => { if (live) setStats(s); })
+      .catch((e: any) => { if (live) setStatsError(e?.message || 'Could not load order stats.'); })
+      .finally(() => { if (live) setLoading(false); });
+    return () => { live = false; };
+  }, [customer, statsReload]);
 
   if (!customer) return null;
 
@@ -407,7 +503,7 @@ function CustomerStatsModal({
       onUpdated?.();
       onClose();
     } catch (e: any) {
-      Alert.alert('Error', e.message || 'Failed to update.');
+      Alert.alert('Error', failureReason(e, 'Failed to update'));
     } finally { setSaving(false); }
   };
 
@@ -418,9 +514,16 @@ function CustomerStatsModal({
     : '—';
 
   const balanceNum = stats?.account_balance ?? null;
-  const balanceColor = balanceNum === null
-    ? '#888'
-    : balanceNum < 0 ? '#FF3B30' : balanceNum > 0 ? '#34C759' : '#888';
+  // stats.account_balance is credit-positive, so what is owed is its negative.
+  const look = balanceNum === null ? null : balanceLook(-balanceNum);
+  const lookBg = !look ? colors.surfaceTint
+    : look.tone === 'danger' ? colors.dangerBg
+    : look.tone === 'success' ? colors.successBg
+    : colors.surfaceTint;
+  const lookLine = !look ? colors.line
+    : look.tone === 'danger' ? colors.dangerLine
+    : look.tone === 'success' ? colors.successBg
+    : colors.line;
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
@@ -429,88 +532,59 @@ function CustomerStatsModal({
           {/* Header */}
           <View style={modal.header}>
             <View style={modal.avatar}>
-              <Text style={modal.avatarText}>{customer.name.charAt(0).toUpperCase()}</Text>
+              <Text style={modal.avatarText}>{(customer.name || customer.username || '?').charAt(0).toUpperCase()}</Text>
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={modal.name}>{customer.name}</Text>
+              <Text style={modal.name} numberOfLines={1}>{customer.name}</Text>
               <Text style={modal.username}>@{customer.username}</Text>
             </View>
-            <TouchableOpacity onPress={onClose} style={modal.closeBtn}>
-              <Ionicons name="close" size={20} color="#555" />
+            <TouchableOpacity onPress={onClose} style={modal.closeBtn} accessibilityLabel="Close">
+              <Ionicons name="close" size={20} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
 
-          <KeyboardAwareScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            {/* Editable contact fields */}
-            <Text style={modal.editLabel}>Phone</Text>
-            <View style={modal.inputRow}>
-              <Ionicons name="call-outline" size={15} color="#888" style={{ marginTop: 12 }} />
-              <TextInput
-                style={modal.input}
-                value={phone}
-                onChangeText={setPhone}
-                placeholder="03xx-xxxxxxx"
-                placeholderTextColor="#000"
-                keyboardType="phone-pad"
-              />
-            </View>
-
-            <View style={{ marginTop: 4 }}>
-              <AddressFields
-                value={address}
-                onChange={setAddress}
-                errors={addressErrors}
-                hint="Leave every part blank if the address is not known yet."
-              />
-            </View>
-
-            {changed && (
-              <TouchableOpacity
-                style={[modal.saveBtn, saving && { opacity: 0.5 }]}
-                onPress={save}
-                disabled={saving}
-              >
-                {saving
-                  ? <ActivityIndicator size="small" color="white" />
-                  : <Text style={modal.saveBtnText}>Save Changes</Text>
-                }
-              </TouchableOpacity>
-            )}
-
-            <View style={modal.divider} />
-
-            {/* Order stats */}
+          <SheetScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            {/* Balance and order stats */}
             {loading ? (
-              <ActivityIndicator size="small" color="#007AFF" style={{ marginVertical: 20 }} />
+              <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: 20 }} />
+            ) : statsError ? (
+              <InlineError
+                flush
+                title="Could not load balance and orders"
+                message={statsError}
+                onRetry={() => setStatsReload(n => n + 1)}
+              />
             ) : stats ? (
-              <View style={modal.statsGrid}>
-                <View style={modal.statCell}>
-                  <Text style={modal.statValue}>{stats.total_orders}</Text>
-                  <Text style={modal.statLabel}>Total Orders</Text>
+              <>
+                <View style={[modal.balanceCard, { backgroundColor: lookBg, borderColor: lookLine }]}>
+                  <View>
+                    <Text style={modal.balanceLabel}>Account balance</Text>
+                    <Text style={[modal.balanceAmount, { color: look ? look.color : colors.textSecondary }]}>
+                      {balanceNum === null ? '—' : `PKR ${money(balanceNum)}`}
+                    </Text>
+                  </View>
+                  {look && <StatusPill label={look.label} tone={look.tone} />}
                 </View>
-                <View style={modal.statCell}>
-                  <Text style={modal.statValue}>{stats.delivered_count}</Text>
-                  <Text style={modal.statLabel}>Delivered</Text>
+
+                <View style={modal.statsGrid}>
+                  <View style={modal.statCell}>
+                    <Text style={modal.statValue}>{stats.total_orders}</Text>
+                    <Text style={modal.statLabel}>Total Orders</Text>
+                  </View>
+                  <View style={modal.statCell}>
+                    <Text style={modal.statValue}>{stats.delivered_count}</Text>
+                    <Text style={modal.statLabel}>Delivered</Text>
+                  </View>
+                  <View style={modal.statCell}>
+                    <Text style={modal.statValue}>{stats.total_bottles}</Text>
+                    <Text style={modal.statLabel}>Bottles</Text>
+                  </View>
+                  <View style={modal.statCell}>
+                    <Text style={modal.statValueSmall}>{lastDate}</Text>
+                    <Text style={modal.statLabel}>Last Order</Text>
+                  </View>
                 </View>
-                <View style={modal.statCell}>
-                  <Text style={modal.statValue}>{stats.total_bottles}</Text>
-                  <Text style={modal.statLabel}>Bottles</Text>
-                </View>
-                <View style={modal.statCell}>
-                  <Text style={modal.statValue}>{lastDate}</Text>
-                  <Text style={modal.statLabel}>Last Order</Text>
-                </View>
-                <View style={[modal.statCell, { width: '100%' }]}>
-                  <Text style={[modal.statValue, { color: balanceColor }]}>
-                    {balanceNum === null
-                      ? '—'
-                      : `${balanceNum >= 0 ? '+' : ''}PKR ${Math.abs(balanceNum).toLocaleString()}`}
-                  </Text>
-                  <Text style={modal.statLabel}>
-                    {balanceNum === null ? 'Balance' : balanceNum < 0 ? 'Owes' : 'Credit'}
-                  </Text>
-                </View>
-              </View>
+              </>
             ) : null}
 
             {/* Ledger + WhatsApp actions */}
@@ -525,8 +599,8 @@ function CustomerStatsModal({
                   });
                 }}
               >
-                <Ionicons name="book-outline" size={17} color="#007AFF" />
-                <Text style={[modal.actionText, { color: '#007AFF' }]}>View Ledger</Text>
+                <Ionicons name="book-outline" size={18} color={colors.primary} />
+                <Text style={[modal.actionText, { color: colors.primary }]}>View Ledger</Text>
               </TouchableOpacity>
 
               {canWhatsApp(phone) && (
@@ -539,14 +613,54 @@ function CustomerStatsModal({
                     balance: balanceNum === null ? 0 : -balanceNum,
                   }))}
                 >
-                  <Ionicons name="logo-whatsapp" size={17} color="#25D366" />
-                  <Text style={[modal.actionText, { color: '#25D366' }]}>WhatsApp</Text>
+                  <Ionicons name="logo-whatsapp" size={18} color={colors.ink} />
+                  <Text style={[modal.actionText, { color: colors.ink }]}>WhatsApp</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* Editable contact fields */}
+            <View style={modal.section}>
+              <Text style={modal.sectionTitle}>Contact and address</Text>
+
+              <Text style={modal.editLabel}>Phone</Text>
+              <View style={modal.inputRow}>
+                <Ionicons name="call-outline" size={18} color={colors.muted} />
+                <TextInput
+                  style={modal.input}
+                  value={phone}
+                  onChangeText={setPhone}
+                  placeholder="03xx-xxxxxxx"
+                  placeholderTextColor={colors.muted}
+                  keyboardType="phone-pad"
+                />
+              </View>
+
+              <View style={{ marginTop: 4 }}>
+                <AddressFields
+                  value={address}
+                  onChange={setAddress}
+                  errors={addressErrors}
+                  hint="Leave every part blank if the address is not known yet."
+                />
+              </View>
+
+              {changed && (
+                <TouchableOpacity
+                  style={[modal.saveBtn, saving && { opacity: 0.5 }]}
+                  onPress={save}
+                  disabled={saving}
+                >
+                  {saving
+                    ? <ActivityIndicator size="small" color={colors.white} />
+                    : <Text style={modal.saveBtnText}>Save Changes</Text>
+                  }
                 </TouchableOpacity>
               )}
             </View>
 
             <View style={{ height: 16 }} />
-          </KeyboardAwareScrollView>
+          </SheetScrollView>
         </View>
       </View>
     </Modal>
@@ -557,26 +671,58 @@ function CustomerStatsModal({
 
 export const AdminCustomersScreen: React.FC = () => {
   const [customers, setCustomers] = useState<AdminCustomer[]>([]);
+  // Owed-positive ledger figures by customer id. Missing entries simply show no
+  // balance on the card; they are never guessed.
+  const [balances, setBalances] = useState<Record<number, Receivable>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<AdminCustomer | null>(null);
   const [addOpen, setAddOpen] = useState(false);
 
+  // A late answer from an older load must not overwrite a newer one.
+  const requestId = useRef(0);
+
   const load = useCallback(async (isRefresh = false) => {
+    const id = ++requestId.current;
     if (!isRefresh) setLoading(true);
+    setError(null);
+
+    // Balances are a bonus on each card, so they are fetched on their own and
+    // never awaited by the list. The ledger call has no timeout and can be slow
+    // or refused (an admin without ledger access): waiting for it, or letting
+    // its failure through, would hold up or break the customer list. The cards
+    // simply fill in with balances when it answers, and stay as they are if not.
+    adminService.getReceivables({ limit: 500 })
+      .then(r => {
+        if (id !== requestId.current) return;
+        const byId: Record<number, Receivable> = {};
+        (r?.results || []).forEach(row => { byId[row.id] = row; });
+        setBalances(byId);
+      })
+      .catch(() => { /* no balances this time; the list is unaffected */ });
+
     try {
       const data = await adminService.getCustomers();
+      if (id !== requestId.current) return;
       setCustomers(data);
-    } catch {
-      // silent
+    } catch (e: any) {
+      if (id !== requestId.current) return;
+      setError(e?.message || 'Could not load customers.');
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (id === requestId.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // A payment recorded in the ledger changes a balance shown on these cards, so
+  // coming back here must re-read them. Silent: the list stays on screen.
+  useRefetchOnFocus(() => load(true));
 
   // Multi-word, digit-tolerant on phones, and aware of the structured address
   // parts. Same rules as the server's search and the web admin's.
@@ -584,66 +730,127 @@ export const AdminCustomersScreen: React.FC = () => {
     ? customers.filter(c => matchesCustomerSearch(c, search))
     : customers;
 
+  const renderItem = ({ item }: { item: AdminCustomer }) => {
+    const receivable = balances[item.id];
+    const owed = receivable ? Number(receivable.balance) : null;
+    const look = owed !== null && Number.isFinite(owed) ? balanceLook(owed) : null;
+    return (
+      <TouchableOpacity style={styles.card} onPress={() => setSelected(item)} activeOpacity={0.85}>
+        <View style={styles.cardTop}>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{(item.name || item.username || '?').charAt(0).toUpperCase()}</Text>
+          </View>
+          <View style={styles.cardInfo}>
+            <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
+            <Text style={styles.username} numberOfLines={1}>
+              @{item.username}{receivable?.customer_code ? ` · #${receivable.customer_code}` : ''}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+        </View>
+
+        {item.phone ? (
+          <View style={styles.detailRow}>
+            <Ionicons name="call-outline" size={16} color={colors.muted} />
+            <Text style={styles.detailText} numberOfLines={1}>{item.phone}</Text>
+          </View>
+        ) : null}
+        {item.address ? (
+          <View style={[styles.detailRow, { marginTop: item.phone ? 4 : 10 }]}>
+            <Ionicons name="location-outline" size={16} color={colors.muted} />
+            <Text style={styles.detailText} numberOfLines={1}>{item.address}</Text>
+          </View>
+        ) : null}
+
+        {look && owed !== null ? (
+          <View style={styles.balanceRow}>
+            <StatusPill label={look.label} tone={look.tone} />
+            <Text style={[styles.amount, { color: look.color }]}>
+              <Text style={styles.amountUnit}>PKR </Text>{money(owed)}
+            </Text>
+          </View>
+        ) : null}
+      </TouchableOpacity>
+    );
+  };
+
   return (
     <View style={styles.container}>
       {/* Search + Add button */}
-      <View style={styles.searchBar}>
-        <Ionicons name="search" size={16} color="#888" />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search by name, phone, address…"
-          value={search}
-          onChangeText={setSearch}
-          placeholderTextColor="#000"
-        />
-        {search.length > 0 && (
-          <TouchableOpacity onPress={() => setSearch('')}>
-            <Ionicons name="close-circle" size={16} color="#888" />
-          </TouchableOpacity>
-        )}
-        <TouchableOpacity style={styles.addBtn} onPress={() => setAddOpen(true)}>
-          <Ionicons name="person-add" size={18} color="white" />
+      <View style={styles.topRow}>
+        <View style={styles.searchBox}>
+          <Ionicons name="search" size={18} color={colors.muted} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search by name, phone, address…"
+            value={search}
+            onChangeText={setSearch}
+            placeholderTextColor={colors.muted}
+          />
+          {search.length > 0 && (
+            <TouchableOpacity
+              onPress={() => setSearch('')}
+              style={styles.clearBtn}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              accessibilityLabel="Clear search"
+            >
+              <Ionicons name="close-circle" size={18} color={colors.muted} />
+            </TouchableOpacity>
+          )}
+        </View>
+        <TouchableOpacity style={styles.addBtn} onPress={() => setAddOpen(true)} accessibilityLabel="Add customer">
+          <Ionicons name="person-add" size={20} color={colors.white} />
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.countText}>{filtered.length} customers</Text>
+      {!(error && customers.length === 0) && (
+        <Text style={styles.countText}>
+          {filtered.length} {filtered.length === 1 ? 'customer' : 'customers'}
+        </Text>
+      )}
 
       {loading ? (
         <LoadingScreen message="Loading customers…" />
+      ) : error && customers.length === 0 ? (
+        <ErrorState title="Could not load customers" message={error} onRetry={() => load()} />
       ) : (
-        <FlatList
-          data={filtered}
-          keyExtractor={c => String(c.id)}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} />
-          }
-          renderItem={({ item }) => (
-            <TouchableOpacity style={styles.row} onPress={() => setSelected(item)}>
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>{item.name.charAt(0).toUpperCase()}</Text>
-              </View>
-              <View style={styles.rowInfo}>
-                <Text style={styles.name}>{item.name}</Text>
-                <Text style={styles.username}>@{item.username}</Text>
-                {item.phone && (
-                  <Text style={styles.sub}>📞 {item.phone}</Text>
-                )}
-                {item.address && (
-                  <Text style={styles.sub} numberOfLines={1}>📍 {item.address}</Text>
-                )}
-              </View>
-              <Ionicons name="chevron-forward" size={16} color="#ccc" />
-            </TouchableOpacity>
-          )}
-          ItemSeparatorComponent={() => <View style={styles.separator} />}
-          ListEmptyComponent={
-            <View style={styles.center}>
-              <Ionicons name="people-outline" size={48} color="#ccc" />
-              <Text style={styles.emptyText}>No customers found</Text>
-            </View>
-          }
-          contentContainerStyle={filtered.length === 0 ? { flex: 1 } : { paddingBottom: 24 }}
-        />
+        <>
+          {/* A failed refresh keeps the last good list and says why. */}
+          {error ? (
+            <InlineError title="Could not refresh customers" message={error} onRetry={() => load(true)} />
+          ) : null}
+          <FlatList
+            data={filtered}
+            extraData={balances}
+            keyExtractor={c => String(c.id)}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={() => { setRefreshing(true); load(true); }}
+                colors={[colors.primary]}
+                tintColor={colors.primary}
+              />
+            }
+            renderItem={renderItem}
+            ListEmptyComponent={
+              search ? (
+                <EmptyState
+                  icon="search-outline"
+                  title="No customers match"
+                  text="Try a different name, phone number or part of the address."
+                />
+              ) : (
+                <EmptyState
+                  icon="people-outline"
+                  title="No customers yet"
+                  text="Customers you add, or who sign up in the app, will appear here."
+                />
+              )
+            }
+            contentContainerStyle={styles.list}
+            keyboardShouldPersistTaps="handled"
+          />
+        </>
       )}
 
       <CustomerStatsModal

@@ -1,12 +1,14 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
-  TextInput, ActivityIndicator, RefreshControl, Alert,
+  TextInput, RefreshControl,
 } from 'react-native';
 import { LoadingScreen } from '../../components/LoadingScreen';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
+import { colors, radius, fontSize, card, pagePadding } from '../../theme';
+import { ErrorState, EmptyState, StatusPill, orderStatusTone, friendlyError } from '../../components/ui';
 import { adminService, AdminOrder, DeliveryBoy } from '../../services/adminService';
 import { useRefetchOnFocus } from '../../hooks/useRefetchOnFocus';
 import { RootStackParamList, AdminTabParamList } from '../../types/navigation';
@@ -15,51 +17,43 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 const STATUS_FILTERS = ['All', 'Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled'];
 
-const STATUS_COLORS: Record<string, string> = {
-  Pending: '#FF9500',
-  Processing: '#5856D6',
-  Shipped: '#32ADE6',
-  Delivered: '#34C759',
-  Cancelled: '#FF3B30',
-};
-
-function StatusBadge({ status }: { status: string }) {
-  const color = STATUS_COLORS[status] || '#888';
-  return (
-    <View style={[styles.badge, { backgroundColor: color + '20', borderColor: color + '50' }]}>
-      <Text style={[styles.badgeText, { color }]}>{status}</Text>
-    </View>
-  );
-}
-
-function OrderRow({ order, onPress }: { order: AdminOrder; onPress: () => void }) {
+function OrderCard({ order, onPress }: { order: AdminOrder; onPress: () => void }) {
   const date = new Date(order.created_at).toLocaleDateString('en-PK', {
     day: 'numeric', month: 'short',
   });
   return (
     <TouchableOpacity
-      style={[styles.orderRow, order.is_hidden && styles.orderRowHidden]}
+      style={[styles.card, order.is_hidden && styles.cardHidden]}
       onPress={onPress}
+      activeOpacity={0.85}
+      accessibilityRole="button"
+      accessibilityLabel={`Order ${order.id}, ${order.customer_name}, ${order.status}, ${order.is_paid ? 'paid' : 'unpaid'}`}
     >
-      <View style={styles.orderRowLeft}>
-        <Text style={styles.orderId}>#{order.id}</Text>
-        <Text style={styles.orderDate}>{date}</Text>
-      </View>
-      <View style={styles.orderRowMid}>
-        <Text style={styles.customerName} numberOfLines={1}>
-          {order.customer_name}
-          {order.guest_name ? ' 📞' : ''}
-        </Text>
-        <Text style={styles.orderAddress} numberOfLines={1}>{order.shipping_address}</Text>
-      </View>
-      <View style={styles.orderRowRight}>
+      <View style={styles.cardTop}>
+        <View style={styles.cardInfo}>
+          <View style={styles.nameRow}>
+            <Text style={styles.customerName} numberOfLines={1}>{order.customer_name}</Text>
+            {/* Phone marker: a call-in guest, not a registered account. */}
+            {!!order.guest_name && <Ionicons name="call" size={14} color={colors.primary} />}
+          </View>
+          <Text style={styles.orderMeta}>#{order.id} · {date}</Text>
+        </View>
         <Text style={styles.orderTotal}>PKR {Number(order.total_price).toLocaleString()}</Text>
-        <StatusBadge status={order.status} />
-        {order.is_paid ? (
-          <Text style={styles.paidTag}>✓ Paid</Text>
-        ) : (
-          <Text style={styles.unpaidTag}>Unpaid</Text>
-        )}
+      </View>
+
+      <View style={styles.addressRow}>
+        <Ionicons name="location-outline" size={16} color={colors.muted} style={styles.addressIcon} />
+        <Text style={styles.orderAddress} numberOfLines={2}>{order.shipping_address || '—'}</Text>
+      </View>
+
+      <View style={styles.pillRow}>
+        <StatusPill label={order.status} tone={orderStatusTone(order.status)} />
+        <StatusPill
+          label={order.is_paid ? 'Paid' : 'Unpaid'}
+          tone={order.is_paid ? 'success' : 'danger'}
+          icon={order.is_paid ? 'checkmark-circle' : 'alert-circle'}
+        />
+        {order.is_hidden && <StatusPill label="Hidden" tone="neutral" icon="eye-off" />}
       </View>
     </TouchableOpacity>
   );
@@ -73,12 +67,15 @@ export const AdminOrdersScreen: React.FC = () => {
   const [deliveryBoys, setDeliveryBoys] = useState<DeliveryBoy[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState(route.params?.initialStatus ?? 'All');
   const [paidFilter, setPaidFilter] = useState<boolean | null>(
     route.params?.initialPaid !== undefined ? (route.params.initialPaid ?? null) : null,
   );
   const [showHidden, setShowHidden] = useState(false);
+  // A late answer for an old filter must not overwrite the current list.
+  const requestId = useRef(0);
 
   // Sync when navigated from dashboard with new params
   useEffect(() => {
@@ -91,7 +88,9 @@ export const AdminOrdersScreen: React.FC = () => {
   }, [route.params]);
 
   const load = useCallback(async (isRefresh = false) => {
+    const id = ++requestId.current;
     if (!isRefresh) setLoading(true);
+    setError(null);
     try {
       const [orderData, riders] = await Promise.all([
         adminService.getOrders({
@@ -102,13 +101,20 @@ export const AdminOrdersScreen: React.FC = () => {
         }),
         adminService.getDeliveryBoys(),
       ]);
+      if (id !== requestId.current) return;
       setOrders(orderData);
       setDeliveryBoys(riders);
-    } catch (e) {
-      Alert.alert('Error', 'Failed to load orders.');
+    } catch (e: any) {
+      if (id !== requestId.current) return;
+      setError(e?.message || 'Could not load orders.');
+      // A refresh keeps the last good list on screen; a new filter must not
+      // keep showing the previous filter's orders under the wrong chip.
+      if (!isRefresh) setOrders([]);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (id === requestId.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [statusFilter, search, paidFilter, showHidden]);
 
@@ -121,12 +127,14 @@ export const AdminOrdersScreen: React.FC = () => {
 
   const onRefresh = () => { setRefreshing(true); load(true); };
 
+  const filtersActive = search.trim().length > 0 || statusFilter !== 'All' || paidFilter !== null || showHidden;
+
   return (
     <View style={styles.container}>
       {/* Search */}
       <View style={styles.searchRow}>
         <View style={styles.searchBox}>
-          <Ionicons name="search" size={16} color="#888" />
+          <Ionicons name="search" size={18} color={colors.muted} />
           <TextInput
             style={styles.searchInput}
             placeholder="Customer, phone, address…"
@@ -134,172 +142,186 @@ export const AdminOrdersScreen: React.FC = () => {
             onChangeText={setSearch}
             returnKeyType="search"
             onSubmitEditing={() => load()}
-            placeholderTextColor="#000"
+            placeholderTextColor={colors.muted}
           />
           {search.length > 0 && (
-            <TouchableOpacity onPress={() => setSearch('')}>
-              <Ionicons name="close-circle" size={16} color="#888" />
+            <TouchableOpacity
+              onPress={() => setSearch('')}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              accessibilityLabel="Clear search"
+            >
+              <Ionicons name="close-circle" size={18} color={colors.muted} />
             </TouchableOpacity>
           )}
         </View>
         <TouchableOpacity
-          style={[styles.hiddenBtn, showHidden && styles.hiddenBtnActive]}
+          style={[styles.iconBtn, showHidden && styles.iconBtnActive]}
           onPress={() => setShowHidden(v => !v)}
+          accessibilityLabel={showHidden ? 'Hide hidden orders' : 'Show hidden orders'}
         >
-          <Ionicons name={showHidden ? 'eye' : 'eye-off'} size={18} color={showHidden ? '#FF9500' : '#888'} />
+          <Ionicons name={showHidden ? 'eye' : 'eye-off'} size={20} color={showHidden ? colors.warningText : colors.muted} />
         </TouchableOpacity>
         <TouchableOpacity
-          style={styles.newOrderBtn}
+          style={[styles.iconBtn, styles.newOrderBtn]}
           onPress={() => navigation.navigate('AdminCreateOrder')}
+          accessibilityLabel="Create a new order"
         >
-          <Ionicons name="add" size={20} color="white" />
+          <Ionicons name="add" size={24} color={colors.white} />
         </TouchableOpacity>
       </View>
 
-      {/* Status filter chips + paid filter */}
-      <View style={styles.filterRow}>
-        <FlatList
-          data={STATUS_FILTERS}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          keyExtractor={s => s}
-          contentContainerStyle={styles.chipList}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={[styles.chip, statusFilter === item && styles.chipActive]}
-              onPress={() => setStatusFilter(item)}
-            >
-              <Text style={[styles.chipText, statusFilter === item && styles.chipTextActive]}>
-                {item}
-              </Text>
-            </TouchableOpacity>
-          )}
-        />
-        {/* Paid / Unpaid toggle */}
-        <View style={styles.paidFilterRow}>
+      {/* Status filter chips */}
+      <FlatList
+        data={STATUS_FILTERS}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        keyExtractor={s => s}
+        style={styles.chipScroll}
+        contentContainerStyle={styles.chipList}
+        renderItem={({ item }) => (
           <TouchableOpacity
-            style={[styles.paidChip, paidFilter === true && styles.paidChipActive]}
-            onPress={() => setPaidFilter(v => v === true ? null : true)}
+            style={[styles.chip, statusFilter === item && styles.chipActive]}
+            onPress={() => setStatusFilter(item)}
           >
-            <Ionicons name="card" size={12} color={paidFilter === true ? 'white' : '#34C759'} />
-            <Text style={[styles.paidChipText, paidFilter === true && { color: 'white' }]}>Paid</Text>
+            <Text style={[styles.chipText, statusFilter === item && styles.chipTextActive]}>
+              {item}
+            </Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.unpaidChip, paidFilter === false && styles.unpaidChipActive]}
-            onPress={() => setPaidFilter(v => v === false ? null : false)}
-          >
-            <Ionicons name="alert-circle" size={12} color={paidFilter === false ? 'white' : '#FF3B30'} />
-            <Text style={[styles.unpaidChipText, paidFilter === false && { color: 'white' }]}>Unpaid</Text>
-          </TouchableOpacity>
-        </View>
+        )}
+      />
+
+      {/* Paid / Unpaid toggle */}
+      <View style={styles.paidFilterRow}>
+        <TouchableOpacity
+          style={[styles.chip, paidFilter === true && styles.chipPaidActive]}
+          onPress={() => setPaidFilter(v => v === true ? null : true)}
+        >
+          <Ionicons name="checkmark-circle" size={16} color={paidFilter === true ? colors.white : colors.success} />
+          <Text style={[styles.chipText, paidFilter === true && styles.chipTextActive]}>Paid</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.chip, paidFilter === false && styles.chipUnpaidActive]}
+          onPress={() => setPaidFilter(v => v === false ? null : false)}
+        >
+          <Ionicons name="alert-circle" size={16} color={paidFilter === false ? colors.white : colors.danger} />
+          <Text style={[styles.chipText, paidFilter === false && styles.chipTextActive]}>Unpaid</Text>
+        </TouchableOpacity>
       </View>
 
       {loading ? (
         <LoadingScreen message="Loading orders…" />
-      ) : orders.length === 0 ? (
-        <View style={styles.center}>
-          <Ionicons name="clipboard-outline" size={48} color="#ccc" />
-          <Text style={styles.emptyText}>No orders found</Text>
-        </View>
+      ) : error && orders.length === 0 ? (
+        <ErrorState title="Could not load orders" message={error} onRetry={() => load()} />
       ) : (
-        <FlatList
-          data={orders}
-          keyExtractor={o => String(o.id)}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-          renderItem={({ item }) => (
-            <OrderRow
-              order={item}
-              onPress={() => navigation.navigate('AdminOrderDetail', { order: item, deliveryBoys })}
-            />
+        <>
+          {/* A failed refresh keeps the list below and says why. */}
+          {!!error && (
+            <View style={styles.errorBanner}>
+              <Ionicons name="alert-circle" size={20} color={colors.danger} />
+              <Text style={styles.errorText}>{friendlyError(error)}</Text>
+              <TouchableOpacity style={styles.errorRetry} onPress={() => load()} accessibilityLabel="Try again">
+                <Text style={styles.errorRetryText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
           )}
-          ItemSeparatorComponent={() => <View style={styles.separator} />}
-          contentContainerStyle={{ paddingBottom: 24 }}
-        />
+          <FlatList
+            style={styles.orderList}
+            data={orders}
+            keyExtractor={o => String(o.id)}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} tintColor={colors.primary} />
+            }
+            renderItem={({ item }) => (
+              <OrderCard
+                order={item}
+                onPress={() => navigation.navigate('AdminOrderDetail', { order: item, deliveryBoys })}
+              />
+            )}
+            ListEmptyComponent={
+              <EmptyState
+                icon="clipboard-outline"
+                title={filtersActive ? 'No orders match' : 'No orders yet'}
+                text={filtersActive
+                  ? 'Try a different search or clear a filter.'
+                  : 'New orders will appear here. Tap + to add a call-in order.'}
+              />
+            }
+            contentContainerStyle={styles.list}
+          />
+        </>
       )}
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
+  container: { flex: 1, backgroundColor: colors.bg },
+
   searchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    padding: 12,
-    backgroundColor: 'white',
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingHorizontal: pagePadding, paddingTop: 16, paddingBottom: 12,
   },
   searchBox: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f0f0f0',
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    height: 38,
-    gap: 6,
+    flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10,
+    height: 48, paddingHorizontal: 14,
+    backgroundColor: colors.surface, borderRadius: radius.lg,
+    borderWidth: 1, borderColor: colors.line,
   },
-  searchInput: { flex: 1, fontSize: 14, color: '#000' },
-  hiddenBtn: {
-    width: 38, height: 38, borderRadius: 10,
-    backgroundColor: '#f0f0f0', alignItems: 'center', justifyContent: 'center',
+  searchInput: { flex: 1, fontSize: fontSize.sm, color: colors.ink },
+  iconBtn: {
+    width: 48, height: 48, borderRadius: radius.md,
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line,
+    alignItems: 'center', justifyContent: 'center',
   },
-  hiddenBtnActive: { backgroundColor: '#FF950015' },
-  newOrderBtn: {
-    width: 38, height: 38, borderRadius: 10,
-    backgroundColor: '#007AFF', alignItems: 'center', justifyContent: 'center',
-  },
-  filterRow: { backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
-  chipList: { paddingHorizontal: 12, paddingVertical: 8, gap: 8 },
+  iconBtnActive: { backgroundColor: colors.warningBg, borderColor: colors.warningLine },
+  newOrderBtn: { backgroundColor: colors.primary, borderColor: colors.primary },
+
+  // flexShrink 0 is the fix for the squashed chip rows: the order list below is
+  // far taller than the screen, so flexbox shrank these rows to make room and
+  // clipped the chips (the Paid/Unpaid row lost its top edge).
+  chipScroll: { flexGrow: 0, flexShrink: 0 },
+  chipList: { paddingHorizontal: pagePadding, gap: 8, alignItems: 'center' },
   paidFilterRow: {
+    flexShrink: 0,
     flexDirection: 'row', gap: 8,
-    paddingHorizontal: 12, paddingBottom: 8,
+    paddingHorizontal: pagePadding, paddingTop: 8, paddingBottom: 12,
   },
-  paidChip: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14,
-    borderWidth: 1, borderColor: '#34C759',
-  },
-  paidChipActive: { backgroundColor: '#34C759' },
-  paidChipText: { fontSize: 12, fontWeight: '600', color: '#34C759' },
-  unpaidChip: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14,
-    borderWidth: 1, borderColor: '#FF3B30',
-  },
-  unpaidChipActive: { backgroundColor: '#FF3B30' },
-  unpaidChipText: { fontSize: 12, fontWeight: '600', color: '#FF3B30' },
   chip: {
-    paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20,
-    backgroundColor: 'white', borderWidth: 1, borderColor: '#e0e0e0',
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    height: 40, paddingHorizontal: 16, borderRadius: radius.pill,
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line,
   },
-  chipActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
-  chipText: { fontSize: 13, color: '#555', fontWeight: '500' },
-  chipTextActive: { color: 'white' },
-  orderRow: {
-    flexDirection: 'row',
-    backgroundColor: 'white',
-    padding: 12,
-    gap: 10,
-    alignItems: 'center',
+  chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  chipPaidActive: { backgroundColor: colors.success, borderColor: colors.success },
+  chipUnpaidActive: { backgroundColor: colors.danger, borderColor: colors.danger },
+  chipText: { fontSize: fontSize.sm, fontWeight: '700', color: colors.ink },
+  chipTextActive: { color: colors.white },
+
+  orderList: { flex: 1 },
+  list: { paddingHorizontal: pagePadding, paddingBottom: 24, flexGrow: 1 },
+  card: { ...card, padding: 16, marginBottom: 12 },
+  cardHidden: { opacity: 0.6 },
+  cardTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  cardInfo: { flex: 1 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  customerName: { flexShrink: 1, fontSize: fontSize.md, fontWeight: '700', color: colors.ink },
+  orderMeta: { fontSize: fontSize.sm, color: colors.muted, marginTop: 2 },
+  orderTotal: { fontSize: fontSize.lg, fontWeight: '800', color: colors.ink, letterSpacing: -0.3 },
+  addressRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 10 },
+  addressIcon: { marginTop: 2 },
+  orderAddress: { flex: 1, fontSize: fontSize.sm, color: colors.textSecondary, lineHeight: 20 },
+  pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
+
+  errorBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    marginHorizontal: pagePadding, marginBottom: 12, padding: 12,
+    backgroundColor: colors.dangerBg, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.dangerLine,
   },
-  orderRowHidden: { opacity: 0.5 },
-  orderRowLeft: { width: 44, alignItems: 'center' },
-  orderId: { fontSize: 13, fontWeight: 'bold', color: '#007AFF' },
-  orderDate: { fontSize: 11, color: '#999', marginTop: 2 },
-  orderRowMid: { flex: 1 },
-  customerName: { fontSize: 14, fontWeight: '600', color: '#1a1a1a' },
-  orderAddress: { fontSize: 12, color: '#888', marginTop: 2 },
-  orderRowRight: { alignItems: 'flex-end', gap: 4 },
-  orderTotal: { fontSize: 13, fontWeight: 'bold', color: '#1a1a1a' },
-  badge: {
-    paddingHorizontal: 8, paddingVertical: 2,
-    borderRadius: 6, borderWidth: 1,
+  errorText: { flex: 1, fontSize: fontSize.sm, color: colors.danger, fontWeight: '600' },
+  errorRetry: {
+    height: 40, paddingHorizontal: 16, borderRadius: radius.pill,
+    backgroundColor: colors.danger, alignItems: 'center', justifyContent: 'center',
   },
-  badgeText: { fontSize: 11, fontWeight: '600' },
-  paidTag: { fontSize: 11, color: '#34C759', fontWeight: '600' },
-  unpaidTag: { fontSize: 11, color: '#FF3B30' },
-  separator: { height: 1, backgroundColor: '#f0f0f0' },
-  emptyText: { fontSize: 15, color: '#aaa' },
+  errorRetryText: { color: colors.white, fontSize: fontSize.sm, fontWeight: '800' },
 });

@@ -1,12 +1,15 @@
+import { colors } from '../theme';
 import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useBrand } from '../context/BrandContext';
 
 interface Props {
   message?: string;
 }
 
 export const LoadingScreen: React.FC<Props> = ({ message }) => {
+  const { name: brandName } = useBrand();
   const pulse = useRef(new Animated.Value(1)).current;
   const dot1 = useRef(new Animated.Value(0.3)).current;
   const dot2 = useRef(new Animated.Value(0.3)).current;
@@ -42,10 +45,10 @@ export const LoadingScreen: React.FC<Props> = ({ message }) => {
   return (
     <View style={styles.container}>
       <Animated.View style={[styles.iconRing, { transform: [{ scale: pulse }] }]}>
-        <Ionicons name="water" size={44} color="#007AFF" />
+        <Ionicons name="water" size={44} color={colors.primary} />
       </Animated.View>
 
-      <Text style={styles.brand}>Century Sip</Text>
+      <Text style={styles.brand}>{brandName}</Text>
 
       <View style={styles.dotsRow}>
         <Animated.View style={[styles.dot, { opacity: dot1 }]} />
@@ -61,7 +64,7 @@ export const LoadingScreen: React.FC<Props> = ({ message }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.bg,
     justifyContent: 'center',
     alignItems: 'center',
     gap: 12,
@@ -70,7 +73,7 @@ const styles = StyleSheet.create({
     width: 96,
     height: 96,
     borderRadius: 48,
-    backgroundColor: '#EBF4FF',
+    backgroundColor: colors.primaryTint,
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#007AFF',
@@ -82,7 +85,7 @@ const styles = StyleSheet.create({
   brand: {
     fontSize: 22,
     fontWeight: '700',
-    color: '#1a1a2e',
+    color: colors.ink,
     letterSpacing: 0.5,
   },
   dotsRow: {
@@ -93,12 +96,12 @@ const styles = StyleSheet.create({
   dot: {
     width: 8,
     height: 8,
-    borderRadius: 4,
-    backgroundColor: '#007AFF',
+    borderRadius: 6,
+    backgroundColor: colors.primary,
   },
   message: {
     fontSize: 13,
-    color: '#888',
+    color: colors.muted,
     marginTop: 4,
   },
 });
