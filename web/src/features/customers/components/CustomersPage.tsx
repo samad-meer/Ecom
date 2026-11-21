@@ -1,7 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { Users, UserPlus, Search, Phone, MapPin, Package } from "lucide-react";
+import { useState, useMemo } from "react";
+import {
+  Users, UserPlus, Search, Phone, MapPin, Package,
+  Filter, Calendar, RotateCcw, X, ArrowUpDown,
+} from "lucide-react";
 import { Button, Card, PageHeader, Skeleton } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import type { AdminCustomer } from "@/lib/types";
@@ -10,20 +13,24 @@ import { matchesCustomerSearch } from "../search";
 import { AddCustomerModal } from "./AddCustomerModal";
 import { CustomerDetailModal } from "./CustomerDetailModal";
 
-type ActiveFilter = "all" | "thisMonth" | "withPhone" | "withAddress";
+type CardFilter = "all" | "thisMonth" | "withPhone" | "withAddress";
+type StatusFilter = "all" | "active" | "inactive";
+type PhoneFilter = "all" | "with" | "without";
+type AddressFilter = "all" | "with" | "without";
+type SortOption = "newest" | "oldest" | "name_asc" | "name_desc";
 
 // ─── Summary cards ────────────────────────────────────────────────────────────
 
 interface SummaryCardsProps {
   customers: AdminCustomer[];
-  activeFilter: ActiveFilter;
-  onFilter: (f: ActiveFilter) => void;
+  activeCard: CardFilter;
+  onFilter: (f: CardFilter) => void;
 }
 
-function SummaryCards({ customers, activeFilter, onFilter }: SummaryCardsProps) {
+function SummaryCards({ customers, activeCard, onFilter }: SummaryCardsProps) {
   const total = customers.length;
-  const withPhone = customers.filter((c) => c.phone).length;
-  const withAddress = customers.filter((c) => c.address).length;
+  const withPhone = customers.filter((c) => c.phone && c.phone.trim()).length;
+  const withAddress = customers.filter((c) => c.address && c.address.trim()).length;
   const thisMonth = customers.filter((c) => {
     const d = new Date(c.date_joined);
     const now = new Date();
@@ -31,14 +38,14 @@ function SummaryCards({ customers, activeFilter, onFilter }: SummaryCardsProps) 
   }).length;
 
   const filterCard = (
-    filter: ActiveFilter,
+    filter: CardFilter,
     icon: React.ReactNode,
     label: string,
     value: number,
     iconCls: string,
     activeBorderCls: string,
   ) => {
-    const active = activeFilter === filter;
+    const active = activeCard === filter;
     return (
       <button
         type="button"
@@ -80,10 +87,12 @@ function SummaryCards({ customers, activeFilter, onFilter }: SummaryCardsProps) 
 // ─── Customer row ─────────────────────────────────────────────────────────────
 
 function CustomerRow({ customer, onView }: { customer: AdminCustomer; onView: () => void }) {
-  const initials = customer.name.charAt(0).toUpperCase();
-  const joined = new Date(customer.date_joined).toLocaleDateString("en-PK", {
-    day: "numeric", month: "short", year: "numeric",
-  });
+  const initials = (customer.name || customer.username || "?").charAt(0).toUpperCase();
+  const joined = customer.date_joined
+    ? new Date(customer.date_joined).toLocaleDateString("en-PK", {
+        day: "numeric", month: "short", year: "numeric",
+      })
+    : "—";
 
   return (
     <tr
@@ -131,33 +140,109 @@ function CustomerRow({ customer, onView }: { customer: AdminCustomer; onView: ()
 export function CustomersPage() {
   const customersList = useCustomers();
   const [search, setSearch] = useState("");
-  const [activeFilter, setActiveFilter] = useState<ActiveFilter>("all");
+  const [activeCard, setActiveCard] = useState<CardFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [phoneFilter, setPhoneFilter] = useState<PhoneFilter>("all");
+  const [addressFilter, setAddressFilter] = useState<AddressFilter>("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [sortBy, setSortBy] = useState<SortOption>("newest");
   const [addOpen, setAddOpen] = useState(false);
   const [selected, setSelected] = useState<AdminCustomer | null>(null);
 
-  const now = new Date();
+  const now = useMemo(() => new Date(), []);
 
-  const filtered = (customersList.data ?? []).filter((c) => {
-    // Card filter
-    if (activeFilter === "thisMonth") {
-      const d = new Date(c.date_joined);
-      if (d.getMonth() !== now.getMonth() || d.getFullYear() !== now.getFullYear()) return false;
-    } else if (activeFilter === "withPhone") {
-      if (!c.phone) return false;
-    } else if (activeFilter === "withAddress") {
-      if (!c.address) return false;
+  const filtered = useMemo(() => {
+    let list = customersList.data ?? [];
+
+    // Search query
+    if (search.trim()) {
+      list = list.filter((c) => matchesCustomerSearch(c, search));
     }
 
-    // Search filter — multi-word, digit-tolerant on phones, and aware of the
-    // structured address parts. Same rules as the server's search.
-    return matchesCustomerSearch(c, search);
-  });
+    // Quick card filter
+    if (activeCard === "thisMonth") {
+      list = list.filter((c) => {
+        if (!c.date_joined) return false;
+        const d = new Date(c.date_joined);
+        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+      });
+    } else if (activeCard === "withPhone") {
+      list = list.filter((c) => !!c.phone && c.phone.trim() !== "");
+    } else if (activeCard === "withAddress") {
+      list = list.filter((c) => !!c.address && c.address.trim() !== "");
+    }
 
-  const filterLabel: Record<ActiveFilter, string> = {
-    all: "all customers",
-    thisMonth: "joined this month",
-    withPhone: "with phone number",
-    withAddress: "with address",
+    // Account Status filter
+    if (statusFilter === "active") {
+      list = list.filter((c) => c.is_active);
+    } else if (statusFilter === "inactive") {
+      list = list.filter((c) => !c.is_active);
+    }
+
+    // Phone filter
+    if (phoneFilter === "with") {
+      list = list.filter((c) => !!c.phone && c.phone.trim() !== "");
+    } else if (phoneFilter === "without") {
+      list = list.filter((c) => !c.phone || c.phone.trim() === "");
+    }
+
+    // Address filter
+    if (addressFilter === "with") {
+      list = list.filter((c) => !!c.address && c.address.trim() !== "");
+    } else if (addressFilter === "without") {
+      list = list.filter((c) => !c.address || c.address.trim() === "");
+    }
+
+    // Date From
+    if (dateFrom) {
+      const from = new Date(dateFrom + "T00:00:00").getTime();
+      list = list.filter((c) => c.date_joined && new Date(c.date_joined).getTime() >= from);
+    }
+
+    // Date To
+    if (dateTo) {
+      const to = new Date(dateTo + "T23:59:59").getTime();
+      list = list.filter((c) => c.date_joined && new Date(c.date_joined).getTime() <= to);
+    }
+
+    // Sorting
+    return [...list].sort((a, b) => {
+      if (sortBy === "newest") {
+        return new Date(b.date_joined || 0).getTime() - new Date(a.date_joined || 0).getTime();
+      }
+      if (sortBy === "oldest") {
+        return new Date(a.date_joined || 0).getTime() - new Date(b.date_joined || 0).getTime();
+      }
+      if (sortBy === "name_asc") {
+        return (a.name || "").localeCompare(b.name || "");
+      }
+      if (sortBy === "name_desc") {
+        return (b.name || "").localeCompare(a.name || "");
+      }
+      return 0;
+    });
+  }, [customersList.data, search, activeCard, statusFilter, phoneFilter, addressFilter, dateFrom, dateTo, sortBy, now]);
+
+  const hasActiveFilters =
+    search.trim() !== "" ||
+    activeCard !== "all" ||
+    statusFilter !== "all" ||
+    phoneFilter !== "all" ||
+    addressFilter !== "all" ||
+    dateFrom !== "" ||
+    dateTo !== "" ||
+    sortBy !== "newest";
+
+  const resetFilters = () => {
+    setSearch("");
+    setActiveCard("all");
+    setStatusFilter("all");
+    setPhoneFilter("all");
+    setAddressFilter("all");
+    setDateFrom("");
+    setDateTo("");
+    setSortBy("newest");
   };
 
   return (
@@ -182,31 +267,215 @@ export function CustomersPage() {
       ) : customersList.data && customersList.data.length > 0 ? (
         <SummaryCards
           customers={customersList.data}
-          activeFilter={activeFilter}
-          onFilter={setActiveFilter}
+          activeCard={activeCard}
+          onFilter={(f) => {
+            setActiveCard(f);
+            if (f === "withPhone") setPhoneFilter("with");
+            else if (f === "withAddress") setAddressFilter("with");
+            else if (f === "all") {
+              if (phoneFilter === "with") setPhoneFilter("all");
+              if (addressFilter === "with") setAddressFilter("all");
+            }
+          }}
         />
       ) : null}
 
-      {/* Search + active filter label */}
+      {/* Filter Toolbar */}
       {!customersList.loading && (
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative max-w-sm flex-1">
+        <div className="glass flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 p-3">
+          {/* Search Input */}
+          <div className="relative min-w-[200px] flex-1">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-mist/40" />
             <input
               type="text"
-              placeholder="Search by name, phone, address…"
+              placeholder="Search name, phone, email, address…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="input w-full py-2 pl-9 pr-3 text-sm"
+              className="input w-full py-1.5 pl-9 pr-7 text-sm"
+            />
+            {search ? (
+              <button
+                type="button"
+                onClick={() => setSearch("")}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-mist/40 hover:text-mist"
+                title="Clear search"
+              >
+                <X size={14} />
+              </button>
+            ) : null}
+          </div>
+
+          {/* Account Status Filter */}
+          <div className="flex items-center gap-1.5">
+            <Filter size={14} className="hidden text-wave sm:inline" />
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+              className="input w-auto py-1.5 text-sm"
+              title="Filter by account status"
+            >
+              <option value="all">All Statuses</option>
+              <option value="active">Active Only</option>
+              <option value="inactive">Inactive Only</option>
+            </select>
+          </div>
+
+          {/* Phone Filter */}
+          <select
+            value={phoneFilter}
+            onChange={(e) => {
+              const val = e.target.value as PhoneFilter;
+              setPhoneFilter(val);
+              if (val === "with") setActiveCard("withPhone");
+              else if (activeCard === "withPhone") setActiveCard("all");
+            }}
+            className="input w-auto py-1.5 text-sm"
+            title="Filter by phone presence"
+          >
+            <option value="all">All Phone</option>
+            <option value="with">With Phone</option>
+            <option value="without">Missing Phone</option>
+          </select>
+
+          {/* Address Filter */}
+          <select
+            value={addressFilter}
+            onChange={(e) => {
+              const val = e.target.value as AddressFilter;
+              setAddressFilter(val);
+              if (val === "with") setActiveCard("withAddress");
+              else if (activeCard === "withAddress") setActiveCard("all");
+            }}
+            className="input w-auto py-1.5 text-sm"
+            title="Filter by address presence"
+          >
+            <option value="all">All Addresses</option>
+            <option value="with">With Address</option>
+            <option value="without">Missing Address</option>
+          </select>
+
+          {/* Date Joined Range */}
+          <div className="flex items-center gap-1.5">
+            <Calendar size={14} className="hidden text-wave sm:inline" />
+            <input
+              type="date"
+              title="Joined from"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="input w-auto px-2.5 py-1.5 text-sm"
+            />
+            <span className="text-sm text-mist/30">→</span>
+            <input
+              type="date"
+              title="Joined to"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="input w-auto px-2.5 py-1.5 text-sm"
             />
           </div>
-          {activeFilter !== "all" && (
-            <button
-              onClick={() => setActiveFilter("all")}
-              className="flex items-center gap-1.5 rounded-lg border border-wave/30 bg-wave/10 px-3 py-2 text-xs font-medium text-wave transition hover:bg-wave/20"
+
+          {/* Sort By */}
+          <div className="flex items-center gap-1.5">
+            <ArrowUpDown size={14} className="hidden text-mist/40 sm:inline" />
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as SortOption)}
+              className="input w-auto py-1.5 text-sm"
+              title="Sort customers by"
             >
-              Showing: {filterLabel[activeFilter]} &times;
+              <option value="newest">Newest First</option>
+              <option value="oldest">Oldest First</option>
+              <option value="name_asc">Name (A → Z)</option>
+              <option value="name_desc">Name (Z → A)</option>
+            </select>
+          </div>
+
+          {/* Reset Filters button */}
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="ml-auto flex items-center gap-1.5 rounded-lg border border-rose-400/30 bg-rose-400/10 px-3 py-1.5 text-xs font-medium text-rose-300 transition hover:bg-rose-400/20"
+            >
+              <RotateCcw size={13} /> Reset Filters
             </button>
+          )}
+        </div>
+      )}
+
+      {/* Active filters summary badges */}
+      {!customersList.loading && hasActiveFilters && (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="font-medium text-mist/40">Active filters:</span>
+          {search && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-wave/30 bg-wave/10 px-2.5 py-0.5 text-wave">
+              Search: &quot;{search}&quot;
+              <button type="button" onClick={() => setSearch("")} className="hover:text-white">
+                <X size={12} />
+              </button>
+            </span>
+          )}
+          {statusFilter !== "all" && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-wave/30 bg-wave/10 px-2.5 py-0.5 text-wave">
+              Status: {statusFilter}
+              <button type="button" onClick={() => setStatusFilter("all")} className="hover:text-white">
+                <X size={12} />
+              </button>
+            </span>
+          )}
+          {phoneFilter !== "all" && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-sky-400/30 bg-sky-400/10 px-2.5 py-0.5 text-sky-300">
+              Phone: {phoneFilter === "with" ? "Has phone" : "Missing phone"}
+              <button
+                type="button"
+                onClick={() => {
+                  setPhoneFilter("all");
+                  if (activeCard === "withPhone") setActiveCard("all");
+                }}
+                className="hover:text-white"
+              >
+                <X size={12} />
+              </button>
+            </span>
+          )}
+          {addressFilter !== "all" && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-indigo-400/30 bg-indigo-400/10 px-2.5 py-0.5 text-indigo-300">
+              Address: {addressFilter === "with" ? "Has address" : "Missing address"}
+              <button
+                type="button"
+                onClick={() => {
+                  setAddressFilter("all");
+                  if (activeCard === "withAddress") setActiveCard("all");
+                }}
+                className="hover:text-white"
+              >
+                <X size={12} />
+              </button>
+            </span>
+          )}
+          {activeCard === "thisMonth" && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2.5 py-0.5 text-emerald-300">
+              Joined: This Month
+              <button type="button" onClick={() => setActiveCard("all")} className="hover:text-white">
+                <X size={12} />
+              </button>
+            </span>
+          )}
+          {(dateFrom || dateTo) && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/30 bg-amber-400/10 px-2.5 py-0.5 text-amber-300">
+              Joined: {dateFrom || "Start"} → {dateTo || "End"}
+              <button type="button" onClick={() => { setDateFrom(""); setDateTo(""); }} className="hover:text-white">
+                <X size={12} />
+              </button>
+            </span>
+          )}
+          {sortBy !== "newest" && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-white/20 bg-white/5 px-2.5 py-0.5 text-mist/70">
+              Sort: {sortBy === "oldest" ? "Oldest" : sortBy === "name_asc" ? "Name A-Z" : "Name Z-A"}
+              <button type="button" onClick={() => setSortBy("newest")} className="hover:text-white">
+                <X size={12} />
+              </button>
+            </span>
           )}
         </div>
       )}
@@ -221,11 +490,18 @@ export function CustomersPage() {
       ) : filtered.length === 0 ? (
         <Card className="p-12 text-center text-mist/40">
           <Package size={36} className="mx-auto mb-3 opacity-30" />
-          <p className="text-sm">
+          <p className="text-sm font-medium text-mist/70">
             {customersList.data?.length === 0
               ? "No customers registered yet."
-              : "No customers match the current filter."}
+              : "No customers match the current filter selection."}
           </p>
+          {hasActiveFilters && (
+            <div className="mt-4">
+              <Button variant="ghost" onClick={resetFilters}>
+                <RotateCcw size={14} /> Clear all filters
+              </Button>
+            </div>
+          )}
         </Card>
       ) : (
         <Card className="overflow-hidden p-0">
@@ -249,7 +525,8 @@ export function CustomersPage() {
             </table>
           </div>
           <p className="border-t border-white/5 px-4 py-2 text-xs text-mist/30">
-            {filtered.length} of {customersList.data?.length ?? 0} customers
+            Showing {filtered.length} of {customersList.data?.length ?? 0} customers
+            {filtered.length !== (customersList.data?.length ?? 0) ? " (filtered)" : ""}
           </p>
         </Card>
       )}
