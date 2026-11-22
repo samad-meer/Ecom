@@ -1,6 +1,13 @@
 from django.contrib import admin
 from django.utils.html import format_html
-from .models import Order, OrderItem, DeliveryStatus
+from .models import Order, OrderItem, DeliveryStatus, DeliverySettings
+
+@admin.register(DeliverySettings)
+class DeliverySettingsAdmin(admin.ModelAdmin):
+    list_display = ('id', 'rider_can_call', 'rider_can_whatsapp', 'updated_at')
+
+    def has_add_permission(self, request):
+        return not DeliverySettings.objects.exists()
 
 @admin.register(DeliveryStatus)
 class DeliveryStatusAdmin(admin.ModelAdmin):
@@ -35,11 +42,11 @@ class OrderItemInline(admin.TabularInline):
 
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
-    list_display = ('id', 'user', 'total_price', 'status', 'assigned_delivery_boy', 
-                   'delivery_status', 'created_at', 'is_paid')
-    list_filter = ('status', 'is_paid', 'created_at', 'assigned_delivery_boy')
+    list_display = ('id', 'user', 'total_price', 'status', 'is_pinned', 'assigned_delivery_boy', 
+                   'show_to_rider', 'delivery_status', 'created_at', 'is_paid')
+    list_filter = ('is_pinned', 'show_to_rider', 'status', 'is_paid', 'created_at', 'assigned_delivery_boy')
     search_fields = ('user__username', 'user__email', 'shipping_address', 'id')
-    list_editable = ('status', 'is_paid')
+    list_editable = ('status', 'is_paid', 'is_pinned', 'show_to_rider')
     # The discount snapshot was frozen at billing time; editing it here would
     # desync the receipt from what was actually charged.
     readonly_fields = ('created_at', 'updated_at', 'delivery_assigned_at', 'delivery_completed_at',

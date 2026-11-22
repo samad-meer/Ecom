@@ -13,6 +13,7 @@ import { FieldError } from '../../components/FormField';
 import { useLanguage } from '../../context/LanguageContext';
 import { GoogleSignInButton } from '../../components/GoogleSignInButton';
 import { IS_GOOGLE_SIGNIN_CONFIGURED } from '../../constants/googleConfig';
+import { useBrand } from '../../context/BrandContext';
 import {
   loadRememberedCredentials,
   saveRememberedCredentials,
@@ -37,6 +38,7 @@ const ACCENT_SHEEN_W = 16;
  */
 
 const LoginScreen = () => {
+  const { name: brandName } = useBrand();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -339,9 +341,19 @@ const LoginScreen = () => {
           </View>
 
           <Animated.View style={[styles.titleWrap, riseStyle(titleIn, 14)]}>
-            <Text style={styles.brandName}>
-              Century<Text style={{ color: colors.sun }}> Sip</Text>
-            </Text>
+            {(() => {
+              const parts = (brandName || 'Century Sip').trim().split(/\s+/);
+              if (parts.length > 1) {
+                const first = parts.slice(0, -1).join(' ');
+                const last = parts[parts.length - 1];
+                return (
+                  <Text style={styles.brandName}>
+                    {first}<Text style={{ color: colors.sun }}> {last}</Text>
+                  </Text>
+                );
+              }
+              return <Text style={styles.brandName}>{brandName || 'Century Sip'}</Text>;
+            })()}
             <Text style={styles.tagline}>Pure water. Fast delivery.</Text>
           </Animated.View>
 

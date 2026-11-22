@@ -294,6 +294,26 @@ class LedgerAPITests(LedgerTestMixin, TestCase):
         self.assertIn('name', res.data)
         self.assertIn('phone', res.data)
 
+    def test_admin_can_rename_the_business(self):
+        res = self.client.patch(
+            '/api/ledger/business/', {'business_name': '  Aqua Fresh  '}, format='json',
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data['name'], 'Aqua Fresh')
+
+    def test_business_name_cannot_be_blank(self):
+        res = self.client.patch(
+            '/api/ledger/business/', {'business_name': '   '}, format='json',
+        )
+        self.assertEqual(res.status_code, 400)
+
+    def test_customer_cannot_rename_the_business(self):
+        self.client.force_authenticate(self.customer)
+        res = self.client.patch(
+            '/api/ledger/business/', {'business_name': 'Hijacked'}, format='json',
+        )
+        self.assertEqual(res.status_code, 403)
+
     def test_record_payment_assigns_customer_code(self):
         self.client.post('/api/ledger/payments/', {
             'customer_id': self.customer.pk, 'amount': '10',

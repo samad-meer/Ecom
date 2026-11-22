@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  TextInput, Alert, ActivityIndicator, Keyboard, Platform,
+  TextInput, Alert, ActivityIndicator, Keyboard, Platform, Switch,
 } from 'react-native';
 import { LoadingScreen } from '../../components/LoadingScreen';
 import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
@@ -57,6 +57,7 @@ export const AdminCreateOrderScreen: React.FC = () => {
   // Cash-only business — no picker needed.
   const paymentMethod = 'COD';
   const [selectedRiderId, setSelectedRiderId] = useState<number | null>(null);
+  const [showToRider, setShowToRider] = useState(true);
   const [deliveryNotes, setDeliveryNotes] = useState('');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [saving, setSaving] = useState(false);
@@ -152,6 +153,7 @@ export const AdminCreateOrderScreen: React.FC = () => {
       area: address.area.trim(),
       payment_method: 'COD',
       assigned_delivery_boy: selectedRiderId || null,
+      show_to_rider: showToRider,
       delivery_notes: deliveryNotes || undefined,
       status: 'Processing',
       items: cart.map(c => ({ product_id: c.product.id, quantity: c.quantity })),
@@ -389,6 +391,31 @@ export const AdminCreateOrderScreen: React.FC = () => {
               ))}
             </View>
           </ScrollView>
+
+          {/* Show to rider toggle */}
+          <View style={styles.riderVisibilityRow}>
+            <View style={{ flex: 1, marginRight: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Ionicons
+                  name={showToRider ? 'eye' : 'eye-off'}
+                  size={18}
+                  color={showToRider ? colors.primary : colors.muted}
+                />
+                <Text style={styles.riderVisibilityTitle}>Show to Rider</Text>
+              </View>
+              <Text style={styles.riderVisibilitySubtitle}>
+                {showToRider
+                  ? 'Visible in the assigned rider’s mobile app'
+                  : 'Hidden from the rider’s mobile app'}
+              </Text>
+            </View>
+            <Switch
+              value={showToRider}
+              onValueChange={setShowToRider}
+              trackColor={{ false: colors.line, true: colors.primary }}
+              thumbColor={colors.white}
+            />
+          </View>
         </Section>
 
         {/* Note for the rider. Named for its audience rather than "Delivery
@@ -535,6 +562,18 @@ const styles = StyleSheet.create({
   riderChipText: { fontSize: fontSize.sm, color: colors.ink, fontWeight: '700' },
   riderChipTextActive: { color: colors.white },
   riderDot: { width: 8, height: 8, borderRadius: 4 },
+
+  riderVisibilityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+  },
+  riderVisibilityTitle: { fontSize: fontSize.sm, fontWeight: '700', color: colors.ink },
+  riderVisibilitySubtitle: { fontSize: fontSize.xs, color: colors.muted, marginTop: 2 },
 
   footer: {
     flexDirection: 'row', alignItems: 'center', gap: 16,

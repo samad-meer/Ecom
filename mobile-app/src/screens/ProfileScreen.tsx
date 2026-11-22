@@ -68,6 +68,32 @@ const ALL_FIELDS: { key: string; multiline?: boolean; keyboard?: 'default' | 'ph
   { key: 'remarks', multiline: true },
 ];
 
+// Offline & instant defaults for staff/riders before or if the server config is fetched
+const DEFAULT_STAFF_FIELDS: Record<string, ProfileConfig> = {
+  delivery_boy: {
+    first_name:        { visible: true,  editable: true,  label: 'First Name' },
+    last_name:         { visible: true,  editable: true,  label: 'Last Name' },
+    phone_number:      { visible: true,  editable: true,  label: 'Phone Number' },
+    address:           { visible: true,  editable: true,  label: 'Address' },
+    emergency_contact: { visible: true,  editable: true,  label: 'Emergency Contact' },
+    employee_id:       { visible: true,  editable: false, label: 'Employee ID' },
+    designation:       { visible: true,  editable: false, label: 'Designation' },
+    department:        { visible: true,  editable: false, label: 'Department' },
+    vehicle_type:      { visible: true,  editable: false, label: 'Vehicle Type' },
+    vehicle_number:    { visible: true,  editable: false, label: 'Vehicle Number' },
+  },
+  staff: {
+    first_name:        { visible: true,  editable: true,  label: 'First Name' },
+    last_name:         { visible: true,  editable: true,  label: 'Last Name' },
+    phone_number:      { visible: true,  editable: true,  label: 'Phone Number' },
+    address:           { visible: true,  editable: true,  label: 'Address' },
+    emergency_contact: { visible: true,  editable: true,  label: 'Emergency Contact' },
+    employee_id:       { visible: true,  editable: false, label: 'Employee ID' },
+    designation:       { visible: true,  editable: false, label: 'Designation' },
+    department:        { visible: true,  editable: false, label: 'Department' },
+  },
+};
+
 // Editable fields the profile PATCH endpoint accepts
 const EDITABLE_KEYS = new Set(['username', 'first_name', 'last_name', 'phone_number', 'address', 'emergency_contact']);
 
@@ -169,7 +195,6 @@ export const ProfileScreen = () => {
   const [form, setForm] = useState<Record<string, string>>({});
   const [isEditing, setIsEditing] = useState(false);
   const [config, setConfig] = useState<ProfileConfig | null>(null);
-  const [configLoading, setConfigLoading] = useState(false);
   // Why the rider/staff field list could not be loaded, if it could not. Bumping
   // the nonce re-runs the focus effect below for the retry button.
   const [configError, setConfigError] = useState<string | null>(null);
@@ -237,8 +262,20 @@ export const ProfileScreen = () => {
         }),
       ),
     );
-    animation.start();
-    return () => animation.stop();
+    animation.start(() => {
+      settled.forEach(value => value.setValue(1));
+    });
+
+    // Safety fallback: ensure values ALWAYS settle to 1, preventing any blank screen
+    const fallbackTimer = setTimeout(() => {
+      settled.forEach(value => value.setValue(1));
+    }, 600);
+
+    return () => {
+      clearTimeout(fallbackTimer);
+      animation.stop();
+      settled.forEach(value => value.setValue(1));
+    };
   }, [reducedMotion, heroIn, infoIn, addressIn, locationIn, langIn, actionsIn]);
 
   // Slow drift on the hero's background circles, matching the login screen.
@@ -289,10 +326,6 @@ export const ProfileScreen = () => {
       if (!isStaff || !token) return;
       let cancelled = false;
       const firstLoad = !hasLoadedConfig.current;
-      // Only the first load blocks the screen; later refreshes are silent so
-      // returning to the tab does not flash a spinner.
-      if (firstLoad) setConfigLoading(true);
-
       fetchProfileConfig(token)
         .then(next => {
           if (cancelled) return;
@@ -306,9 +339,6 @@ export const ProfileScreen = () => {
           if (cancelled) return;
           setConfigError(e?.message ?? '');
           hasLoadedConfig.current = true;
-        })
-        .finally(() => {
-          if (!cancelled && firstLoad) setConfigLoading(false);
         });
 
       return () => {
@@ -359,23 +389,15 @@ export const ProfileScreen = () => {
         first_name:   { visible: true, editable: true, label: t('first_name', 'First Name') },
         last_name:    { visible: true, editable: true, label: t('last_name', 'Last Name') },
         phone_number: { visible: true, editable: true, label: 'Phone Number' },
-        // A customer's delivery address lives in the address book — several
-        // labelled entries, each with an optional map pin, and one of them the
-        // default checkout actually uses. A free-text box here would be a
-        // second copy that silently disagrees with it, so the card below links
-        // to the book instead.
-        //
-        // Admins share this screen and reach this branch too. Nothing is ever
-        // delivered *to* an admin, so for them the same field is where the
-        // business operates from — the address they hand out to suppliers and
-        // walk-in customers.
         ...(isCustomer
           ? {}
           : { address: { visible: true, editable: true, label: 'Work Place Address' } }),
       };
       return customerFields[key] ?? null;
     }
-    return config?.[key] ?? null;
+    const staffType = user?.user_type === 'staff' ? 'staff' : 'delivery_boy';
+    const defaults = DEFAULT_STAFF_FIELDS[staffType] || DEFAULT_STAFF_FIELDS.delivery_boy;
+    return config?.[key] ?? defaults[key] ?? null;
   };
 
   const visibleFields = ALL_FIELDS.filter(({ key }) => {
@@ -546,14 +568,6 @@ export const ProfileScreen = () => {
     return cfg?.editable && EDITABLE_KEYS.has(key);
   });
 
-  if (configLoading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={BRAND_BLUE} />
-      </View>
-    );
-  }
-
   // Two initials where there is a real name, one otherwise — never the blank
   // circle an empty profile would otherwise show.
   const initials = (
@@ -664,7 +678,7 @@ export const ProfileScreen = () => {
       {/* ── Personal information ─────────────────────────────────────────── */}
       {/* A rider's field list comes from the server. If that request failed and
           nothing was ever loaded, say so here rather than showing no section. */}
-      {isStaff && !config && configError !== null && (
+      {isStaff && !config && configError !== null && visibleFields.length === 0 && (
         <Animated.View style={[styles.section, riseStyle(infoIn)]}>
           <View style={styles.sectionHeader}>
             <IconChip name="person" color={BRAND_BLUE} bg={colors.primaryTint} />

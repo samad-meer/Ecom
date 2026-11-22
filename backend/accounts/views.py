@@ -918,9 +918,13 @@ class UpdatePushTokenView(APIView):
         token = request.data.get('token')
         if not token:
             return Response({'error': 'Token is required'}, status=status.HTTP_400_BAD_REQUEST)
+        # A device token can only belong to one active user at a time.
+        # Detach from any other accounts previously logged in on this physical device.
+        UserProfile.objects.filter(expo_push_token=token).exclude(user=request.user).update(expo_push_token=None)
+
         profile, _ = UserProfile.objects.get_or_create(user=request.user)
         profile.expo_push_token = token
-        profile.save()
+        profile.save(update_fields=['expo_push_token'])
         return Response({'status': 'Token updated'}, status=status.HTTP_200_OK)
 
 
@@ -1113,7 +1117,10 @@ class AdminSendNotificationView(APIView):
         qs = UserProfile.objects.exclude(expo_push_token__isnull=True).exclude(expo_push_token='')
 
         if recipient_type == 'customers':
-            qs = qs.filter(user_type='customer')
+            # Target genuine customers only — never staff, superusers, or the sender admin
+            qs = qs.filter(user_type='customer').exclude(user__is_staff=True).exclude(user__is_superuser=True)
+            if request.user and request.user.is_authenticated:
+                qs = qs.exclude(user=request.user)
         elif recipient_type == 'riders':
             qs = qs.filter(user_type='delivery_boy')
         elif recipient_type == 'admins':

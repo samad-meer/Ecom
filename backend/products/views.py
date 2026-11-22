@@ -40,11 +40,12 @@ class ProductViewSet(viewsets.ModelViewSet):
     serializer_class = ProductSerializer
     permission_classes = [IsStaffOrReadOnly]
     filter_backends = [DjangoFilterBackend, SearchFilter]
-    filterset_fields = ['category', 'is_active']
+    filterset_fields = ['category', 'is_active', 'is_refill']
     search_fields = ['name', 'description']
 
     def get_queryset(self):
-        # Staff see all products (including inactive); customers see only active
+        # Staff see all products (including inactive); customers see only active.
+        # Refills are always ordered on top (-is_refill).
         if self.request.user and self.request.user.is_authenticated and self.request.user.is_staff:
-            return Product.objects.select_related('category').order_by('-created_at')
-        return Product.objects.filter(is_active=True).select_related('category').order_by('-created_at')
+            return Product.objects.select_related('category').order_by('-is_refill', '-created_at')
+        return Product.objects.filter(is_active=True).select_related('category').order_by('-is_refill', '-created_at')

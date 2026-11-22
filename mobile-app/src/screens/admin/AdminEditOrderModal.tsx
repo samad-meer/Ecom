@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, Modal, ScrollView, TouchableOpacity,
-  TextInput, Alert, ActivityIndicator,
+  TextInput, Alert, ActivityIndicator, Switch,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, fontSize, card, pagePadding } from '../../theme';
@@ -42,6 +42,7 @@ export const AdminEditOrderModal: React.FC<Props> = ({
   const [address, setAddress] = useState<AddressParts>(EMPTY_ADDRESS);
   const [addressErrors, setAddressErrors] = useState<Partial<Record<keyof AddressParts, string>>>({});
   const [selectedRiderId, setSelectedRiderId] = useState<number | null>(null);
+  const [showToRider, setShowToRider] = useState(true);
   const [deliveryNotes, setDeliveryNotes] = useState('');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [saving, setSaving] = useState(false);
@@ -58,6 +59,7 @@ export const AdminEditOrderModal: React.FC<Props> = ({
       }
       setAddressErrors({});
       setSelectedRiderId(order.assigned_delivery_boy);
+      setShowToRider(order.show_to_rider !== false);
       setDeliveryNotes(order.delivery_notes || '');
 
       const initialCart: CartItem[] = (order.items || []).map((it) => ({
@@ -123,6 +125,7 @@ export const AdminEditOrderModal: React.FC<Props> = ({
       block: address.block.trim() || undefined,
       area: address.area.trim(),
       assigned_delivery_boy: selectedRiderId,
+      show_to_rider: showToRider,
       delivery_notes: deliveryNotes || '',
     };
 
@@ -279,6 +282,31 @@ export const AdminEditOrderModal: React.FC<Props> = ({
                 </TouchableOpacity>
               ))}
             </View>
+
+            {/* Show to rider toggle */}
+            <View style={styles.riderVisibilityRow}>
+              <View style={{ flex: 1, marginRight: 12 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Ionicons
+                    name={showToRider ? 'eye' : 'eye-off'}
+                    size={18}
+                    color={showToRider ? colors.primary : colors.muted}
+                  />
+                  <Text style={styles.riderVisibilityTitle}>Show to Rider</Text>
+                </View>
+                <Text style={styles.riderVisibilitySubtitle}>
+                  {showToRider
+                    ? 'Visible in the assigned rider’s mobile app'
+                    : 'Hidden from the rider’s mobile app'}
+                </Text>
+              </View>
+              <Switch
+                value={showToRider}
+                onValueChange={setShowToRider}
+                trackColor={{ false: colors.line, true: colors.primary }}
+                thumbColor={colors.white}
+              />
+            </View>
           </View>
 
           {/* Delivery Notes */}
@@ -379,6 +407,17 @@ const styles = StyleSheet.create({
   riderPillActive: { backgroundColor: colors.primaryTint, borderColor: colors.primary },
   riderPillText: { fontSize: fontSize.xs, fontWeight: '700', color: colors.ink },
   riderPillTextActive: { color: colors.primaryDark },
+  riderVisibilityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+  },
+  riderVisibilityTitle: { fontSize: fontSize.sm, fontWeight: '700', color: colors.ink },
+  riderVisibilitySubtitle: { fontSize: fontSize.xs, color: colors.muted, marginTop: 2 },
   notesInput: {
     borderWidth: 1, borderColor: colors.line, borderRadius: radius.md,
     backgroundColor: colors.surfaceTint, paddingHorizontal: 12, paddingVertical: 10,

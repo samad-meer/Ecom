@@ -136,6 +136,7 @@ class OrderSerializer(serializers.ModelSerializer):
                   # back. The rider and admin serializers below add it. Same
                   # rule as rider_note.
                   'assigned_delivery_boy', 'assigned_delivery_boy_name', 'show_to_rider',
+                  'is_pinned', 'pinned_at',
                   'delivery_assigned_at', 'delivery_completed_at',
                   'number_of_bottles', 'delivery_status', 'delivery_status_updated_at',
                   'cash_received', 'cash_amount'] + DISCOUNT_SNAPSHOT_FIELDS
@@ -483,7 +484,7 @@ class AdminOrderUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Order
         fields = [
-            'status', 'is_paid', 'is_hidden', 'show_to_rider',
+            'status', 'is_paid', 'is_hidden', 'show_to_rider', 'is_pinned',
             'assigned_delivery_boy', 'delivery_notes', 'rider_note',
             'cash_amount', 'cash_received',
             'delivery_status',          # staff can override anytime — lock only applies to rider mobile app

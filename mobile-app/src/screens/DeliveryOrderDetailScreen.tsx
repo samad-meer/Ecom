@@ -205,6 +205,19 @@ The office can see it now. You cannot change it from here.`,
   return (
     <View style={styles.screen}>
     <KeyboardAwareScrollView style={styles.container} extraBottomSpace={32}>
+      {/* ── Priority Pinned Banner ──────────────────────────────────── */}
+      {order.is_pinned && (
+        <View style={styles.priorityBanner}>
+          <View style={styles.priorityBannerIconWrap}>
+            <Ionicons name="pin" size={20} color={colors.white} />
+          </View>
+          <View style={styles.priorityBannerContent}>
+            <Text style={styles.priorityBannerTitle}>Deliver First · Priority Order</Text>
+            <Text style={styles.priorityBannerSub}>Admin has pinned this order for priority delivery.</Text>
+          </View>
+        </View>
+      )}
+
       {/* ── Order summary (Customer name and order details on top) ──── */}
       <View style={styles.card}>
         <View style={styles.orderHeaderRow}>
@@ -560,6 +573,40 @@ The office can see it now. You cannot change it from here.`,
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   container: { flex: 1, backgroundColor: colors.bg },
+
+  priorityBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#D97706',
+    marginHorizontal: 16,
+    marginTop: 14,
+    marginBottom: 6,
+    borderRadius: radius.xl - 4,
+    padding: 14,
+    gap: 12,
+    ...shadow.card,
+  },
+  priorityBannerIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  priorityBannerContent: {
+    flex: 1,
+  },
+  priorityBannerTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: colors.white,
+  },
+  priorityBannerSub: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.92)',
+    marginTop: 2,
+  },
 
   collectTile: {
     backgroundColor: colors.primary, borderRadius: radius.xl, padding: 20, marginBottom: 18,

@@ -78,6 +78,9 @@ export interface Order {
   payment_number?: string | null;
   is_paid: boolean;
   is_hidden?: boolean;
+  show_to_rider?: boolean;
+  is_pinned?: boolean;
+  pinned_at?: string | null;
   created_at: string;
   assigned_delivery_boy?: number | null;
   assigned_delivery_boy_name?: string | null;
@@ -393,6 +396,8 @@ export interface AdminOrderUpdatePayload {
   status?: OrderStatus;
   is_paid?: boolean;
   is_hidden?: boolean;
+  show_to_rider?: boolean;
+  is_pinned?: boolean;
   assigned_delivery_boy?: number | null;
   delivery_notes?: string;
   rider_note?: string;
@@ -438,6 +443,7 @@ export interface CreateAdminOrderPayload {
   payment_method: PaymentMethod;
   payment_number?: string;
   assigned_delivery_boy?: number | null;
+  show_to_rider?: boolean;
   delivery_notes?: string;
   status?: OrderStatus;
   items: { product_id: number; quantity: number }[];

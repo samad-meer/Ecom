@@ -25,15 +25,22 @@ function OrderCard({ order, onPress }: { order: AdminOrder; onPress: () => void 
   });
   return (
     <TouchableOpacity
-      style={[styles.card, order.is_hidden && styles.cardHidden]}
+      style={[
+        styles.card,
+        order.is_hidden && styles.cardHidden,
+        order.is_pinned && styles.cardPinned,
+      ]}
       onPress={onPress}
       activeOpacity={0.85}
       accessibilityRole="button"
-      accessibilityLabel={`Order ${order.id}, ${order.customer_name}, ${order.status}, ${order.is_paid ? 'paid' : 'unpaid'}`}
+      accessibilityLabel={`Order ${order.id}, ${order.customer_name}, ${order.status}, ${order.is_paid ? 'paid' : 'unpaid'}${order.is_pinned ? ', pinned' : ''}`}
     >
       <View style={styles.cardTop}>
         <View style={styles.cardInfo}>
           <View style={styles.nameRow}>
+            {order.is_pinned && (
+              <Ionicons name="pin" size={15} color="#D97706" style={{ marginRight: 4 }} />
+            )}
             <Text style={styles.customerName} numberOfLines={1}>{order.customer_name}</Text>
             {/* Phone marker: a call-in guest, not a registered account. */}
             {!!order.guest_name && <Ionicons name="call" size={14} color={colors.primary} />}
@@ -49,6 +56,9 @@ function OrderCard({ order, onPress }: { order: AdminOrder; onPress: () => void 
       </View>
 
       <View style={styles.pillRow}>
+        {order.is_pinned && (
+          <StatusPill label="Pinned" tone="warning" icon="pin" />
+        )}
         <StatusPill label={order.status} tone={orderStatusTone(order.status)} />
         <StatusPill
           label={order.is_paid ? 'Paid' : 'Unpaid'}
@@ -56,6 +66,9 @@ function OrderCard({ order, onPress }: { order: AdminOrder; onPress: () => void 
           icon={order.is_paid ? 'checkmark-circle' : 'alert-circle'}
         />
         {order.is_hidden && <StatusPill label="Hidden" tone="neutral" icon="eye-off" />}
+        {order.show_to_rider === false && (
+          <StatusPill label="Rider Hidden" tone="danger" icon="eye-off" />
+        )}
       </View>
     </TouchableOpacity>
   );
@@ -426,6 +439,12 @@ const styles = StyleSheet.create({
   list: { paddingHorizontal: pagePadding, paddingBottom: 24, flexGrow: 1 },
   card: { ...card, padding: 16, marginBottom: 12 },
   cardHidden: { opacity: 0.6 },
+  cardPinned: {
+    borderWidth: 1.5,
+    borderColor: '#F59E0B',
+    shadowColor: '#F59E0B',
+    shadowOpacity: 0.15,
+  },
   cardTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
   cardInfo: { flex: 1 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },

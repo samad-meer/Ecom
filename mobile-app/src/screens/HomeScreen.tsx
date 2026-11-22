@@ -1,11 +1,12 @@
-import React, { useCallback, useContext, useMemo, useState } from 'react';
-import { View, Text, FlatList, StyleSheet, TextInput, RefreshControl, TouchableOpacity, ScrollView } from 'react-native';
+import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { View, Text, FlatList, StyleSheet, TextInput, RefreshControl, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, shadow } from '../theme';
 import { useProducts } from '../hooks/useProducts';
 import { ProductCard } from '../components/ProductCard';
+import { RefillProductCard } from '../components/RefillProductCard';
 import { LoadingScreen } from '../components/LoadingScreen';
 import { Product } from '../types/product';
 import { RootStackParamList } from '../types/navigation';
@@ -14,11 +15,28 @@ import { useCart } from '../context/CartContext';
 import { AuthContext } from '../context/AuthContext';
 import { getOrders, Order } from '../services/orderService';
 import { authService, getAuthToken } from '../services/authService';
-import { friendlyError } from '../components/ui';
+import { friendlyError, StatusPill, orderStatusTone } from '../components/ui';
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 const money = (n: number) => n.toLocaleString('en-PK', { maximumFractionDigits: 0 });
+
+const formatOrderTime = (dateStr: string) => {
+  try {
+    const d = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - d.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    const isToday = d.toDateString() === now.toDateString();
+    const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (isToday) return `Today, ${timeStr}`;
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + `, ${timeStr}`;
+  } catch {
+    return '';
+  }
+};
 
 export const HomeScreen: React.FC = () => {
   const { products, categories, selectedCategory, setSelectedCategory, loading, error, refetch } = useProducts();
@@ -33,35 +51,67 @@ export const HomeScreen: React.FC = () => {
   // figure here would tell a customer they are settled when they are not.
   const [owed, setOwed] = useState<number | null>(null);
 
-  // Re-read on every visit, so "your usual" and the balance are never a day old.
+  const fetchOrdersAndBalance = useCallback(async () => {
+    try {
+      const data = await getOrders();
+      if (Array.isArray(data)) setOrders(data);
+    } catch {
+      // No history is fine: the usual order simply does not appear.
+    }
+    try {
+      const token = await getAuthToken();
+      if (!token) return;
+      const profile = await authService.getProfile(token);
+      const stored = Number(profile?.account_balance);
+      // The stored balance is credit-positive, so what is owed is its negative.
+      if (profile?.account_balance != null && Number.isFinite(stored)) setOwed(-stored);
+    } catch {
+      setOwed(null);
+    }
+  }, []);
+
+  // Re-read on every visit, so active orders, "your usual" and the balance are never a day old.
   useFocusEffect(useCallback(() => {
-    let live = true;
-    (async () => {
-      try {
-        const data = await getOrders();
-        if (live && Array.isArray(data)) setOrders(data);
-      } catch {
-        // No history is fine: the usual order simply does not appear.
-      }
-      try {
-        const token = await getAuthToken();
-        if (!token) return;
-        const profile = await authService.getProfile(token);
-        const stored = Number(profile?.account_balance);
-        // The stored balance is credit-positive, so what is owed is its negative.
-        if (live && profile?.account_balance != null && Number.isFinite(stored)) setOwed(-stored);
-      } catch {
-        if (live) setOwed(null);
-      }
-    })();
-    return () => { live = false; };
-  }, []));
+    fetchOrdersAndBalance();
+  }, [fetchOrdersAndBalance]));
+
+  // Active / in-progress orders placed by the customer
+  const activeOrders = useMemo(() => {
+    return orders
+      .filter((o) => o.status !== 'Delivered' && o.status !== 'Cancelled')
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }, [orders]);
+
+  const latestActiveOrder = activeOrders[0] || null;
+
+  const activeOrderSummary = useMemo(() => {
+    if (!latestActiveOrder || !Array.isArray(latestActiveOrder.items) || latestActiveOrder.items.length === 0) {
+      return 'Order Placed';
+    }
+    const first = latestActiveOrder.items[0];
+    const firstName = first.product_details?.name || 'Item';
+    const text = `${first.quantity} × ${firstName}`;
+    return latestActiveOrder.items.length > 1 ? `${text} + ${latestActiveOrder.items.length - 1} more` : text;
+  }, [latestActiveOrder]);
 
   const quantityOf = (productId: number) => items.find((i) => i.id === productId)?.quantity ?? 0;
 
-  const filteredProducts = products.filter((product) =>
-    product.name.toLowerCase().includes(searchQuery.toLowerCase()),
-  );
+  const isRefillProduct = (p: Product) => {
+    return Boolean(p.is_refill || (p.name && /refill/i.test(p.name)));
+  };
+
+  const filteredProducts = useMemo(() => {
+    const list = products.filter((product) =>
+      product.name.toLowerCase().includes(searchQuery.toLowerCase()),
+    );
+    // Refill products (e.g. 19L Refill) are ALWAYS pinned to the top
+    return list.slice().sort((a, b) => {
+      const aRefill = isRefillProduct(a) ? 1 : 0;
+      const bRefill = isRefillProduct(b) ? 1 : 0;
+      if (aRefill !== bRefill) return bRefill - aRefill;
+      return 0;
+    });
+  }, [products, searchQuery]);
 
   // The customer's last real order, limited to what is still on sale.
   const usual = useMemo(() => {
@@ -114,6 +164,52 @@ export const HomeScreen: React.FC = () => {
 
   const name = user?.first_name || user?.username || '';
   const cartCount = getCartCount();
+  const [pullRefreshing, setPullRefreshing] = useState(false);
+
+  const handlePullRefresh = useCallback(async () => {
+    setPullRefreshing(true);
+    try {
+      await Promise.allSettled([refetch(), fetchOrdersAndBalance()]);
+    } finally {
+      setPullRefreshing(false);
+    }
+  }, [refetch, fetchOrdersAndBalance]);
+
+  useEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <View style={styles.headerRightRow}>
+          <TouchableOpacity
+            style={styles.headerRefreshBtn}
+            onPress={handlePullRefresh}
+            disabled={pullRefreshing}
+            accessibilityRole="button"
+            accessibilityLabel="Refresh products and orders"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            {pullRefreshing ? (
+              <ActivityIndicator size="small" color={colors.primary} />
+            ) : (
+              <Ionicons name="refresh" size={20} color={colors.ink} />
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => navigation.navigate('Cart')}
+            style={styles.headerCartButton}
+            accessibilityLabel="Open cart"
+          >
+            <Ionicons name="cart-outline" size={22} color={colors.ink} />
+            {cartCount > 0 && (
+              <View style={styles.headerBadge}>
+                <Text style={styles.headerBadgeText}>{cartCount}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </View>
+      ),
+    });
+  }, [navigation, handlePullRefresh, pullRefreshing, cartCount]);
 
   const header = (
     <View>
@@ -125,6 +221,23 @@ export const HomeScreen: React.FC = () => {
           <Text style={styles.greetingSmall}>Assalam o Alaikum</Text>
           <Text style={styles.greeting} numberOfLines={1}>{name ? `Hi, ${name}` : 'Welcome'}</Text>
         </View>
+        <TouchableOpacity
+          style={styles.greetingRefreshBtn}
+          onPress={handlePullRefresh}
+          disabled={pullRefreshing}
+          accessibilityRole="button"
+          accessibilityLabel="Refresh page"
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          {pullRefreshing ? (
+            <ActivityIndicator size="small" color={colors.primaryDark} />
+          ) : (
+            <>
+              <Ionicons name="refresh" size={15} color={colors.primaryDark} />
+              <Text style={styles.greetingRefreshText}>Refresh</Text>
+            </>
+          )}
+        </TouchableOpacity>
       </View>
 
       {!!error && (
@@ -139,9 +252,66 @@ export const HomeScreen: React.FC = () => {
         </View>
       )}
 
-      {/* Only when the cart is empty: adding a whole order on top of a half-built
+      {/* ── Active Order Banner (shown on top when an order is placed) ── */}
+      {latestActiveOrder && (
+        <TouchableOpacity
+          style={styles.activeOrderCard}
+          onPress={() => (navigation as any).navigate('Orders')}
+          activeOpacity={0.9}
+          accessibilityRole="button"
+          accessibilityLabel={`Active order number ${latestActiveOrder.id}`}
+        >
+          <View style={styles.activeOrderCircleBig} />
+          <View style={styles.activeOrderDropWrap}>
+            <Ionicons
+              name={latestActiveOrder.status === 'Shipped' ? 'bicycle' : 'receipt-outline'}
+              size={54}
+              color="rgba(255, 255, 255, 0.12)"
+            />
+          </View>
+
+          <View style={styles.activeOrderHeader}>
+            <View style={styles.activeOrderBadge}>
+              <View style={styles.activeOrderDot} />
+              <Text style={styles.activeOrderBadgeText}>
+                ORDER PLACED · #{latestActiveOrder.id}
+              </Text>
+            </View>
+            <StatusPill
+              label={t(`status_${latestActiveOrder.status.toLowerCase()}`, latestActiveOrder.status)}
+              tone={orderStatusTone(latestActiveOrder.status)}
+            />
+          </View>
+
+          <Text style={styles.activeOrderSummary} numberOfLines={2}>
+            {activeOrderSummary}
+          </Text>
+
+          <View style={styles.activeOrderMetaRow}>
+            <Ionicons name="time-outline" size={14} color="rgba(255, 255, 255, 0.85)" />
+            <Text style={styles.activeOrderSub}>
+              PKR {money(latestActiveOrder.total_price)} · {formatOrderTime(latestActiveOrder.created_at)}
+            </Text>
+          </View>
+
+          {activeOrders.length > 1 && (
+            <Text style={styles.activeOrderExtra}>
+              +{activeOrders.length - 1} more active order{activeOrders.length > 2 ? 's' : ''}
+            </Text>
+          )}
+
+          <View style={styles.activeOrderFooter}>
+            <View style={styles.activeOrderBtn}>
+              <Text style={styles.activeOrderBtnText}>View Details & Track</Text>
+              <Ionicons name="arrow-forward" size={16} color={colors.ink} />
+            </View>
+          </View>
+        </TouchableOpacity>
+      )}
+
+      {/* Only when there is no active order and the cart is empty: adding a whole order on top of a half-built
           cart would double the quantities. */}
-      {usual && cartCount === 0 && (
+      {!latestActiveOrder && usual && cartCount === 0 && (
         <View style={styles.usualCard}>
           <View style={styles.usualCircleBig} />
           <View style={styles.usualDropWrap}>
@@ -213,20 +383,33 @@ export const HomeScreen: React.FC = () => {
     <View style={styles.container}>
       <FlatList
         data={filteredProducts}
-        renderItem={({ item }) => (
-          <ProductCard
-            product={item}
-            quantity={quantityOf(item.id)}
-            onPress={handleProductPress}
-            onAdd={(p) => addToCart(p, 1)}
-            onChangeQuantity={handleQuantity}
-          />
-        )}
+        renderItem={({ item }) => {
+          if (isRefillProduct(item)) {
+            return (
+              <RefillProductCard
+                product={item}
+                quantity={quantityOf(item.id)}
+                onPress={handleProductPress}
+                onAdd={(p) => addToCart(p, 1)}
+                onChangeQuantity={handleQuantity}
+              />
+            );
+          }
+          return (
+            <ProductCard
+              product={item}
+              quantity={quantityOf(item.id)}
+              onPress={handleProductPress}
+              onAdd={(p) => addToCart(p, 1)}
+              onChangeQuantity={handleQuantity}
+            />
+          );
+        }}
         keyExtractor={(item) => item.id.toString()}
         ListHeaderComponent={header}
         contentContainerStyle={[styles.listContent, cartCount > 0 && { paddingBottom: 92 }]}
         keyboardShouldPersistTaps="handled"
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={refetch} colors={[colors.primary]} tintColor={colors.primary} />}
+        refreshControl={<RefreshControl refreshing={loading || pullRefreshing} onRefresh={handlePullRefresh} colors={[colors.primary]} tintColor={colors.primary} />}
         ListEmptyComponent={
           <View style={styles.emptyBox}>
             <Ionicons name="water-outline" size={36} color={colors.disabled} />
@@ -266,6 +449,169 @@ const styles = StyleSheet.create({
   greetingText: { flex: 1 },
   greetingSmall: { fontSize: 13, color: colors.muted },
   greeting: { fontSize: 24, fontWeight: '800', color: colors.ink, letterSpacing: -0.3 },
+
+  greetingRefreshBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 12,
+    height: 36,
+    borderRadius: radius.pill,
+    backgroundColor: colors.primaryTint,
+    borderWidth: 1,
+    borderColor: colors.primarySoft,
+  },
+  greetingRefreshText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.primaryDark,
+  },
+
+  headerRightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 14,
+    gap: 8,
+  },
+  headerRefreshBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerCartButton: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  headerBadge: {
+    position: 'absolute',
+    right: -5,
+    top: -5,
+    backgroundColor: colors.danger,
+    borderRadius: 12,
+    minWidth: 18,
+    height: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 3,
+  },
+  headerBadgeText: {
+    color: colors.white,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+
+  activeOrderCard: {
+    backgroundColor: colors.ink,
+    borderRadius: radius.xl,
+    padding: 20,
+    marginBottom: 12,
+    overflow: 'hidden',
+    ...shadow.card,
+  },
+  activeOrderCircleBig: {
+    position: 'absolute',
+    right: -30,
+    top: -40,
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  activeOrderDropWrap: {
+    position: 'absolute',
+    right: 20,
+    top: 22,
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  activeOrderHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  activeOrderBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255, 210, 63, 0.18)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
+  },
+  activeOrderDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: colors.sun,
+  },
+  activeOrderBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    color: colors.sun,
+  },
+  activeOrderSummary: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: colors.white,
+    marginTop: 2,
+    marginRight: 80,
+    lineHeight: 28,
+  },
+  activeOrderMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
+  },
+  activeOrderSub: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.88)',
+    fontWeight: '600',
+  },
+  activeOrderExtra: {
+    fontSize: 12,
+    color: colors.sun,
+    fontWeight: '700',
+    marginTop: 6,
+  },
+  activeOrderFooter: {
+    marginTop: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  activeOrderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    alignSelf: 'flex-start',
+    height: 42,
+    paddingHorizontal: 18,
+    borderRadius: radius.md,
+    backgroundColor: colors.sun,
+  },
+  activeOrderBtnText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: colors.ink,
+  },
 
   usualCard: {
     backgroundColor: colors.primary, borderRadius: radius.xl, padding: 20, marginBottom: 12,

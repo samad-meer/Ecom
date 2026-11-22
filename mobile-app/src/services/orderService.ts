@@ -30,6 +30,9 @@ export interface Order {
   /** Saved-address name the order was placed from; '' when unnamed. */
   shipping_label?: string;
   payment_method: string;
+  show_to_rider?: boolean;
+  is_pinned?: boolean;
+  pinned_at?: string | null;
   created_at: string;
   // Delivery fields
   number_of_bottles?: number;
@@ -152,6 +155,12 @@ export const getDeliveryOrder = async (orderId: number) => {
   const token = await getAuthToken();
   const response = await authedFetch(`${API_URL}/orders/delivery/orders/${orderId}/`);
   if (!response.ok) throw new Error(`Failed to fetch order ${orderId}`);
+  return response.json();
+};
+
+export const getDeliverySettings = async () => {
+  const response = await authedFetch(`${API_URL}/orders/delivery/settings/`);
+  if (!response.ok) throw new Error(`Failed to fetch delivery settings`);
   return response.json();
 };
 

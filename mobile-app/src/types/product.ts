@@ -13,6 +13,7 @@ export interface Product {
   description: string;
   price: string;
   is_active: boolean;
+  is_refill?: boolean;
   image: string | null;
   category: number | null;
   category_details?: Category;

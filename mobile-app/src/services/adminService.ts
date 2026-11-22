@@ -32,6 +32,8 @@ export interface AdminOrder {
   is_paid: boolean;
   is_hidden: boolean;
   show_to_rider?: boolean;
+  is_pinned?: boolean;
+  pinned_at?: string | null;
   created_at: string;
   assigned_delivery_boy: number | null;
   assigned_delivery_boy_name: string | null;
@@ -350,6 +352,7 @@ export const adminService = {
     payment_method: string;
     payment_number?: string;
     assigned_delivery_boy?: number | null;
+    show_to_rider?: boolean;
     delivery_notes?: string;
     status?: string;
     items: { product_id: number; quantity: number }[];

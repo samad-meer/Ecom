@@ -8,7 +8,7 @@ class CategoryAdmin(admin.ModelAdmin):
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
-    list_display = ('name', 'category', 'price', 'is_active', 'created_at')
-    list_editable = ('price', 'is_active')
-    list_filter = ('category', 'is_active', 'created_at')
+    list_display = ('name', 'category', 'price', 'is_refill', 'is_active', 'created_at')
+    list_editable = ('price', 'is_refill', 'is_active')
+    list_filter = ('is_refill', 'category', 'is_active', 'created_at')
     search_fields = ('name', 'description')

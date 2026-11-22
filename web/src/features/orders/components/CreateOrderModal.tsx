@@ -133,6 +133,7 @@ export function CreateOrderModal({ open, onClose, onCreated }: CreateOrderModalP
   const [address, setAddress] = useState<AddressParts>(EMPTY_ADDRESS);
   const [addressErrors, setAddressErrors] = useState<AddressErrors>({});
   const [riderId, setRiderId] = useState<number | "">("");
+  const [showToRider, setShowToRider] = useState(true);
   const [deliveryNotes, setDeliveryNotes] = useState("");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [saving, setSaving] = useState(false);
@@ -157,6 +158,7 @@ export function CreateOrderModal({ open, onClose, onCreated }: CreateOrderModalP
       setAddress(EMPTY_ADDRESS);
       setAddressErrors({});
       setRiderId("");
+      setShowToRider(true);
       setDeliveryNotes("");
       setCart([]);
       setError("");
@@ -213,6 +215,7 @@ export function CreateOrderModal({ open, onClose, onCreated }: CreateOrderModalP
       area: address.area.trim(),
       payment_method: "COD",
       assigned_delivery_boy: riderId || null,
+      show_to_rider: showToRider,
       delivery_notes: deliveryNotes || undefined,
       status: "Processing",
       items: cart.map((c) => ({ product_id: c.product.id, quantity: c.quantity })),
@@ -405,6 +408,17 @@ export function CreateOrderModal({ open, onClose, onCreated }: CreateOrderModalP
               </option>
             ))}
           </select>
+          <label className="mt-3 flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={showToRider}
+              onChange={(e) => setShowToRider(e.target.checked)}
+              className="h-4 w-4 rounded border-white/20 bg-white/5 text-wave accent-sky-500 focus:ring-0"
+            />
+            <span className="text-xs font-medium text-mist">
+              Show order to rider in rider app
+            </span>
+          </label>
         </div>
 
         {/* Note for the rider. Named for its audience rather than "Delivery

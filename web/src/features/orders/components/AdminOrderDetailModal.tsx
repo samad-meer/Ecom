@@ -20,6 +20,9 @@ import {
   MessageCircle,
   Pencil,
   ChevronDown,
+  Eye,
+  EyeOff,
+  Pin,
 } from "lucide-react";
 import { canWhatsApp, openWhatsApp, orderDispatchMessage } from "@/lib/whatsapp";
 import { canCall, telHref } from "@/lib/phone";
@@ -288,6 +291,7 @@ function RecordPayment({
 // ─── Main modal ───────────────────────────────────────────────────────────────
 
 export function AdminOrderDetailModal({ order, onClose, onUpdated }: AdminOrderDetailModalProps) {
+  const notify = useToast();
   const deliveryStatuses = useAsync(() => ordersApi.deliveryStatuses(), []);
   const templates = useAsync(() => messageTemplatesApi.list(), []);
   const [isEditing, setIsEditing] = useState(false);
@@ -329,7 +333,15 @@ export function AdminOrderDetailModal({ order, onClose, onUpdated }: AdminOrderD
         <div className="flex flex-col gap-1 max-h-[80vh] overflow-y-auto pr-1">
           {/* Status + actions + date */}
           <div className="mb-3 flex items-center justify-between">
-            <OrderStatusBadge status={order.status} />
+            <div className="flex items-center gap-2">
+              <OrderStatusBadge status={order.status} />
+              {order.is_pinned && (
+                <span className="flex items-center gap-1 rounded-full bg-amber-400/20 border border-amber-400/30 px-2 py-0.5 text-xs font-semibold text-amber-300">
+                  <Pin size={11} className="fill-amber-300" />
+                  Deliver First
+                </span>
+              )}
+            </div>
             <div className="flex items-center gap-3">
               <Button
                 variant="ghost"
@@ -485,6 +497,65 @@ export function AdminOrderDetailModal({ order, onClose, onUpdated }: AdminOrderD
         {order.assigned_delivery_boy_name && (
           <Row icon={Truck} label="Delivery boy" value={order.assigned_delivery_boy_name} />
         )}
+        <div className="flex items-center justify-between py-2 border-b border-white/5 text-xs">
+          <div className="flex items-center gap-2 text-mist/60">
+            <Pin size={15} className={cn(order.is_pinned ? "text-amber-400 fill-amber-400" : "text-mist/40")} />
+            <span>Pin for Rider (Deliver First)</span>
+          </div>
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                const nextVal = !order.is_pinned;
+                const updated = await ordersApi.adminUpdate(order.id, {
+                  is_pinned: nextVal,
+                });
+                notify(nextVal ? "Order pinned to top for rider (Deliver First)." : "Order unpinned.");
+                onUpdated?.(updated as AdminOrder);
+              } catch (e) {
+                notify(e instanceof Error ? e.message : "Failed to update pin status.", "error");
+              }
+            }}
+            className={cn(
+              "px-2.5 py-1 rounded-full font-medium transition-colors cursor-pointer flex items-center gap-1.5",
+              order.is_pinned
+                ? "bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/30"
+                : "bg-white/5 text-mist/40 hover:bg-white/10 hover:text-mist border border-white/10"
+            )}
+          >
+            <Pin size={12} className={cn(order.is_pinned && "fill-amber-300")} />
+            {order.is_pinned ? "Pinned (Priority #1)" : "Pin Order"}
+          </button>
+        </div>
+        <div className="flex items-center justify-between py-2 border-b border-white/5 text-xs">
+          <div className="flex items-center gap-2 text-mist/60">
+            {order.show_to_rider !== false ? <Eye size={15} /> : <EyeOff size={15} className="text-rose-400" />}
+            <span>Show to Rider</span>
+          </div>
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                const nextVal = order.show_to_rider === false;
+                const updated = await ordersApi.adminUpdate(order.id, {
+                  show_to_rider: nextVal,
+                });
+                notify(nextVal ? "Order is now visible to rider." : "Order is now hidden from rider.");
+                onUpdated?.(updated as AdminOrder);
+              } catch (e) {
+                notify(e instanceof Error ? e.message : "Failed to update rider visibility.", "error");
+              }
+            }}
+            className={cn(
+              "px-2.5 py-1 rounded-full font-medium transition-colors cursor-pointer",
+              order.show_to_rider !== false
+                ? "bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 border border-emerald-500/30"
+                : "bg-rose-500/15 text-rose-300 hover:bg-rose-500/25 border border-rose-500/30"
+            )}
+          >
+            {order.show_to_rider !== false ? "Visible to Rider" : "Hidden from Rider"}
+          </button>
+        </div>
         {order.delivery_notes && (
           <Row icon={MessageSquare} label="Note for the rider" value={order.delivery_notes} />
         )}

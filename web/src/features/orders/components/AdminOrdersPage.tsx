@@ -155,6 +155,7 @@ export function AdminOrdersPage() {
                 <th className="px-3 py-2.5 font-medium">Total</th>
                 <th className="px-3 py-2.5 font-medium">Status</th>
                 <th className="px-3 py-2.5 font-medium">Rider</th>
+                <th className="px-3 py-2.5 text-center font-medium">Pin</th>
                 <th className="px-3 py-2.5 text-center font-medium">Paid</th>
                 <th className="px-3 py-2.5 text-center font-medium">Hide</th>
                 <th className="px-3 py-2.5 text-center font-medium">Details</th>

@@ -198,3 +198,83 @@ class AdminOrderAddressPartsTests(TestCase):
         res = self.client.post(ADMIN_ORDERS_URL, self._payload(), format='json')
         self.assertEqual(res.status_code, http.HTTP_400_BAD_REQUEST)
         self.assertIn('shipping_address', res.data)
+
+
+class AdminOrderEditTests(TestCase):
+    """Admin can edit order details (items, address, customer details, notes)."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = User.objects.create_user(
+            username='editadmin', password='AdminPass1!', is_staff=True,
+        )
+        self.client.force_authenticate(self.admin)
+        self.p1 = Product.objects.create(name='19L Bottle', price=Decimal('150.00'), is_active=True)
+        self.p2 = Product.objects.create(name='Dispenser', price=Decimal('500.00'), is_active=True)
+
+        res = self.client.post(
+            ADMIN_ORDERS_URL,
+            {
+                'guest_name': 'Original Customer',
+                'guest_phone': '03001234567',
+                'house_number': '123',
+                'area': 'Gulberg',
+                'payment_method': 'COD',
+                'items': [{'product_id': self.p1.id, 'quantity': 2}],
+            },
+            format='json',
+        )
+        self.assertEqual(res.status_code, http.HTTP_201_CREATED)
+        self.order_id = res.data['id']
+        self.update_url = f'/api/orders/admin/{self.order_id}/'
+
+    def test_edit_order_items_recalculates_total(self):
+        # Change to 1 bottle + 1 dispenser = 150 + 500 = 650
+        res = self.client.patch(
+            self.update_url,
+            {
+                'items': [
+                    {'product_id': self.p1.id, 'quantity': 1},
+                    {'product_id': self.p2.id, 'quantity': 1},
+                ],
+            },
+            format='json',
+        )
+        self.assertEqual(res.status_code, http.HTTP_200_OK, res.data)
+        order = Order.objects.get(pk=self.order_id)
+        self.assertEqual(order.total_price, Decimal('650.00'))
+        self.assertEqual(order.items.count(), 2)
+        quantities = {item.product_id: item.quantity for item in order.items.all()}
+        self.assertEqual(quantities, {self.p1.id: 1, self.p2.id: 1})
+
+    def test_edit_order_address(self):
+        res = self.client.patch(
+            self.update_url,
+            {
+                'house_number': '456',
+                'portion': 'first_floor',
+                'block': 'Block B',
+                'area': 'Model Town',
+            },
+            format='json',
+        )
+        self.assertEqual(res.status_code, http.HTTP_200_OK, res.data)
+        order = Order.objects.get(pk=self.order_id)
+        self.assertEqual(order.house_number, '456')
+        self.assertEqual(order.portion, 'first_floor')
+        self.assertEqual(order.shipping_address, '456, 1st Floor, Block B, Model Town')
+
+    def test_edit_guest_customer_details(self):
+        res = self.client.patch(
+            self.update_url,
+            {
+                'guest_name': 'Changed Customer Name',
+                'guest_phone': '03119876543',
+            },
+            format='json',
+        )
+        self.assertEqual(res.status_code, http.HTTP_200_OK, res.data)
+        order = Order.objects.get(pk=self.order_id)
+        self.assertEqual(order.guest_name, 'Changed Customer Name')
+        self.assertEqual(order.guest_phone, '03119876543')
+

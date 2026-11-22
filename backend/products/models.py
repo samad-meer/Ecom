@@ -38,6 +38,11 @@ class Product(models.Model):
     description = models.TextField(blank=True)
     price = models.DecimalField(max_digits=10, decimal_places=2)
     is_active = models.BooleanField(default=True)
+    is_refill = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text="Designates this product as a refill; displayed prominently on top with distinct animated styling.",
+    )
     image = models.ImageField(upload_to='products/', blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

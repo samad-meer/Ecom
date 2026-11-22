@@ -1,5 +1,5 @@
 import { colors, radius, shadow, card, pagePadding } from '../theme';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, Image, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -21,6 +21,11 @@ export const ProductDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const priceText = Number.isFinite(price)
     ? price.toLocaleString('en-PK', { maximumFractionDigits: 2 })
     : String(product.price);
+  const [imageError, setImageError] = useState(false);
+
+  useEffect(() => {
+    setImageError(false);
+  }, [product.image]);
 
   const handleAddToCart = () => {
     addToCart(product, quantity);
@@ -34,8 +39,13 @@ export const ProductDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     <SafeAreaView style={styles.container} edges={['left', 'right']}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.imageCard}>
-          {product.image ? (
-            <Image source={{ uri: product.image }} style={styles.image} resizeMode="cover" />
+          {product.image && !imageError ? (
+            <Image
+              source={{ uri: product.image }}
+              style={styles.image}
+              resizeMode="cover"
+              onError={() => setImageError(true)}
+            />
           ) : (
             <View style={[styles.image, styles.placeholder]}>
               <Ionicons name="water" size={72} color={colors.primary} />

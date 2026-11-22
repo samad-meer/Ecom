@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 from rest_framework import generics, permissions, status
@@ -58,10 +58,18 @@ class DeliveryBoyOrderListView(generics.ListAPIView):
 
     def get_queryset(self):
         profile = self.request.user.profile
+        today = timezone.localdate()
+        yesterday = today - timedelta(days=1)
+
         return Order.objects.filter(
-            assigned_delivery_boy=profile
+            assigned_delivery_boy=profile,
+            show_to_rider=True,
         ).exclude(
-            status__in=['Delivered', 'Cancelled']
+            status='Cancelled'
+        ).filter(
+            Q(created_at__date__gte=yesterday) |
+            Q(delivery_assigned_at__date__gte=yesterday) |
+            Q(delivery_completed_at__date__gte=yesterday)
         ).select_related(
             # assigned_delivery_boy is a UserProfile FK and its .user is read
             # when serializing; without both, each order re-queries them.
@@ -71,7 +79,7 @@ class DeliveryBoyOrderListView(generics.ListAPIView):
             # The product serializer nests its gallery, so stopping the
             # prefetch at the product costs one images query per order.
             'items__product__images'
-        ).order_by('-created_at')
+        ).order_by('-is_pinned', '-created_at')
 
     def list(self, request, *args, **kwargs):
         # The customer-card lookups are batched for the whole page here —
@@ -107,7 +115,8 @@ class DeliveryBoyOrderDetailView(generics.RetrieveUpdateAPIView):
 
     def get_queryset(self):
         return Order.objects.filter(
-            assigned_delivery_boy=self.request.user.profile
+            assigned_delivery_boy=self.request.user.profile,
+            show_to_rider=True,
         ).select_related('user', 'user__profile').prefetch_related('items__product')
     
     def update(self, request, *args, **kwargs):
@@ -355,7 +364,7 @@ class AdminOrderListView(generics.ListCreateAPIView):
     def get_queryset(self):
         qs = Order.objects.select_related(
             'user', 'user__profile', 'assigned_delivery_boy', 'assigned_delivery_boy__user'
-        ).prefetch_related('items__product').order_by('-created_at')
+        ).prefetch_related('items__product').order_by('-is_pinned', '-created_at')
 
         p = self.request.query_params
         # Default: hide is_hidden orders; pass ?show_hidden=true to include them
@@ -449,6 +458,7 @@ class AdminOrderUpdateView(generics.UpdateAPIView):
         old_status = instance.status
         old_rider_id = instance.assigned_delivery_boy_id
         old_hidden = instance.is_hidden
+        old_pinned = instance.is_pinned
         old_total = instance.total_price
         old_address = instance.shipping_address
 
@@ -490,6 +500,16 @@ class AdminOrderUpdateView(generics.UpdateAPIView):
                 activity_log(
                     request.user, 'order',
                     'Order Hidden' if new_hidden else 'Order Unhidden',
+                    target_type='order', target_id=instance.id, target_label=label,
+                )
+        if 'is_pinned' in data:
+            new_pinned = bool(instance.is_pinned)
+            if new_pinned != old_pinned:
+                instance.pinned_at = timezone.now() if new_pinned else None
+                instance.save(update_fields=['pinned_at'])
+                activity_log(
+                    request.user, 'order',
+                    'Order Pinned for Rider' if new_pinned else 'Order Unpinned',
                     target_type='order', target_id=instance.id, target_label=label,
                 )
         if 'items' in data:

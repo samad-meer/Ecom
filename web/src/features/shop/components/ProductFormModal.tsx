@@ -27,6 +27,7 @@ export function ProductFormModal({ open, product, onClose, onSaved }: ProductFor
   const [price, setPrice] = useState("");
   const [categoryId, setCategoryId] = useState<number | "">("");
   const [isActive, setIsActive] = useState(true);
+  const [isRefill, setIsRefill] = useState(false);
   const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [existingImages, setExistingImages] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
@@ -60,6 +61,7 @@ export function ProductFormModal({ open, product, onClose, onSaved }: ProductFor
       setPrice(product.price);
       setCategoryId(product.category_details?.id ?? "");
       setIsActive(product.is_active);
+      setIsRefill(Boolean(product.is_refill ?? (product.name && /refill/i.test(product.name))));
       setImageFiles([]);
       // Prefer the gallery; fall back to the legacy single image.
       const urls = product.images?.length
@@ -74,6 +76,7 @@ export function ProductFormModal({ open, product, onClose, onSaved }: ProductFor
       setPrice("");
       setCategoryId("");
       setIsActive(true);
+      setIsRefill(false);
       setImageFiles([]);
       setExistingImages([]);
     }
@@ -98,6 +101,7 @@ export function ProductFormModal({ open, product, onClose, onSaved }: ProductFor
         description: description.trim(),
         price,
         is_active: isActive,
+        is_refill: isRefill,
         category: categoryId || null,
         // Only send images when the user picked new ones; otherwise keep existing.
         images: imageFiles.length ? imageFiles : undefined,
@@ -210,6 +214,34 @@ export function ProductFormModal({ open, product, onClose, onSaved }: ProductFor
             <span
               className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${
                 isActive ? "translate-x-5" : "translate-x-0"
+              }`}
+            />
+          </button>
+        </div>
+
+        {/* Refill / Priority Pin toggle */}
+        <div className="flex items-center justify-between rounded-xl border border-sky-500/25 bg-sky-500/10 px-4 py-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-white">Refill Product</span>
+              <span className="rounded bg-sky-400/20 px-2 py-0.5 text-[10px] font-bold tracking-wider text-sky-300 border border-sky-400/30">
+                PINNED ON TOP
+              </span>
+            </div>
+            <p className="text-xs text-mist/70 mt-0.5">
+              Refill bottles show at the top of the mobile app with a special animated card
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsRefill((v) => !v)}
+            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ${
+              isRefill ? "bg-sky-500" : "bg-white/20"
+            }`}
+          >
+            <span
+              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform duration-200 ${
+                isRefill ? "translate-x-5" : "translate-x-0"
               }`}
             />
           </button>

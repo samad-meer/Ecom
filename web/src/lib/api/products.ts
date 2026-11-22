@@ -17,6 +17,7 @@ export interface ProductInput {
   description?: string;
   price: string | number;
   is_active?: boolean;
+  is_refill?: boolean;
   category?: number | null;
   /** New gallery images to upload (replaces existing on update). Max 3. */
   images?: File[];
@@ -28,6 +29,7 @@ function toFormData(data: ProductInput): FormData {
   if (data.description !== undefined) fd.append("description", data.description);
   fd.append("price", String(data.price));
   fd.append("is_active", String(data.is_active ?? true));
+  if (data.is_refill !== undefined) fd.append("is_refill", String(data.is_refill));
   if (data.category != null) fd.append("category", String(data.category));
   if (data.images?.length) {
     for (const file of data.images) fd.append("uploaded_images", file);

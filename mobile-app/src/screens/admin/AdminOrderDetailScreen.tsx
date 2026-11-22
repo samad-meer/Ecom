@@ -109,6 +109,9 @@ export const AdminOrderDetailScreen: React.FC = () => {
         </View>
         <Text style={styles.metaText}>{dateStr}</Text>
         <View style={styles.headerPills}>
+          {order.is_pinned && (
+            <StatusPill label="Pinned (Deliver First)" tone="warning" icon="pin" />
+          )}
           <StatusPill label={order.status} tone={orderStatusTone(order.status)} />
           <StatusPill
             label={order.is_paid ? 'Paid' : 'Unpaid'}
@@ -325,6 +328,58 @@ export const AdminOrderDetailScreen: React.FC = () => {
           ))}
         </View>
         {saving === 'rider' && <ActivityIndicator size="small" color={colors.primary} style={{ marginTop: 10 }} />}
+
+        {/* Rider visibility toggle */}
+        <View style={styles.riderVisibilityRow}>
+          <View style={{ flex: 1, marginRight: 12 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Ionicons
+                name={order.show_to_rider !== false ? 'eye' : 'eye-off'}
+                size={18}
+                color={order.show_to_rider !== false ? colors.primary : colors.muted}
+              />
+              <Text style={styles.riderVisibilityTitle}>Show to Rider</Text>
+            </View>
+            <Text style={styles.riderVisibilitySubtitle}>
+              {order.show_to_rider !== false
+                ? 'Visible in the assigned rider’s mobile app'
+                : 'Hidden from the rider’s mobile app'}
+            </Text>
+          </View>
+          <Switch
+            value={order.show_to_rider !== false}
+            onValueChange={(val) => patch('show_to_rider', { show_to_rider: val })}
+            disabled={saving === 'show_to_rider'}
+            trackColor={{ false: colors.line, true: colors.primary }}
+            thumbColor={colors.white}
+          />
+        </View>
+
+        {/* Pin Order / Deliver First Priority toggle */}
+        <View style={styles.riderVisibilityRow}>
+          <View style={{ flex: 1, marginRight: 12 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Ionicons
+                name="pin"
+                size={18}
+                color={order.is_pinned ? '#D97706' : colors.muted}
+              />
+              <Text style={styles.riderVisibilityTitle}>Pin Order (Deliver First)</Text>
+            </View>
+            <Text style={styles.riderVisibilitySubtitle}>
+              {order.is_pinned
+                ? 'Pinned at the very top of the rider’s list with Deliver First priority'
+                : 'Standard order priority'}
+            </Text>
+          </View>
+          <Switch
+            value={Boolean(order.is_pinned)}
+            onValueChange={(val) => patch('is_pinned', { is_pinned: val })}
+            disabled={saving === 'is_pinned'}
+            trackColor={{ false: colors.line, true: '#F59E0B' }}
+            thumbColor={colors.white}
+          />
+        </View>
       </View>
 
       {/* Notes */}
@@ -567,6 +622,18 @@ const styles = StyleSheet.create({
   riderState: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
   riderDot: { width: 8, height: 8, borderRadius: 4 },
   riderBtnSub: { fontSize: fontSize.xs, color: colors.muted },
+
+  riderVisibilityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 16,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+  },
+  riderVisibilityTitle: { fontSize: fontSize.sm, fontWeight: '700', color: colors.ink },
+  riderVisibilitySubtitle: { fontSize: fontSize.xs, color: colors.muted, marginTop: 2 },
 
   notesHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   notesTitle: { marginBottom: 0 },

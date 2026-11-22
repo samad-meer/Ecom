@@ -23,6 +23,11 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 }) => {
   const inStock = product.is_active;
   const price = Number(product.price);
+  const [imageError, setImageError] = React.useState(false);
+
+  React.useEffect(() => {
+    setImageError(false);
+  }, [product.image]);
 
   return (
     <View style={styles.card}>
@@ -32,8 +37,13 @@ export const ProductCard: React.FC<ProductCardProps> = ({
         activeOpacity={0.8}
         accessibilityLabel={`${product.name}, PKR ${product.price}`}
       >
-        {product.image ? (
-          <Image source={{ uri: product.image }} style={styles.image} resizeMode="cover" />
+        {product.image && !imageError ? (
+          <Image
+            source={{ uri: product.image }}
+            style={styles.image}
+            resizeMode="cover"
+            onError={() => setImageError(true)}
+          />
         ) : (
           <View style={[styles.image, styles.placeholder]}>
             <Ionicons name="water" size={28} color={colors.primary} />

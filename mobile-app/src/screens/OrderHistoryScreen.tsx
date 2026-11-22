@@ -1,6 +1,7 @@
 import { colors, radius, card, pagePadding } from '../theme';
-import React, { useEffect, useState, useContext, useMemo } from 'react';
-import { View, Text, FlatList, StyleSheet, TouchableOpacity, RefreshControl, ScrollView } from 'react-native';
+import React, { useEffect, useState, useContext, useMemo, useRef, useCallback } from 'react';
+import { View, Text, FlatList, StyleSheet, TouchableOpacity, RefreshControl, ScrollView, Vibration, ActivityIndicator } from 'react-native';
+import * as Notifications from 'expo-notifications';
 import { Ionicons } from '@expo/vector-icons';
 import { LoadingScreen } from '../components/LoadingScreen';
 import { TrackingStatusBanner } from '../components/TrackingStatusBanner';
@@ -52,22 +53,45 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
   const [calendarVisible, setCalendarVisible] = useState(false);
   const [riderStatusFilter, setRiderStatusFilter] = useState<'all' | 'to_deliver' | 'delivered'>('all');
   const isDeliveryBoy = user?.user_type === 'delivery_boy';
+  const [manualRefreshing, setManualRefreshing] = useState(false);
+  const previousOrderIdsRef = useRef<Set<number>>(new Set());
 
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async (silent = false) => {
+    if (!silent) setError(null);
     try {
       const data = isDeliveryBoy ? await getDeliveryOrders() : await getOrders();
-      setOrders(data);
-      setError(null);
+      if (Array.isArray(data)) {
+        // When rider gets a newly assigned order, alert with haptic buzz
+        if (isDeliveryBoy && previousOrderIdsRef.current.size > 0) {
+          const hasNew = data.some(
+            (o) => !previousOrderIdsRef.current.has(o.id) && o.status !== 'Delivered' && o.status !== 'Cancelled'
+          );
+          if (hasNew) {
+            try {
+              Vibration.vibrate([0, 300, 150, 300]);
+            } catch {
+              // Ignore if vibration unsupported
+            }
+          }
+        }
+        previousOrderIdsRef.current = new Set(data.map((o) => o.id));
+        setOrders(data);
+        setError(null);
+      }
     } catch (e: any) {
-      console.error('Error fetching orders:', e);
-      setError(e?.message || 'Could not load your orders.');
+      if (!silent) {
+        console.error('Error fetching orders:', e);
+        setError(e?.message || 'Could not load your orders.');
+      }
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (!silent) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  };
+  }, [isDeliveryBoy]);
 
-  const fetchDeliveryStatuses = async () => {
+  const fetchDeliveryStatuses = useCallback(async () => {
     if (!isDeliveryBoy) return;
     try {
       const statuses = await getDeliveryStatuses();
@@ -75,24 +99,79 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
     } catch (error) {
       console.error('Error fetching delivery statuses:', error);
     }
-  };
+  }, [isDeliveryBoy]);
 
+  const handleManualRefresh = useCallback(async () => {
+    setManualRefreshing(true);
+    setRefreshing(true);
+    try {
+      await Promise.allSettled([fetchOrders(), fetchDeliveryStatuses()]);
+    } finally {
+      setManualRefreshing(false);
+    }
+  }, [fetchOrders, fetchDeliveryStatuses]);
+
+  // Set header refresh button
   useEffect(() => {
-    fetchOrders();
-    fetchDeliveryStatuses();
-  }, []);
+    navigation.setOptions({
+      headerRight: () => (
+        <TouchableOpacity
+          onPress={handleManualRefresh}
+          style={styles.headerRefreshBtn}
+          accessibilityRole="button"
+          accessibilityLabel="Refresh orders"
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          {manualRefreshing ? (
+            <ActivityIndicator size="small" color={colors.primary} />
+          ) : (
+            <Ionicons name="refresh" size={20} color={colors.ink} />
+          )}
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation, handleManualRefresh, manualRefreshing]);
 
-  useFocusEffect(
-    React.useCallback(() => {
-      if (!loading) {
-        fetchOrders();
+  // Push notification listener: whenever an order/assignment notification arrives, auto-refresh immediately!
+  useEffect(() => {
+    let sub: any = null;
+    try {
+      sub = Notifications.addNotificationReceivedListener(() => {
+        fetchOrders(true);
+        fetchDeliveryStatuses();
+      });
+    } catch {
+      // Ignore
+    }
+    return () => {
+      if (sub && typeof sub.remove === 'function') {
+        sub.remove();
       }
-    }, [isDeliveryBoy, loading])
+    };
+  }, [fetchOrders, fetchDeliveryStatuses]);
+
+  // Screen focus & interval auto-polling (every 10 seconds for rider)
+  useFocusEffect(
+    useCallback(() => {
+      fetchOrders();
+      fetchDeliveryStatuses();
+
+      let interval: NodeJS.Timeout | null = null;
+      if (isDeliveryBoy) {
+        // Automatically check for newly assigned orders every 10 seconds
+        interval = setInterval(() => {
+          fetchOrders(true);
+        }, 10000);
+      }
+
+      return () => {
+        if (interval) clearInterval(interval);
+      };
+    }, [isDeliveryBoy, fetchOrders, fetchDeliveryStatuses])
   );
 
   const onRefresh = () => {
-    setRefreshing(true);
-    fetchOrders();
+    handleManualRefresh();
   };
 
   const getDeliveryStatusColor = (deliveryStatusName: string) => {
@@ -104,7 +183,7 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
   };
 
   const filteredOrders = useMemo(() => {
-    return orders.filter(o => {
+    const list = orders.filter(o => {
       // 1. Date filter (if active)
       if (selectedDate) {
         const orderDate = isoDate(new Date(o.created_at));
@@ -125,6 +204,18 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
       }
       return true;
     });
+
+    // Pinned orders ALWAYS sort to the top for the rider so they deliver first
+    if (isDeliveryBoy) {
+      return [...list].sort((a, b) => {
+        if (Boolean(a.is_pinned) !== Boolean(b.is_pinned)) {
+          return a.is_pinned ? -1 : 1;
+        }
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      });
+    }
+
+    return list;
   }, [orders, selectedDate, selectedFilter, riderStatusFilter, isDeliveryBoy]);
 
   // Counts for rider quick chips
@@ -139,7 +230,11 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
 
   const renderRiderFilterChips = () => {
     const todayStr = isoDate(new Date());
+    const dYesterday = new Date();
+    dYesterday.setDate(dYesterday.getDate() - 1);
+    const yesterdayStr = isoDate(dYesterday);
     const isToday = selectedDate === todayStr;
+    const isYesterday = selectedDate === yesterdayStr;
 
     return (
       <ScrollView
@@ -148,14 +243,14 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
         style={styles.filterBar}
         contentContainerStyle={styles.filterBarContent}
       >
-        {/* Date: All Dates */}
+        {/* Date: All (Today & Yesterday) */}
         <TouchableOpacity
           style={[styles.filterChip, selectedDate === null && styles.filterChipActiveYellow]}
           onPress={() => setSelectedDate(null)}
           accessibilityRole="button"
         >
           <Text style={[styles.filterChipText, selectedDate === null && styles.filterChipTextActiveDark]}>
-            All Dates
+            All
           </Text>
         </TouchableOpacity>
 
@@ -176,11 +271,28 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
           </Text>
         </TouchableOpacity>
 
+        {/* Date: Yesterday quick chip */}
+        <TouchableOpacity
+          style={[styles.filterChip, isYesterday && styles.filterChipActiveYellow]}
+          onPress={() => setSelectedDate(isYesterday ? null : yesterdayStr)}
+          accessibilityRole="button"
+        >
+          <Ionicons
+            name="time-outline"
+            size={14}
+            color={isYesterday ? colors.ink : colors.muted}
+            style={{ marginRight: 4 }}
+          />
+          <Text style={[styles.filterChipText, isYesterday && styles.filterChipTextActiveDark]}>
+            Yesterday
+          </Text>
+        </TouchableOpacity>
+
         {/* Date: Pick Date using responsive Calendar Modal */}
         <TouchableOpacity
           style={[
             styles.filterChip,
-            selectedDate && !isToday ? styles.filterChipActiveYellow : styles.calendarChip,
+            selectedDate && !isToday && !isYesterday ? styles.filterChipActiveYellow : styles.calendarChip,
           ]}
           onPress={() => setCalendarVisible(true)}
           accessibilityRole="button"
@@ -188,17 +300,17 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
           <Ionicons
             name="calendar"
             size={14}
-            color={selectedDate && !isToday ? colors.ink : colors.primary}
+            color={selectedDate && !isToday && !isYesterday ? colors.ink : colors.primary}
             style={{ marginRight: 4 }}
           />
           <Text
             style={[
               styles.filterChipText,
-              selectedDate && !isToday && styles.filterChipTextActiveDark,
+              selectedDate && !isToday && !isYesterday && styles.filterChipTextActiveDark,
               !selectedDate && { color: colors.primary, fontWeight: '700' },
             ]}
           >
-            {selectedDate && !isToday ? formatDateChip(selectedDate) : 'Pick Date'}
+            {selectedDate && !isToday && !isYesterday ? formatDateChip(selectedDate) : 'Pick Date'}
           </Text>
           {selectedDate && (
             <TouchableOpacity
@@ -259,6 +371,24 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
           <Text style={[styles.filterChipText, riderStatusFilter === 'delivered' && styles.filterChipTextActive]}>
             Delivered ({riderCounts.delivered})
           </Text>
+        </TouchableOpacity>
+
+        {/* Quick Refresh Chip */}
+        <TouchableOpacity
+          style={styles.refreshChip}
+          onPress={handleManualRefresh}
+          disabled={manualRefreshing}
+          accessibilityRole="button"
+          accessibilityLabel="Refresh orders list"
+        >
+          {manualRefreshing ? (
+            <ActivityIndicator size="small" color={colors.primaryDark} />
+          ) : (
+            <>
+              <Ionicons name="refresh" size={13} color={colors.primaryDark} style={{ marginRight: 4 }} />
+              <Text style={styles.refreshChipText}>Refresh</Text>
+            </>
+          )}
         </TouchableOpacity>
       </ScrollView>
     );
@@ -335,6 +465,24 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
             </TouchableOpacity>
           );
         })}
+
+        {/* Quick Refresh Chip */}
+        <TouchableOpacity
+          style={styles.refreshChip}
+          onPress={handleManualRefresh}
+          disabled={manualRefreshing}
+          accessibilityRole="button"
+          accessibilityLabel="Refresh orders list"
+        >
+          {manualRefreshing ? (
+            <ActivityIndicator size="small" color={colors.primaryDark} />
+          ) : (
+            <>
+              <Ionicons name="refresh" size={13} color={colors.primaryDark} style={{ marginRight: 4 }} />
+              <Text style={styles.refreshChipText}>Refresh</Text>
+            </>
+          )}
+        </TouchableOpacity>
       </ScrollView>
     );
   };
@@ -368,20 +516,34 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
       (item as any).customer?.phone_number ?? (item as any).guest_phone ?? null;
     const itemCount = item.items.reduce((n, p) => n + p.quantity, 0);
 
+    const riderCanCall = (item as any).delivery_settings?.rider_can_call ?? true;
+    const riderCanWhatsApp = (item as any).delivery_settings?.rider_can_whatsapp ?? true;
+    const allowCall = canCall(customerPhone) && riderCanCall;
+    const allowWhatsApp = canWhatsApp(customerPhone) && riderCanWhatsApp;
+
     return (
-      <View style={styles.riderCard}>
+      <TouchableOpacity
+        style={[styles.riderCard, item.is_pinned && styles.riderCardPinned]}
+        onPress={() => (navigation as any).navigate('DeliveryOrderDetail', { order: item })}
+        activeOpacity={0.85}
+        accessibilityRole="button"
+        accessibilityLabel={`Order #${item.id}, ${item.shipping_address || 'No address'}${item.is_pinned ? ' (Priority Deliver First)' : ''}`}
+      >
         {/* A status-coloured spine down the left edge. Riders scan a list of
             near-identical cards, and colour is readable at arm's length in a
             way a small badge is not. */}
         <View
           style={[
             styles.riderSpine,
-            { backgroundColor: isDelivered ? colors.success : statusColor?.border || colors.primary },
+            { backgroundColor: item.is_pinned ? '#D97706' : (isDelivered ? colors.success : statusColor?.border || colors.primary) },
           ]}
         />
 
         {/* Order number as a banner welded to the right edge. */}
-        <View style={styles.riderBanner}>
+        <View style={[styles.riderBanner, item.is_pinned && styles.riderBannerPinned]}>
+          {item.is_pinned && (
+            <Ionicons name="pin" size={13} color={colors.white} style={{ marginRight: 4 }} />
+          )}
           <Text style={styles.riderBannerHash}>#</Text>
           <Text style={styles.riderBannerId}>{item.id}</Text>
         </View>
@@ -390,16 +552,22 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
           {/* 1 — Address. The whole job starts with getting to the right gate.
               Padded clear of the banner so long addresses never run under it. */}
           <View style={styles.riderAddressRow}>
-            <Ionicons name="location" size={18} color={colors.primary} style={{ marginTop: 2 }} />
+            <Ionicons name="location" size={18} color={item.is_pinned ? '#D97706' : colors.primary} style={{ marginTop: 2 }} />
             <Text style={styles.riderAddress} numberOfLines={3}>
               {item.shipping_address || t('no_address', 'No address on this order')}
             </Text>
           </View>
 
-          {/* Whether an exact pin exists changes how a rider plans the stop. */}
-          {(!!pin || (!!item.delivery_status && !!statusColor)) && (
+          {/* Status badges: Priority Deliver First, Map Pin, and Delivery Status */}
+          {(item.is_pinned || !!pin || (!!item.delivery_status && !!statusColor)) && (
             <View style={styles.riderChipRow}>
-              {!!pin && <StatusPill label="Pinned" tone="success" icon="location" />}
+              {item.is_pinned && (
+                <View style={styles.riderPriorityBadge}>
+                  <Ionicons name="pin" size={12} color="#D97706" />
+                  <Text style={styles.riderPriorityText}>Deliver First</Text>
+                </View>
+              )}
+              {!!pin && <StatusPill label="Map Pin" tone="info" icon="location" />}
               {!!item.delivery_status && statusColor && (
                 <View style={[
                   styles.riderStatusChip,
@@ -414,15 +582,12 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
             </View>
           )}
 
-          {/* Contact. A rider standing at a locked gate needs the number in one
-              tap, without opening the order. Which app is not ours to decide —
-              WhatsApp is free but the customer may not have it or be online, so
-              the SIM is always offered too. */}
-          {(canCall(customerPhone) || canWhatsApp(customerPhone)) && (
+          {/* Contact. Respects admin settings for call and WhatsApp. */}
+          {(allowCall || allowWhatsApp) && (
             <View style={styles.riderContactRow}>
               <Ionicons name="call-outline" size={16} color={colors.muted} />
               <Text style={styles.riderPhone}>{customerPhone}</Text>
-              {canCall(customerPhone) && (
+              {allowCall && (
                 <TouchableOpacity
                   style={[styles.riderContactBtn, styles.riderCallBtn]}
                   onPress={() => callNumber(customerPhone)}
@@ -433,7 +598,7 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
                   <Ionicons name="call" size={18} color={colors.white} />
                 </TouchableOpacity>
               )}
-              {canWhatsApp(customerPhone) && (
+              {allowWhatsApp && (
                 <TouchableOpacity
                   style={[styles.riderContactBtn, styles.riderWaBtn]}
                   onPress={() => openWhatsApp(
@@ -503,29 +668,21 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
               <Text style={[styles.riderReceivedValue, item.cash_received && styles.riderReceivedPaid]}>
                 {item.cash_received ? `PKR ${received.toFixed(0)}` : '—'}
               </Text>
+              <Ionicons name="chevron-forward" size={16} color={colors.primary} style={{ marginLeft: 4 }} />
             </View>
           </View>
 
-          {/* A submitted delivery is final — nothing left to manage. */}
-          {isSubmitted ? (
+          {/* A submitted delivery is final — status pill if finished. */}
+          {isSubmitted && (
             <View style={styles.riderDoneRow}>
               <Ionicons name="checkmark-circle" size={18} color={colors.success} />
               <Text style={styles.riderDoneText}>
                 {isDelivered ? 'Delivered — no further changes' : 'Submitted — no further changes'}
               </Text>
             </View>
-          ) : item.status !== 'Cancelled' ? (
-            <TouchableOpacity
-              style={styles.riderManageBtn}
-              onPress={() => (navigation as any).navigate('DeliveryOrderDetail', { order: item })}
-              activeOpacity={0.85}
-            >
-              <Ionicons name="navigate" size={18} color={colors.white} />
-              <Text style={styles.updateButtonText}>{t('manage_delivery', 'Manage Delivery')}</Text>
-            </TouchableOpacity>
-          ) : null}
+          )}
         </View>
-      </View>
+      </TouchableOpacity>
     );
   };
 
@@ -679,6 +836,33 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.bg,
+  },
+
+  headerRefreshBtn: {
+    marginRight: 14,
+    width: 40,
+    height: 40,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  refreshChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    height: 40,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.primarySoft,
+    backgroundColor: colors.primaryTint,
+  },
+  refreshChipText: {
+    fontSize: 13,
+    color: colors.primaryDark,
+    fontWeight: '800',
   },
 
   // Filters sit straight on the page, not on a white band.
@@ -874,6 +1058,14 @@ const styles = StyleSheet.create({
     // Clips the spine and the banner to the rounded corners.
     overflow: 'hidden',
   },
+  riderCardPinned: {
+    borderWidth: 2,
+    borderColor: '#F59E0B',
+    shadowColor: '#F59E0B',
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    elevation: 4,
+  },
   riderSpine: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 5 },
   // Welded to the top-right corner: square where it meets the card edges,
   // rounded only on the inward corner, so it reads as a banner rather than a
@@ -884,6 +1076,25 @@ const styles = StyleSheet.create({
     backgroundColor: colors.ink,
     paddingLeft: 14, paddingRight: 18, paddingTop: 8, paddingBottom: 9,
     borderBottomLeftRadius: 20,
+  },
+  riderBannerPinned: {
+    backgroundColor: '#D97706',
+  },
+  riderPriorityBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FEF3C7',
+    borderColor: '#F59E0B',
+    borderWidth: 1,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: radius.pill,
+  },
+  riderPriorityText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#B45309',
   },
   riderBannerHash: { color: 'rgba(255,255,255,0.8)', fontSize: 12, fontWeight: '700' },
   riderBannerId: {

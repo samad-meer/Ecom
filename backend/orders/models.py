@@ -127,6 +127,14 @@ class Order(models.Model):
         default=True,
         help_text="Whether this order is visible to the assigned rider",
     )
+    is_pinned = models.BooleanField(
+        default=False,
+        help_text="Whether this order is pinned / prioritized by admin to be delivered first by the rider",
+    )
+    pinned_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Timestamp when the order was pinned by admin",
+    )
     delivery_assigned_at = models.DateTimeField(null=True, blank=True)
     delivery_completed_at = models.DateTimeField(null=True, blank=True)
     delivery_notes = models.TextField(blank=True, null=True)

@@ -207,6 +207,7 @@ class BusinessSettingsSerializer(serializers.ModelSerializer):
     date) changes how money is posted and stays in the Django admin, behind a
     deploy-level login rather than an app screen.
     """
+    name = serializers.CharField(source='business_name', required=False)
 
     class Meta:
         model = LedgerSettings
@@ -214,11 +215,18 @@ class BusinessSettingsSerializer(serializers.ModelSerializer):
             # The name shown in the app header and printed on receipts. Blank is
             # refused (the model field is not blank=True), so it can't be wiped.
             'business_name',
+            'name',
             'share_location_label',
             'order_success_message',
             'payment_account_title', 'payment_account_number',
             'payment_bank_name', 'payment_qr', 'payment_instructions',
         )
+
+    def to_internal_value(self, data):
+        data = data.copy() if hasattr(data, 'copy') else dict(data)
+        if 'name' in data and not data.get('business_name'):
+            data['business_name'] = data['name']
+        return super().to_internal_value(data)
 
 
 class PaymentAccountSerializer(serializers.ModelSerializer):

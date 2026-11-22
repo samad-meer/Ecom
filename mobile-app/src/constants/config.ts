@@ -18,8 +18,8 @@ const USE_LOCAL = __DEV__ && true;
 
 // Used only when USE_LOCAL is true. Point at your PC on the LAN.
 // Find your IP with:  ipconfig   (IPv4 Address, e.g. 192.168.1.5)
-const LOCAL_HOST = '192.168.100.17';
-const LOCAL_PORT = '8002';
+const LOCAL_HOST = process.env.API_HOST || '192.168.10.6';
+const LOCAL_PORT = process.env.API_PORT || '8002';
 /* ============================================================ */
 
 const LIVE_API_URL = 'https://century.zipnixtechnologies.com/api';

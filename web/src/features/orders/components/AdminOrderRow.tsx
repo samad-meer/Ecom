@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Eye, EyeOff, Check, X } from "lucide-react";
+import { Eye, EyeOff, Check, X, Pin } from "lucide-react";
 import type { AdminOrder, DeliveryBoy, OrderStatus } from "@/lib/types";
 import { formatPrice } from "@/lib/format";
 import { cn } from "@/lib/cn";
@@ -53,10 +53,20 @@ export function AdminOrderRow({
     <tr
       className={cn(
         "border-b border-white/5 transition hover:bg-white/5",
-        order.is_hidden && "opacity-50"
+        order.is_hidden && "opacity-50",
+        order.is_pinned && "bg-amber-500/[0.04]"
       )}
     >
-      <td className="px-3 py-2.5 text-sm text-mist/40">{index + 1}</td>
+      <td className="px-3 py-2.5 text-sm text-mist/40">
+        <span className="flex items-center gap-1.5">
+          {order.is_pinned && (
+            <span title="Pinned: Deliver First">
+              <Pin size={13} className="text-amber-400 fill-amber-400 shrink-0" />
+            </span>
+          )}
+          {index + 1}
+        </span>
+      </td>
 
       <td className="px-3 py-2.5 text-sm text-mist/70">{dateStr}</td>
 
@@ -98,25 +108,62 @@ export function AdminOrderRow({
         </select>
       </td>
 
-      {/* Inline delivery boy selector */}
+      {/* Inline delivery boy selector & rider visibility toggle */}
       <td className="px-3 py-2.5">
-        <select
-          value={order.assigned_delivery_boy ?? ""}
-          disabled={busy === "rider"}
-          onChange={(e) =>
-            patch("rider", {
-              assigned_delivery_boy: e.target.value ? Number(e.target.value) : null,
-            })
-          }
-          className={cn("input w-auto py-1 text-xs", busy === "rider" && "opacity-50")}
+        <div className="flex items-center gap-1.5">
+          <select
+            value={order.assigned_delivery_boy ?? ""}
+            disabled={busy === "rider"}
+            onChange={(e) =>
+              patch("rider", {
+                assigned_delivery_boy: e.target.value ? Number(e.target.value) : null,
+              })
+            }
+            className={cn("input w-auto py-1 text-xs", busy === "rider" && "opacity-50")}
+          >
+            <option value="">— None —</option>
+            {deliveryBoys.map((db) => (
+              <option key={db.id} value={db.id}>
+                {db.name}{db.is_available ? "" : " (busy)"}
+              </option>
+            ))}
+          </select>
+          {order.assigned_delivery_boy && (
+            <button
+              type="button"
+              disabled={busy === "show_to_rider"}
+              onClick={() => patch("show_to_rider", { show_to_rider: order.show_to_rider === false })}
+              className={cn(
+                "flex h-6 w-6 items-center justify-center rounded transition shrink-0 cursor-pointer",
+                order.show_to_rider === false
+                  ? "bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 border border-rose-500/30"
+                  : "bg-white/5 text-mist/40 hover:bg-white/10 hover:text-mist",
+                busy === "show_to_rider" && "opacity-50"
+              )}
+              title={order.show_to_rider === false ? "Hidden from rider app (click to show)" : "Visible in rider app (click to hide)"}
+            >
+              {order.show_to_rider === false ? <EyeOff size={13} /> : <Eye size={13} />}
+            </button>
+          )}
+        </div>
+      </td>
+
+      {/* Pin for Rider toggle */}
+      <td className="px-3 py-2.5 text-center">
+        <button
+          disabled={busy === "is_pinned"}
+          onClick={() => patch("is_pinned", { is_pinned: !order.is_pinned })}
+          className={cn(
+            "mx-auto flex h-7 w-7 items-center justify-center rounded-lg transition cursor-pointer",
+            order.is_pinned
+              ? "bg-amber-400/20 text-amber-300 hover:bg-amber-400/30"
+              : "text-mist/30 hover:bg-white/10 hover:text-mist",
+            busy === "is_pinned" && "opacity-50"
+          )}
+          title={order.is_pinned ? "Pinned (Deliver First) — click to unpin" : "Pin for rider (Deliver First)"}
         >
-          <option value="">— None —</option>
-          {deliveryBoys.map((db) => (
-            <option key={db.id} value={db.id}>
-              {db.name}{db.is_available ? "" : " (busy)"}
-            </option>
-          ))}
-        </select>
+          <Pin size={14} className={cn(order.is_pinned && "fill-amber-300")} />
+        </button>
       </td>
 
       {/* Paid toggle */}

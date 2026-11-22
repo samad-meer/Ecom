@@ -100,13 +100,17 @@ def business_info(request):
         serializer = BusinessSettingsSerializer(cfg, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         cfg = serializer.save()
-        activity_log(
-            request.user, 'settings', f'Business Settings Updated: {cfg.business_name}',
-            target_type='settings', target_id=cfg.pk, target_label='Business',
-        )
+        try:
+            activity_log(
+                request.user, 'settings', f'Business Settings Updated: {cfg.business_name}',
+                target_type='settings', target_id=cfg.pk, target_label='Business',
+            )
+        except Exception:
+            pass
 
     payload = {
         'name': cfg.business_name,
+        'business_name': cfg.business_name,
         'phone': cfg.business_phone,
         'address': cfg.business_address,
         'share_location_label': cfg.share_location_label,
